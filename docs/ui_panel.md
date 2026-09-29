@@ -1,14 +1,18 @@
 # Sensewright — In-Game Configuration Panel (design + settings inventory)
 
-> Goal: **one** in-game panel that exposes every configurable option of the mod
-> and its agents — **sliders**, toggles, selects, tags and per-agent values.
-> Two render paths share the same control model:
-> **(A) native dialog menu** (works today, no dependency) and
-> **(B) custom GFX/Flash panel** (real sliders, planned).
+> Goal: **one** panel **inside the game** that exposes every configurable option
+> of the mod and its agents — values, toggles, selects, tags and per-agent
+> settings — using **The Sims 4's own native dialogs** (list/picker, paginated
+> responses, numeric input, multi-select).
+>
+> **No Flash, no slider, no external tools, no `.package` for the UI.** Drag
+> sliders are not scriptable in TS4, so a 0..1 value is a **row of stepped
+> choices** (`0 / .25 / .5 / .75 / 1`) or a **native numeric input**. The look is
+> the game's own.
 >
 > The declarative source of truth is the sidecar's `ControlSpec` registry
 > (`sidecar/sensewright_sidecar/god/controls.py`). Adding a setting = one spec
-> entry + i18n keys; both UI paths pick it up for free.
+> entry + i18n keys; the panel picks it up for free.
 
 ---
 
@@ -53,176 +57,186 @@
 | Impulse frequency (override) | slider | 0..1 / 0.05 | `POST /v1/agency/seats` (`sim_id`,`impulse_frequency`) |
 | Roster (seats used, tier, sim_id) | list (read) | — | `GET /v1/agency/seats` |
 
-### 1.4 Mod / global (partly exposed today; candidates to promote into ControlSpec)
+### 1.4 Mod / global — promoted into `ControlSpec` (P1)
 
-| Setting | Kind | Default | Status |
+These become ControlSpec entries (single source of truth) with a `target`/`path`
+so `/v1/config/god` validates and applies them, and the panel renders them.
+
+| Setting | Kind | Range / step | Default |
 |---|---|---|---|
-| `ui.language` | select | auto / en / pt-BR | exposed via `sw.lang` (`POST /v1/config/lang`) |
-| Zeitgeist text + tags | text + tags | — | `POST /v1/god/zeitgeist` |
-| `llm.temperature` | slider 0..2 | 0.8 | not exposed |
-| `llm.max_tokens` | slider 128..4096 | 700 | not exposed |
-| `llm.budget_per_sim_per_day` | slider 0..2000 | 500 | not exposed |
-| `llm.reasoning_effort` | select | none | global fallback |
-| `memory.consolidation_enabled` | toggle | on | not exposed |
-| `memory.decay_preset` | select | fast / normal / slow | not exposed |
-| `memory.dejavu_chance` | slider 0..1 | 0.05 | not exposed |
-| `agents.personality.absorption_enabled` | toggle | on | not exposed |
-| `agents.personality.salience_threshold` | slider 0..5 | 1.5 | not exposed |
-| `agents.personality.sleep_consolidation` | toggle | on | not exposed |
-| `agents.evolution.enabled` | toggle | on | not exposed |
-| `agents.evolution.trait_swap` | select | off / propose / auto | not exposed |
-| `agents.evolution.drift_strength` | slider 0..1 | 0.2 | not exposed |
-| `agents.social.max_pairs_per_tick` | slider 0..4 / 1 | 1 | not exposed |
-| `agents.social.pair_cooldown_seconds` | slider 30..600 / 30 | 180 | not exposed |
-| `god.backgrounds.enabled` | toggle | on | not exposed |
-| `god.backgrounds.batch_size` | slider 1..10 / 1 | 2 | not exposed |
-| `runtime.expose_roster` | toggle | on | not exposed |
-| `runtime.shutdown_on_game_exit` | toggle | on | not exposed |
+| `ui.language` | select | auto / en / pt-BR | auto |
+| `llm.temperature` | slider | 0..2 / 0.05 | 0.8 |
+| `llm.max_tokens` | slider | 128..4096 / 64 | 700 |
+| `llm.budget_per_sim_per_day` | slider | 0..2000 / 50 | 500 |
+| `memory.consolidation_enabled` | toggle | on/off | on |
+| `memory.decay_preset` | select | fast / normal / slow | normal |
+| `memory.dejavu_chance` | slider | 0..0.5 / 0.01 | 0.05 |
+| `agents.personality.absorption_enabled` | toggle | on/off | on |
+| `agents.personality.salience_threshold` | slider | 0..5 / 0.1 | 1.5 |
+| `agents.personality.sleep_consolidation` | toggle | on/off | on |
+| `agents.evolution.enabled` | toggle | on/off | on |
+| `agents.evolution.trait_swap` | select | off / propose / auto | propose |
+| `agents.evolution.drift_strength` | slider | 0..1 / 0.05 | 0.2 |
+| `agents.social.max_pairs_per_tick` | slider | 0..4 / 1 | 1 |
+| `agents.social.pair_cooldown_seconds` | slider | 30..600 / 30 | 180 |
+| `god.backgrounds.enabled` | toggle | on/off | on |
+| `god.backgrounds.batch_size` | slider | 1..10 / 1 | 2 |
+| `runtime.expose_roster` | toggle | on/off | on |
 
-> **Recommendation:** promote the "not exposed" rows into `ControlSpec` so the
-> panel and `/v1/config/god` cover them with the same validation (single source
-> of truth, no UI rewrite).
+> **Excluded from the panel (`restart_only`):** `network.*` and
+> `runtime.shutdown_on_game_exit` (read once at sidecar startup). Zeitgeist is
+> **not** a flat setting — it gets its own panel page via `POST /v1/god/zeitgeist`.
 
 ---
 
 ## 2. UI design
 
-**Sections (tabs / pages):**
-1. **God** — orchestration sliders, `evolution_speed`, mood tags, power toggles.
-2. **Agents** — seats, impulse dials, reasoning effort, layer toggles,
-   reactions.
-3. **Per-Sim** — pick a Sim from the roster; set autonomy + impulse override;
-   show tier/seat.
-4. **World & Language** — language select; zeitgeist (tags + free text).
-5. **Advanced** — the `advanced=True` specs (agent dials + promoted settings).
+**Sections (panel pages):**
+1. **God** — the 5 dials, `evolution_speed`, mood tags, the 6 power toggles.
+2. **Agents** — seats, impulse dials, reasoning effort, layer toggles, reactions.
+3. **Per-Sim** — pick a Sim from the roster; autonomy + impulse override; tier.
+4. **World** — zeitgeist (tags + free text); language.
+5. **Advanced** — every `advanced=True` spec (incl. promoted llm/memory/etc.).
 
-**Widgets and their native approximations**
-| Design widget | Native dialog | Flash panel |
-|---|---|---|
-| slider | stepped choice (`0`, `.1` … `1`) or `−` / `+` | real slider |
-| toggle | choice On/Off | switch |
-| select | single-choice dialog | dropdown |
-| tags (multi) | multi-select dialog | checkbox group |
-| list (roster) | read-only text + per-row action | scroll list |
+**Widgets (all native EA dialogs — no Flash, no slider)**
+| Control kind | Native rendering |
+|---|---|
+| `slider` | **row of stepped choices** (0 / .25 / .5 / .75 / 1, or the spec step) **or** native numeric input (min/max validated) |
+| `toggle` | two-row choice On / Off (current one marked chosen) |
+| `select` | list of options (picker rows), current one marked chosen |
+| `tags` | native **multi-select** dialog over the 7 mood tags |
+| per-Sim + roster | `UiObjectPicker`/sim picker list → per-Sim page |
+| status/providers/memory | read-only text page (console fallback for long output) |
 
-**Data flow (both paths):**
+**Data flow:**
 `GET /v1/god/controls` (+ `GET /v1/agency/seats`) → render →
-`POST /v1/config/god` / `POST /v1/agency/seats` / `POST /v1/config/autonomy` /
-`POST /v1/config/lang` → refresh.
+`POST /v1/config/god` (`persist=true`) / `POST /v1/agency/seats` /
+`POST /v1/config/autonomy` / `POST /v1/config/lang` → refresh the page.
 
 ---
 
 ## 3. Architecture
 
 **Script side (`mod/sensewright_mod/`)** — new `panel_ui.py`:
-- `build_sections(controls, values)` → the panel model (pure, unit-tested).
-- `format_panel(...)` → console fallback text (pure).
-- `show_panel(sim_info)` → a **paged native dialog menu**, with console fallback.
-- new cheat `sw.panel` (Live) + `sw.set <key> <value>` (apply one control; used
-  by the dialog buttons), registered in `main.py` and `cmd.help.body`.
-- `http_client.set_god_controls(values)` → `POST /v1/config/god`.
+- `build_sections(controls, values, roster)` → the panel model (pure, tested).
+- `format_panel(...)` → console fallback (pure, tested).
+- Native renderer: section list → option pages → value pages. Uses EA's native
+  dialogs (see §3.1), each row dispatches `sw.set <key> <value>` or a roster
+  endpoint. Layered fallback: picker → paginated responses → console.
+- new cheats `sw.panel` (Live) + `sw.set <key> <value>` (validated; persists).
+- `http_client.set_god_controls(values, persist=True)` → `POST /v1/config/god`.
 
-**GFX side (planned, P3)** — `SensewrightUI.package`:
-- overrides/creates a GFX screen (real sliders, toggles, select, list);
-- the `.ts4script` opens it and receives values back (via a callback command or
-  a shared JSON file the mod polls and forwards to the sidecar).
+**Entry points**
+- **Now:** a button on the boot notification ("Open Panel") using
+  `ui_responses` + `SEND_COMMAND` → `sw.panel`, plus the `sw.panel` cheat.
+- **Optional (P2b):** a **pie-menu category** "Sensewright" on the Sim, via a
+  tiny XML tuning `.package` (writer in pure Python; no S4S/FFDec).
 
-### 3.1 Native panel mechanics (how the reference mods do it)
+**Sidecar (P1)** — `ControlSpec` promotion + persistence overlay (§4).
 
-Confirmed by cloning reference mods into `research/ui-refs/` (see §4.1). The
-mainstream approach is **native dialogs with button responses that dispatch
-commands** — there is **no scriptable slider widget**, so a "slider" is a row of
-stepped choice buttons.
+### 3.1 Native dialog mechanics (what the game already exposes)
 
-- **Dialog factory:** `UiDialogOkCancel.TunableFactory().default(owner, text=…,
-  title=…, text_ok=…)` and `UiDialogTextInputOk.TunableFactory().default(…)`
-  (free text — e.g. the zeitgeist prompt).
-- **Buttons that act:** `UiDialogResponse(dialog_response_id=ButtonType…,
-  text=…, ui_request=UiDialogResponse.UiDialogUiRequest.SEND_COMMAND,
-  response_command=<command>)`. This is how a menu button applies a setting
-  without extra code — the command is our `sw.set`.
-- **Custom dialog subclasses:** subclass `UiDialogOk` and override `responses`
-  (see `TS4ControlAnySim/canys_ui.py`).
-- **Panel = N pages:** a top page lists sections (God / Agents / Per-Sim /
-  World & Language / Advanced); each section opens a page of rows; each row
-  opens a choice (or steps the value) and calls `sw.set` / the roster endpoints.
-- **In-game entry point (not just a cheat):** a **pie-menu category** on the Sim
-  ("Sensewright") registered by a tiny XML tuning `.package` (interaction +
-  `PieMenuCategory`), as `TS4ControlAnySim` and `ShadySimDeals` do. The pie
-  interaction just runs `sw.panel`. No EA assets are redistributed.
-- **Icons (optional):** custom art is packed as DDS/BC3 resource type
-  `0x00B2D882`, group 0, referenced by `pie_menu_icon` (`ShadySimDeals`).
+Verified from the S4CL documentation (`DeviantGameMods/Sims4CommunityLibrary`,
+open source) which wraps EA's native dialogs — we **reimplement the pattern**
+in our own module (no dependency, no copied code):
+
+- **List/picker dialogs:** `ui.ui_dialog_picker.UiObjectPicker` with
+  `BasePickerRow`/`ObjectPickerRow`/`SimPickerRow` — native rows with icon,
+  description, tooltip, **pagination (`per_page`)**, a category dropdown, and
+  "always visible" rows. This is the "choose a trait/object" look.
+- **Paginated responses:** a response dialog that pages buttons (Previous /
+  Next) — used for long option lists.
+- **Numeric input:** a native input dialog with `initial_value`, `min_value`,
+  `max_value` (used for the 0..1 values as an alternative to step buttons).
+- **Multi-select:** native multi-select dialog with `min/max_selectable`
+  (used for the 7 mood tags).
+- **Toggle/select** are just option rows (current value pre-selected).
+- **Buttons that act:** `UiDialogResponse(..., ui_request=SEND_COMMAND,
+  response_command=<command>)` — a button runs a cheat command, so rows apply
+  settings through `sw.set` without extra wiring.
+- **Owners/labels:** dialog owner = the active Sim instance; text via
+  `sims4.localization.LocalizationHelperTuning.get_raw_text(...)` (already
+  validated in `chat_ui.py`).
+
+> **No scriptable slider exists.** Drag sliders live only in EA's GFX screens
+> (see §5, deferred). The native step buttons + numeric input are the shipping
+> UX and are indistinguishable from the game's own menus.
 
 ---
 
-## 4. Flash/GFX pipeline (how real TS4 UI mods do it)
+## 4. Persistence — overlay `panel.toml`
 
-Source: SimsEdit UI docs (2026).
+Today `POST /v1/config/god` mutates settings **in memory only**. The panel adds
+a persistence overlay so changes survive a sidecar restart, **without touching
+the user's `config.toml`**:
 
-- The TS4 UI is **Adobe Flash / Scaleform GFX** (a modified **SWF**) inside the
-  base-game **`UI.package`**. It supports shapes, images, text, animation and
-  **ActionScript 3** (compiled to P-code).
-- **Tools:** **Sims 4 Studio** or **Sims 4 Editor (S4E)** to browse/extract UI
-  resources from `UI.package`; **JPEXS Free Flash Decompiler (FFDec)** to edit
-  the `.gfx` (tags + ActionScript). FFDec does not understand `.package`, so
-  images show as red boxes — cross-reference with S4E/S4S.
-- **Approach:** extract a GFX that already contains a slider (e.g. a Game
-  Options screen), clone/repurpose it, add our labels and callbacks, rebuild a
-  `.package` that overrides the target resource key.
-- **AS3 ↔ Python bridge options:** (a) buttons call a cheat command; (b) the
-  screen writes a small JSON file that the mod polls and forwards to the
-  sidecar; (c) reuse an existing EA dialog resource and only reskin.
-- **Risks / constraints:**
-  - **Patch fragility:** UI resource keys/layout change on patches; the
-    override must be rebuilt.
-  - **Licensing:** EA UI assets **cannot be redistributed** — the panel's GFX
-    must be original (or built at install time from the player's own files).
-  - **Tooling is GUI-only.** The GFX binary cannot be produced headless in this
-    repo; AS3 source, resource definitions and the build script can be authored
-    here, but the final compile is manual in S4S/FFDec.
-- Sources: <https://simsedit.com/ui-mods/ui-101/>,
-  <https://simsedit.com/ui-mods/gfx/gfx-intro/>,
-  <https://simsedit.com/ui-mods/gfx/gfx-modding/>,
-  <https://simsedit.com/references/software-setup/>.
+- **Load:** `load_settings` loads `config.toml`, then, if present,
+  `data/panel.toml`, deep-merging **only** `ControlSpec`-known paths (env
+  expanded).
+- **Write:** `POST /v1/config/god` with `persist=true` writes the validated
+  overrides to `data/panel.toml` via a small built-in TOML serializer (no new
+  dependency; flat `[section] key = value` per path).
+- **Reset:** a panel action deletes the overlay (back to `config.toml`).
+- `restart_only` settings are never written here.
 
-### 4.1 Reference implementations (cloned into `research/ui-refs/`)
+---
 
-Cloned for study only (never committed — see `.gitignore`).
+## 5. Appendix — Flash/GFX sliders (deferred, not planned)
 
-| Repo | License | What it demonstrates |
+Kept for reference only; **not** on the roadmap. Drag-slider screens require the
+game's Flash/Scaleform GFX inside `UI.package` (tools: S4S/S4E + JPEXS FFDec;
+patch-fragile; EA assets cannot be redistributed). Sources: SimsEdit UI docs
+(<https://simsedit.com/ui-mods/ui-101/>, `.../gfx/gfx-intro/`,
+`.../gfx/gfx-modding/`, `.../references/software-setup/`).
+
+### Reference implementations (cloned into `research/ui-refs/`, never committed)
+
+| Repo | License | Use |
 |---|---|---|
-| `lot51/core-library` → `utils/dialog.py` | MIT | `DialogHelper`: notification/`UiDialogOkCancel`/`UiDialogTextInputOk` factories + **`build_ui_response(response_command=…)`** (buttons that run commands) and `create_text_dialog` (free-text input). The cleanest blueprint for our native panel. |
-| `TitanNano/TS4ControlAnySim` → `canys_ui.py` | Apache-2.0 | Custom `UiDialog` subclass (`UiDialogQuitIgnore(UiDialogOk)`) with a custom `responses` tuple; `dialog_class.TunableFactory(**kwargs).load_etree_node(...)`; pie-menu category + interaction tuning in a `.package`. |
-| `mf-rl/ShadySimDeals` | Apache-2.0 | `UiDialogOkCancel`/`UiDialogNotification` confirmations; pie-menu category SimData build; custom UI icons as BC3/DST5 `0x00B2D882`. |
-| `azigler/ts4-modding-workspace` | (none) | Minimal `UiDialogNotification.TunableFactory().default(...)` example + hot-reload utilities. |
+| `lot51/core-library` → `utils/dialog.py` | MIT | `DialogHelper`: notification/`UiDialogOkCancel`/`UiDialogTextInputOk` factories + `build_ui_response(response_command=…)`. |
+| `TitanNano/TS4ControlAnySim` → `canys_ui.py` | Apache-2.0 | Custom `UiDialogOk` subclass with a `responses` tuple; pie-menu category tuning. |
+| `mf-rl/ShadySimDeals` | Apache-2.0 | Confirmations; pie-menu category SimData build; DDS icons. |
+| `azigler/ts4-modding-workspace` | (none) | Minimal notification dialog + hot-reload utilities. |
 
-Take-aways: (1) nobody ships a scriptable slider — panels are stepped choice
-dialogs or pie menus; (2) the reusable piece we want is `DialogHelper`-style
-factories + `response_command` buttons; (3) a pie-menu category is the standard
-"open the mod's UI" entry without shipping EA assets.
-
-> **Licensing:** `core-library` is MIT (adaptable with attribution);
-> `TS4ControlAnySim`/`ShadySimDeals` are Apache-2.0. We will **reimplement** the
-> small dialog helper in our own module (no code copied verbatim) and credit the
-> originals in `docs/`/`CHANGELOG.md`.
+S4CL (`DeviantGameMods/Sims4CommunityLibrary`) is the key reference for the
+**native picker/response/input dialogs** (§3.1). We reimplement, never copy, and
+credit the originals in `docs/`/`CHANGELOG.md`.
 
 ---
 
-## 5. Roadmap (adjusted after the reference study)
+## 6. Roadmap
 
-1. **P1 — Model:** promote the "not exposed" settings into `ControlSpec`;
-   add `http_client.set_god_controls` + a generic `sw.set <key> <value>`;
-   i18n labels/descriptions for every key.
-2. **P2 — Native panel:** `panel_ui.py` (a `DialogHelper`-style module) +
-   `sw.panel`, covering **all** sections. Rows are stepped choice buttons whose
-   responses dispatch `sw.set`/roster commands. Works in-game today, no
-   dependency, no EA assets.
-3. **P2b — In-game entry:** a tiny XML tuning `.package` adding a **"Sensewright"
-   pie-menu category** on the Sim that runs `sw.panel` (the usual mod-UI entry).
-4. **P3 — GFX sliders:** `SensewrightUI.package` (S4S/S4E + FFDec) with **real
-   sliders** + the AS3↔Python bridge; the native panel stays as fallback.
-5. **P4 — Live validation:** render + write-back on the real client, then the
-   patch-rebuild drill for the package.
+1. **P1 — Model + persistence (sidecar, offline-testable).** Promote §1.4 into
+   `ControlSpec` with `target`/`path`; generic `apply_values_to_settings` /
+   `values_from_settings`; `POST /v1/config/god?persist` → `panel.toml` overlay;
+   mark `restart_only`. i18n label/desc keys for every spec.
+2. **P2 — Native panel (mod).** `panel_ui.py` (model + native renderer +
+   console fallback) + `sw.set`; `http_client.set_god_controls`; boot-notification
+   button; `cmd.help.body`.
+3. **P2b — Pie-menu entry (optional).** `mod/ui_package/` (category + interaction
+   `do_command sw.panel` + STBL en/pt-BR) and `build_package.py` (pure-Python DBPF
+   writer, reference `ShadySimDeals/build_mod.py`).
+4. **P3 — Live validation + docs.** Round-trip on the client, restart-persistence
+   check, `[validate]` logs, CHANGELOG/STATUS/PLANO, test counts.
 
-> Until P3 ships, the native panel + pie entry is the shipping UI; it exposes the
-> same settings, only with stepped values instead of real sliders.
+### P0 — In-game spike (before P2 ships)
+Extend `sw.uitest` to confirm on the live client: (a) `UiObjectPicker` rows +
+pagination; (b) a response dialog with `SEND_COMMAND` buttons; (c) the numeric
+input dialog; (d) multi-select. The result fixes the widget matrix + fallbacks.
+
+---
+
+## 7. Test plan & risks
+
+**Tests.** Sidecar: promoted specs (validate/coerce/route), overlay precedence +
+serializer round-trip, `config_god` persist. Mod: panel model, `sw.set` parsing,
+`set_god_controls`, console fallback, locales parity, Python 3.7. Full suites +
+ruff + `py -3.7 mod/build.py`.
+
+**Risks.**
+- Dialog API varies by patch → P0 spike + layered fallback (picker → response →
+  console).
+- Numeric input returns a string → parse/validate (`invalid_argument`).
+- Live-apply per key → verified in P1; `restart_only` excluded and labelled.
+- Notification buttons not yet validated live → P0(b).
+- Rendering is only testable in-game → the model stays 100% unit-tested.

@@ -22,10 +22,10 @@
 
 | Item | Value |
 |---|---|
-| Repo root | `C:\workspace\sims-sense-8-agent` (NOT a git repo yet) |
+| Repo root | `C:\workspace\sims-sense-8-agent` (git repo; `main` → `origin` github.com/MaiconSlavieiro/sensewright) |
 | In-game mod | `mod/sensewright_mod/` (Python 3.7, stdlib only) |
 | Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
-| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-27.18"` |
+| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.2"` |
 | Installed artifact | `C:\Users\maico\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\Sensewright\Sensewright.ts4script` |
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
@@ -78,8 +78,9 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
     both; `[agents.social]` cadence + cooldown. Wire: `AutonomyTickResponse.social`.
   - **R6 God director** — verified: the orchestrator only targets non-player Sims
     (`god/orchestrator.py`) and broadcasts world events to witnesses.
-  - **R7 panel** — verified: `ControlSpec` dials + `sw.agents` roster/frequency
-    fallback + `sw.lang` selector (the optional native visual panel stays gated).
+  - **R7 panel** — dials + `sw.agents` roster/frequency fallback + `sw.lang`
+    selector done; the full **native-dialog panel** is specified in
+    `docs/ui_panel.md` (no Flash/slider).
   - **F0** — `scripts/decompile-scripts.ps1`.
   - **F1** — `mod/sensewright_mod/probe.py` + `sw.probe` cheat.
 - **Lifecycle** — `sidecar/.../lifecycle.py` + `/v1/lifecycle/attach`; exits with the game.
@@ -93,6 +94,21 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
   executed intent. **Notifications fixed** (`chat_ui`): real
   `LocalizationHelperTuning.get_raw_text` strings instead of the invalid
   `urgent=`/`TunableLocalizedStringFactory` usage, so messages render in-game.
+
+---
+
+## 2b. In-game configuration panel (planned — see `docs/ui_panel.md`)
+
+Decision (2026-09-29): the settings UI lives **inside the game** and uses TS4's
+**native dialogs only** — picker/list rows, paginated responses, native numeric
+input and multi-select. **No Flash/GFX and no drag sliders** (sliders are not
+scriptable in TS4), no external tools; a 0..1 value is a row of stepped choices
+or a numeric input. Entry = boot-notification button + `sw.panel` cheat
+(pie-menu category optional). Persistence via a `data/panel.toml` overlay that
+never touches the user's `config.toml`. Roadmap: **P1** model + persistence →
+**P2** native panel + `sw.set` → **P2b** pie-menu entry (optional) → **P3**
+validation. A short in-game **P0 spike** (`sw.uitest`) confirms the dialog skins
+before P2 ships.
 
 ---
 
@@ -136,7 +152,8 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
 4. **Events delivered**: `[validate] event: <type>` on buffs/relationships/social.
 5. **God**: zeitgeist onboarding on first load; backgrounds pipeline cadence.
 6. **Memory cadence**: consolidation after the idle window; decay/deja-vu over long play.
-7. **UI**: `UiDialogTextInput` / tag dialogs (God onboarding).
+7. **UI**: God onboarding dialogs + the native **configuration panel**
+   (`sw.panel`; see `docs/ui_panel.md`) once P1/P2 land.
 8. **Native interaction APIs (R1)**: `tool_executor` now tries multiple
    `InteractionContext` import paths/signatures and candidate social affordances
    (best-effort), but `say_to` still needs live confirmation that the push
@@ -176,13 +193,16 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
   empty list when the inventory component is unavailable).
 - **R5** uses a deterministic template dialogue in native (0-key) mode, so
   conversations appear even without a provider (one pair per ~3 min by default).
-- No `git init` yet → `research/ts4/` is not actually protected by `.gitignore` until then.
+- **Git**: initialized; `main` → `origin` (`github.com/MaiconSlavieiro/sensewright`).
+  `research/ts4/` and `research/ui-refs/` (cloned reference mods) are gitignored.
 
 ---
 
 ## 6. Key files & docs
 
 - **Plan / roadmap**: `PLANO.md` (§11 phases, §14 v0.2, §15 v0.3, §2.3 checklist).
+- **In-game UI plan**: `docs/ui_panel.md` (native-dialog panel, full settings
+  inventory, `panel.toml` persistence overlay, `sw.set`/`sw.panel`).
 - **Change log**: `CHANGELOG.md` ([Unreleased] has the v0.3 + live-validation entries).
 - **Confirmed game APIs**: `docs/ts4_internals.md`.
 - **Agent guidelines**: `.agents/skills/sims_mod_guidelines/SKILL.md` (module map, gotchas,
@@ -203,8 +223,9 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
 5. Before any commit: `git init` (so `research/ts4/` stays ignored) and follow the
    CHANGELOG format.
 
-**Current TODO on the board:** run `.18` with the sidecar up and `sw.hud on` to
-confirm the HUD/notifications render → re-check the `.9` speak fallback + clean
-impulse thoughts → buffs/events live → **R5 sim↔sim** (`[validate] social:` line,
-two lines surface, relationship moves) → God/memory/UI → resolve a real social
-affordance for native `say_to` (R1, the last v0.3 phase still needing live data).
+**Current TODO on the board:** run the current build with the sidecar up and
+`sw.hud on` to confirm the HUD/notifications render → re-check the speak fallback
++ clean impulse thoughts → buffs/events live → **R5 sim↔sim** (`[validate]
+social:` line, two lines surface, relationship moves) → resolve a real social
+affordance for native `say_to` (R1) → build the in-game **configuration panel**
+(`docs/ui_panel.md`: P1 model+persistence, P2 native panel + `sw.set`).

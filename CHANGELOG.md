@@ -12,6 +12,26 @@ All notable changes to **Sensewright** are documented in this file.
 
 ## [Unreleased] — Phases 2, 2b, 3, 4, 5a, 5b, 5c + v0.2 §14: Directives, Census, Agents, Evolution, God foundation, backgrounds, orchestration & autonomous Sim agents
 
+### Changed — in-game configuration panel plan: native dialogs, no Flash (docs)
+Settled the settings-UI direction after a research pass (reference mods cloned
+into the gitignored `research/ui-refs/`). The panel lives **inside the game** and
+uses **TS4's native dialogs only** — picker/list rows, paginated responses,
+numeric input and multi-select (the S4CL pattern, **reimplemented** in our own
+module). **No Flash/GFX and no drag sliders** (not scriptable in TS4); a 0..1
+value renders as a row of stepped choices or a numeric input. Entry =
+boot-notification button + `sw.panel` cheat (pie-menu category optional later).
+Persistence = a `data/panel.toml` overlay written by `POST /v1/config/god?persist`,
+keeping the user's `config.toml` untouched.
+- **`docs/ui_panel.md`** rewritten: full settings inventory (God, agents, per-Sim,
+  plus the previously unexposed `llm`/`memory`/`personality`/`evolution`/`social`/
+  `backgrounds`/`runtime` settings to be promoted into `ControlSpec`), the native
+  widget matrix, the `panel.toml` overlay, and the P0–P3 roadmap.
+- **`PLANO.md`** §8/§11/§15 updated: the panel is **no longer gated on Flash**
+  (native dialogs; R7 marked "dialogs done, panel specified").
+- **`docs/STATUS.md`**: added §2b (panel decision) and refreshed the build
+  stamp / git facts.
+- No code change yet; **P1** (model + persistence) and **P2** (native panel) are next.
+
 ### Changed — renamed the project to **Sensewright** (build `2026-09-29.2`)
 Full rename from `SimsSense` to **Sensewright** (descriptive subtitle: *for The Sims 4*;
 no "Sims" in technical identifiers). A git baseline was committed **before** the rename so
