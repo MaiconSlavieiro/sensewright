@@ -12,6 +12,11 @@
     automatically (no manual start needed on the dev machine).
 #>
 
+param(
+    # Remove the legacy Mods\SimsSense folder after a successful install.
+    [switch]$RemoveLegacy
+)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -20,11 +25,14 @@ Write-Host "=== Sensewright Mod Installer ===" -ForegroundColor Cyan
 
 $modDist = Join-Path $repoRoot "dist\Sensewright.ts4script"
 $sidecarSrc = Join-Path $repoRoot "sidecar"
+$sidecarConfig = Join-Path $sidecarSrc "config.toml"
 $configExample = Join-Path $repoRoot "config.example.toml"
 
 $docsPath = [Environment]::GetFolderPath("MyDocuments")
-$modsDest = Join-Path $docsPath "Electronic Arts\The Sims 4\Mods\Sensewright"
+$modsRoot = Join-Path $docsPath "Electronic Arts\The Sims 4\Mods"
+$modsDest = Join-Path $modsRoot "Sensewright"
 $sidecarDest = Join-Path $modsDest "sidecar"
+$legacyDir = Join-Path $modsRoot "SimsSense"
 
 if (-not (Test-Path $modDist)) {
     Write-Error "Mod package not found at $modDist. Run 'make build-mod' first."
@@ -52,6 +60,8 @@ $sidecarFiles = Get-ChildItem -Path $sidecarSrc -Recurse -File | Where-Object {
     $_.FullName -notmatch "\\__pycache__\\" -and
     $_.FullName -notmatch "\\\.pytest_cache\\" -and
     $_.FullName -notmatch "\\tests\\" -and
+    $_.FullName -notmatch "\\data\\" -and
+    $_.Name -ne "config.toml" -and
     $_.Extension -notin @(".pyc", ".pyo", ".lock")
 }
 
@@ -69,11 +79,41 @@ foreach ($file in $sidecarFiles) {
 }
 Write-Host "  Copied $copiedCount sidecar files" -ForegroundColor Green
 
-# Seed config.toml from the example if the user has none
+# config.toml holds the model/API keys, so it is handled explicitly and is
+# NEVER overwritten by the sidecar source copy. Precedence:
+#   1. keep an existing install config (keys preserved on re-install);
+#   2. migrate the legacy Mods\SimsSense config (the user's keys);
+#   3. the repo sidecar\config.toml (dev keys);
+#   4. the example (empty keys).
 $destConfig = Join-Path $sidecarDest "config.toml"
-if (-not (Test-Path $destConfig) -and (Test-Path $configExample)) {
+if (Test-Path $destConfig) {
+    Write-Host "  Keeping existing config.toml (model keys preserved)" -ForegroundColor Green
+} elseif (Test-Path (Join-Path $legacyDir "sidecar\config.toml")) {
+    Copy-Item -Path (Join-Path $legacyDir "sidecar\config.toml") -Destination $destConfig -Force
+    Write-Host "  Migrated config.toml (model keys) from Mods\SimsSense" -ForegroundColor Green
+} elseif (Test-Path $sidecarConfig) {
+    Copy-Item -Path $sidecarConfig -Destination $destConfig -Force
+    Write-Host "  Copied config.toml (model keys) from sidecar\" -ForegroundColor Green
+} elseif (Test-Path $configExample) {
     Copy-Item -Path $configExample -Destination $destConfig -Force
-    Write-Host "  Seeded config.toml from config.example.toml" -ForegroundColor Gray
+    Write-Host "  Seeded config.toml from config.example.toml (no keys)" -ForegroundColor Gray
+}
+
+# The sidecar data folder (memory DB / token / runtime) is NEVER overwritten by
+# the source copy. Precedence mirrors config.toml: keep an existing install,
+# else migrate the legacy Mods\SimsSense data, else copy the repo sidecar\data
+# (dev convenience). The sidecar creates whatever is still missing on start.
+$legacyData = Join-Path $legacyDir "sidecar\data"
+$repoData = Join-Path $sidecarSrc "data"
+$destData = Join-Path $sidecarDest "data"
+if (Test-Path $destData) {
+    Write-Host "  Keeping existing sidecar data (memory/token)" -ForegroundColor Green
+} elseif (Test-Path $legacyData) {
+    Copy-Item -Path $legacyData -Destination $destData -Recurse -Force
+    Write-Host "  Migrated sidecar data (memory/token) from Mods\SimsSense" -ForegroundColor Green
+} elseif (Test-Path $repoData) {
+    Copy-Item -Path $repoData -Destination $destData -Recurse -Force
+    Write-Host "  Copied sidecar data (memory/token) from sidecar\data" -ForegroundColor Green
 }
 
 # Record the interpreter that has the sidecar dependencies so the mod's autoboot
@@ -124,4 +164,13 @@ Write-Host "  1. Enable 'Script Mods Allowed' in Game Options > Other"
 Write-Host "  2. Restart The Sims 4"
 Write-Host "  3. Open the cheat console (Ctrl+Shift+C) and type: sw.help"
 Write-Host ""
+if ($RemoveLegacy) {
+    if (Test-Path $legacyDir) {
+        Remove-Item -Path $legacyDir -Recurse -Force
+        Write-Host "Removed legacy install: $legacyDir" -ForegroundColor Yellow
+    } else {
+        Write-Host "No legacy install found at $legacyDir" -ForegroundColor Gray
+    }
+}
+
 Write-Host "Note: if Documents is inside OneDrive, script mods may not load." -ForegroundColor Yellow

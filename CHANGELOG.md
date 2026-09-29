@@ -30,6 +30,10 @@ it stays revertible.
 - **Docs/scripts:** `PLANO.md`, `CHANGELOG.md`, `docs/*`, `SKILL.md`, `Makefile`,
   `scripts/*.ps1`, `config.example.toml` updated.
 - **Repo:** `git init` + baseline commit; remote `https://github.com/MaiconSlavieiro/sensewright`.
+- **Installer:** `scripts/install-mod.ps1` now preserves `sidecar\config.toml` (model/API keys)
+  and `sidecar\data\` (memory DB / shared token) — never overwritten by the source copy on a
+  re-install, migrated from a legacy `Mods\SimsSense` install when present — and gained a
+  `-RemoveLegacy` switch to delete the old folder after installing.
 - Note: installs now land in `Mods\Sensewright\` — delete the old `Mods\SimsSense\` folder so
   the game does not load both.
 - **Tests:** sidecar **406**, mod **305**; ruff + `py -3.7 mod/build.py` clean.
