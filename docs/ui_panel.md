@@ -117,14 +117,41 @@
 **Script side (`mod/sensewright_mod/`)** — new `panel_ui.py`:
 - `build_sections(controls, values)` → the panel model (pure, unit-tested).
 - `format_panel(...)` → console fallback text (pure).
-- `show_panel(sim_info)` → native dialogs, with console fallback.
-- new cheat `sw.panel` (Live), registered in `main.py` and `cmd.help.body`.
+- `show_panel(sim_info)` → a **paged native dialog menu**, with console fallback.
+- new cheat `sw.panel` (Live) + `sw.set <key> <value>` (apply one control; used
+  by the dialog buttons), registered in `main.py` and `cmd.help.body`.
 - `http_client.set_god_controls(values)` → `POST /v1/config/god`.
 
-**GFX side (planned)** — `SensewrightUI.package`:
-- overrides/creates a GFX screen (sliders, toggles, select, list);
+**GFX side (planned, P3)** — `SensewrightUI.package`:
+- overrides/creates a GFX screen (real sliders, toggles, select, list);
 - the `.ts4script` opens it and receives values back (via a callback command or
   a shared JSON file the mod polls and forwards to the sidecar).
+
+### 3.1 Native panel mechanics (how the reference mods do it)
+
+Confirmed by cloning reference mods into `research/ui-refs/` (see §4.1). The
+mainstream approach is **native dialogs with button responses that dispatch
+commands** — there is **no scriptable slider widget**, so a "slider" is a row of
+stepped choice buttons.
+
+- **Dialog factory:** `UiDialogOkCancel.TunableFactory().default(owner, text=…,
+  title=…, text_ok=…)` and `UiDialogTextInputOk.TunableFactory().default(…)`
+  (free text — e.g. the zeitgeist prompt).
+- **Buttons that act:** `UiDialogResponse(dialog_response_id=ButtonType…,
+  text=…, ui_request=UiDialogResponse.UiDialogUiRequest.SEND_COMMAND,
+  response_command=<command>)`. This is how a menu button applies a setting
+  without extra code — the command is our `sw.set`.
+- **Custom dialog subclasses:** subclass `UiDialogOk` and override `responses`
+  (see `TS4ControlAnySim/canys_ui.py`).
+- **Panel = N pages:** a top page lists sections (God / Agents / Per-Sim /
+  World & Language / Advanced); each section opens a page of rows; each row
+  opens a choice (or steps the value) and calls `sw.set` / the roster endpoints.
+- **In-game entry point (not just a cheat):** a **pie-menu category** on the Sim
+  ("Sensewright") registered by a tiny XML tuning `.package` (interaction +
+  `PieMenuCategory`), as `TS4ControlAnySim` and `ShadySimDeals` do. The pie
+  interaction just runs `sw.panel`. No EA assets are redistributed.
+- **Icons (optional):** custom art is packed as DDS/BC3 resource type
+  `0x00B2D882`, group 0, referenced by `pie_menu_icon` (`ShadySimDeals`).
 
 ---
 
@@ -158,17 +185,44 @@ Source: SimsEdit UI docs (2026).
   <https://simsedit.com/ui-mods/gfx/gfx-modding/>,
   <https://simsedit.com/references/software-setup/>.
 
+### 4.1 Reference implementations (cloned into `research/ui-refs/`)
+
+Cloned for study only (never committed — see `.gitignore`).
+
+| Repo | License | What it demonstrates |
+|---|---|---|
+| `lot51/core-library` → `utils/dialog.py` | MIT | `DialogHelper`: notification/`UiDialogOkCancel`/`UiDialogTextInputOk` factories + **`build_ui_response(response_command=…)`** (buttons that run commands) and `create_text_dialog` (free-text input). The cleanest blueprint for our native panel. |
+| `TitanNano/TS4ControlAnySim` → `canys_ui.py` | Apache-2.0 | Custom `UiDialog` subclass (`UiDialogQuitIgnore(UiDialogOk)`) with a custom `responses` tuple; `dialog_class.TunableFactory(**kwargs).load_etree_node(...)`; pie-menu category + interaction tuning in a `.package`. |
+| `mf-rl/ShadySimDeals` | Apache-2.0 | `UiDialogOkCancel`/`UiDialogNotification` confirmations; pie-menu category SimData build; custom UI icons as BC3/DST5 `0x00B2D882`. |
+| `azigler/ts4-modding-workspace` | (none) | Minimal `UiDialogNotification.TunableFactory().default(...)` example + hot-reload utilities. |
+
+Take-aways: (1) nobody ships a scriptable slider — panels are stepped choice
+dialogs or pie menus; (2) the reusable piece we want is `DialogHelper`-style
+factories + `response_command` buttons; (3) a pie-menu category is the standard
+"open the mod's UI" entry without shipping EA assets.
+
+> **Licensing:** `core-library` is MIT (adaptable with attribution);
+> `TS4ControlAnySim`/`ShadySimDeals` are Apache-2.0. We will **reimplement** the
+> small dialog helper in our own module (no code copied verbatim) and credit the
+> originals in `docs/`/`CHANGELOG.md`.
+
 ---
 
-## 5. Roadmap
+## 5. Roadmap (adjusted after the reference study)
 
 1. **P1 — Model:** promote the "not exposed" settings into `ControlSpec`;
-   add `http_client.set_god_controls`; i18n labels/descriptions for every key.
-2. **P2 — Native panel:** `panel_ui.py` + `sw.panel` covering **all** sections
-   (stepped sliders, toggles, selects, tags, roster). Works in-game today.
-3. **P3 — GFX panel:** `SensewrightUI.package` (S4S/S4E + FFDec) with real
-   sliders + the AS3↔Python bridge; keep the native menu as fallback.
-4. **P4 — Live validation:** render check, write-back check, patch rebuild.
+   add `http_client.set_god_controls` + a generic `sw.set <key> <value>`;
+   i18n labels/descriptions for every key.
+2. **P2 — Native panel:** `panel_ui.py` (a `DialogHelper`-style module) +
+   `sw.panel`, covering **all** sections. Rows are stepped choice buttons whose
+   responses dispatch `sw.set`/roster commands. Works in-game today, no
+   dependency, no EA assets.
+3. **P2b — In-game entry:** a tiny XML tuning `.package` adding a **"Sensewright"
+   pie-menu category** on the Sim that runs `sw.panel` (the usual mod-UI entry).
+4. **P3 — GFX sliders:** `SensewrightUI.package` (S4S/S4E + FFDec) with **real
+   sliders** + the AS3↔Python bridge; the native panel stays as fallback.
+5. **P4 — Live validation:** render + write-back on the real client, then the
+   patch-rebuild drill for the package.
 
-> Until P3 ships, `sw.panel` (native) is the shipping UI; it covers the same
-> settings, only with stepped values instead of real sliders.
+> Until P3 ships, the native panel + pie entry is the shipping UI; it exposes the
+> same settings, only with stepped values instead of real sliders.

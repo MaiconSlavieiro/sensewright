@@ -24,6 +24,9 @@ sidecar/data/
 # Decompiled EA game scripts (proprietary — never commit)
 research/ts4/
 
+# Cloned third-party reference mods (never commit)
+research/ui-refs/
+
 # OS / IDE
 .DS_Store
 Thumbs.db
