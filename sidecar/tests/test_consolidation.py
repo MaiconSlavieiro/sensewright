@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from sims_sense_sidecar.llm.base import LLMResponse
-from sims_sense_sidecar.memory.consolidation import (
+from sensewright_sidecar.llm.base import LLMResponse
+from sensewright_sidecar.memory.consolidation import (
     consolidate_turns,
     deterministic_consolidation,
 )

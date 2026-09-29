@@ -11,7 +11,7 @@ mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
 import pytest
-from simssense_mod import i18n
+from sensewright_mod import i18n
 
 
 def test_load_both_locales():
@@ -34,7 +34,7 @@ def test_t_fallback_missing_key():
 
     # Existing key
     result = i18n.t("cmd.help.title")
-    assert result == "SimsSense commands"
+    assert result == "Sensewright commands"
     assert result != "cmd.help.title"
 
     # Missing key returns key itself

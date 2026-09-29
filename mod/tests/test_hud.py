@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from simssense_mod import hud, i18n
+from sensewright_mod import hud, i18n
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +72,7 @@ def test_render_status_reports_state_and_counters(_clean):
 
     status = hud.render_status()
 
-    assert "SimsSense HUD" in status
+    assert "Sensewright HUD" in status
     assert "7" in status
     assert "pulled 1" in status
 

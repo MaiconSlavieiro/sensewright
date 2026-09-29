@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from sims_sense_sidecar.agent import graph
-from sims_sense_sidecar.config import (
+from sensewright_sidecar.agent import graph
+from sensewright_sidecar.config import (
     AgentsConfig,
     BackgroundsConfig,
     GodConfig,
@@ -16,15 +16,15 @@ from sims_sense_sidecar.config import (
     MemoryConfig,
     Settings,
 )
-from sims_sense_sidecar.god.budgeter import BackgroundBudgeter
-from sims_sense_sidecar.god.scheduler import (
+from sensewright_sidecar.god.budgeter import BackgroundBudgeter
+from sensewright_sidecar.god.scheduler import (
     PRIORITY_HOUSEHOLD_ACTIVE,
     PRIORITY_RELATED,
     PRIORITY_SIM_ACTIVE,
     BackgroundJob,
     BackgroundScheduler,
 )
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.schemas import (
     BackgroundRequest,
     CensusHousehold,
     CensusRequest,

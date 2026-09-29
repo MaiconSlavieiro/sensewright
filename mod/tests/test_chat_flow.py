@@ -14,7 +14,7 @@ import sys
 mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
-from simssense_mod import main  # noqa: E402
+from sensewright_mod import main  # noqa: E402
 
 
 def _no_batch(monkeypatch):
@@ -130,7 +130,7 @@ def test_render_response_surfaces_spontaneous_line(monkeypatch):
 
 def _stub_player_lock(monkeypatch):
     """Replace tool_executor.record_player_activity with a recorder (C1 wiring)."""
-    from simssense_mod import tool_executor
+    from sensewright_mod import tool_executor
 
     armed = []
     monkeypatch.setattr(

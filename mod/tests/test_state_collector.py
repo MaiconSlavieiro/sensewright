@@ -12,8 +12,8 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from simssense_mod import events, http_client, state_collector
-from simssense_mod.state_collector import StateCollector
+from sensewright_mod import events, http_client, state_collector
+from sensewright_mod.state_collector import StateCollector
 
 
 SAMPLE_SIM = {"player_id": "local", "save_id": "save1", "sim_id": 123}
@@ -213,7 +213,7 @@ def test_ensure_started_bootstraps_census_once(monkeypatch):
 
 def test_no_threading_timer_usage():
     for filename in ("state_collector.py", "events.py"):
-        path = os.path.join(mod_dir, "simssense_mod", filename)
+        path = os.path.join(mod_dir, "sensewright_mod", filename)
         with open(path, "r", encoding="utf-8") as handle:
             source = handle.read()
         assert "threading" not in source
@@ -294,7 +294,7 @@ def test_career_name_of_returns_tuning_name():
 
     careers = [{"name": "career_TechGuru", "level": 5, "is_active": True}]
 
-    import simssense_mod.sim_context as sim_context
+    import sensewright_mod.sim_context as sim_context
 
     original_get_careers = sim_context._get_careers
     try:
@@ -310,7 +310,7 @@ def test_career_name_of_skips_numeric_names():
 
     careers = [{"name": "12345", "level": 5, "is_active": True}]
 
-    import simssense_mod.sim_context as sim_context
+    import sensewright_mod.sim_context as sim_context
 
     original_get_careers = sim_context._get_careers
     try:
@@ -324,7 +324,7 @@ def test_career_name_of_returns_empty_when_no_careers():
     class FakeInfo(object):
         pass
 
-    import simssense_mod.sim_context as sim_context
+    import sensewright_mod.sim_context as sim_context
     original_get_careers = sim_context._get_careers
     try:
         sim_context._get_careers = lambda sim_info: []
@@ -419,7 +419,7 @@ def test_send_autonomy_tick_logs_generic_failure(monkeypatch):
 
 def test_show_autonomy_text_falls_back_to_debug_log(monkeypatch):
     """L8: the console fallback uses debug_log, not print()."""
-    import simssense_mod.sim_context as sim_context
+    import sensewright_mod.sim_context as sim_context
 
     messages = []
     monkeypatch.setattr(state_collector.chat_ui, "show_simple_notification",
@@ -434,7 +434,7 @@ def test_show_autonomy_text_falls_back_to_debug_log(monkeypatch):
 
 
 def test_no_print_statements_in_state_collector():
-    path = os.path.join(mod_dir, "simssense_mod", "state_collector.py")
+    path = os.path.join(mod_dir, "sensewright_mod", "state_collector.py")
     with open(path, "r", encoding="utf-8") as handle:
         source = handle.read()
     assert "print(" not in source

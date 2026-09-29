@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sims_sense_sidecar.config import LLMConfig, ProviderConfig, Settings
-from sims_sense_sidecar.llm.base import AllProvidersFailed, LLMError, LLMResponse
-from sims_sense_sidecar.llm.chain import ProviderChain
-from sims_sense_sidecar.llm.limits import ProviderRateLimiter
+from sensewright_sidecar.config import LLMConfig, ProviderConfig, Settings
+from sensewright_sidecar.llm.base import AllProvidersFailed, LLMError, LLMResponse
+from sensewright_sidecar.llm.chain import ProviderChain
+from sensewright_sidecar.llm.limits import ProviderRateLimiter
 
 
 class FakeProvider:
@@ -90,7 +90,7 @@ async def test_chain_success_first_provider():
     """Test that chain returns first provider's response on success."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         # Replace with fake providers
         provider_a = FakeProvider("provider_a")
@@ -115,7 +115,7 @@ async def test_chain_fallback_on_failure():
     """Test that chain falls back to next provider on failure."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a", should_fail=True, fail_count=1)
         provider_b = FakeProvider("provider_b")
@@ -139,7 +139,7 @@ async def test_chain_circuit_breaker_after_3_failures():
     """Test that provider is marked cold after 3 failures across multiple requests."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a", should_fail=True, fail_count=3)
         provider_b = FakeProvider("provider_b")
@@ -195,7 +195,7 @@ async def test_chain_all_providers_failed():
     """Test AllProvidersFailed is raised when all providers fail."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a", should_fail=True, fail_count=1)
         provider_b = FakeProvider("provider_b", should_fail=True, fail_count=1)
@@ -218,7 +218,7 @@ async def test_chain_prefer_provider():
     """Test that preferred provider is tried first."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a")
         provider_b = FakeProvider("provider_b")
@@ -243,7 +243,7 @@ async def test_chain_non_retryable_error_stops_chain():
     """Test that non-retryable errors stop the chain immediately."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a", should_fail=True, fail_count=1, retryable=False)
         provider_b = FakeProvider("provider_b")
@@ -269,7 +269,7 @@ async def test_chain_status():
     """Test chain status reporting."""
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a")
         provider_b = FakeProvider("provider_b")
@@ -319,7 +319,7 @@ def test_rate_limiter_enforces_rpm_then_rpd():
 async def test_chain_skips_rate_limited_provider():
     settings = make_test_settings()
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a")
         provider_b = FakeProvider("provider_b")
@@ -344,7 +344,7 @@ def test_chain_primary_rpm_reads_configured_provider():
     }
     settings = make_test_settings(providers)
 
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider_a = FakeProvider("provider_a")
         chain._providers = [provider_a]

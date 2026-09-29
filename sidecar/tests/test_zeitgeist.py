@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from sims_sense_sidecar.god.zeitgeist import (
+from sensewright_sidecar.god.zeitgeist import (
     build_local_template,
     normalize_zeitgeist,
     suggest_zeitgeist,
     zeitgeist_to_prompt_block,
 )
-from sims_sense_sidecar.llm.base import LLMResponse
+from sensewright_sidecar.llm.base import LLMResponse
 
 
 class FakeRegistry:

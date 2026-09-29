@@ -1,5 +1,5 @@
-# ─── SimsSense — config.toml (example) ────────────────────────────────
-# Copy to <Mods>/SimsSense/sidecar/config.toml and fill in only the keys
+# ─── Sensewright — config.toml (example) ────────────────────────────────
+# Copy to <Mods>/Sensewright/sidecar/config.toml and fill in only the keys
 # you want. With NO KEYS AT ALL the mod already runs in "native mode".
 
 [ui]
@@ -132,7 +132,7 @@ spontaneous_lines = true
 quota_fraction = 0.8             # target fraction of the free-tier RPM
 max_impulses_per_tick = 1
 # v0.3 §15.6: impulse/thought frequency dials. 0 = sleep-only. The agent-roster
-# panel (`ai.agents`) adjusts these live; a per-Sim override wins.
+# panel (`sw.agents`) adjusts these live; a per-Sim override wins.
 impulse_frequency = 0.2
 player_sim_impulse_frequency = 0.0
 # Salient event reactions stay on independently of the impulse dial.
@@ -168,10 +168,10 @@ line_max_tokens = 200
 
 # ─── RUNTIME ──────────────────────────────────────────────────────────
 [runtime]
-# Expose the live agent roster + dials to the mod panel (`ai.agents`).
+# Expose the live agent roster + dials to the mod panel (`sw.agents`).
 expose_roster = true
 # Lifecycle: shut the sidecar down when The Sims 4 exits, so it never lingers
-# after the game closes. The mod passes its own PID via SIMS_SENSE_GAME_PID when
+# after the game closes. The mod passes its own PID via SENSEWRIGHT_GAME_PID when
 # it spawns the sidecar; `game_pid` is a manual override. If the sidecar was
 # already running, the mod arms it at boot through POST /v1/lifecycle/attach.
 shutdown_on_game_exit = true

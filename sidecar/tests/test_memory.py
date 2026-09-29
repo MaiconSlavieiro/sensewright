@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from sims_sense_sidecar.config import MemoryConfig, Settings
-from sims_sense_sidecar.memory import (
+from sensewright_sidecar.config import MemoryConfig, Settings
+from sensewright_sidecar.memory import (
     NoneEmbeddings,
     build_embedding_provider,
     build_memory_store,
 )
-from sims_sense_sidecar.memory.base import MemKey
+from sensewright_sidecar.memory.base import MemKey
 
 
 def make_test_settings(tmp_path: Path) -> Settings:

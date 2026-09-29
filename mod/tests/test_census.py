@@ -14,7 +14,7 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from simssense_mod import http_client, sim_context, state_collector
+from sensewright_mod import http_client, sim_context, state_collector
 
 
 SAMPLE_SIM = {"player_id": "local", "save_id": "save1", "sim_id": 123}

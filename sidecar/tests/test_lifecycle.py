@@ -9,13 +9,13 @@ import time
 import httpx
 import pytest
 
-from sims_sense_sidecar.lifecycle import (
+from sensewright_sidecar.lifecycle import (
     GameProcessWatcher,
     game_pid_from_env,
     is_pid_alive,
 )
-from sims_sense_sidecar.schemas import LifecycleResponse
-from sims_sense_sidecar.server import _start_game_watcher
+from sensewright_sidecar.schemas import LifecycleResponse
+from sensewright_sidecar.server import _start_game_watcher
 
 
 class _FakeApp:
@@ -24,7 +24,7 @@ class _FakeApp:
 
 
 def test_start_game_watcher_creates_inert_watcher_without_target(settings, monkeypatch):
-    monkeypatch.delenv("SIMS_SENSE_GAME_PID", raising=False)
+    monkeypatch.delenv("SENSEWRIGHT_GAME_PID", raising=False)
     settings.runtime.game_pid = None
     settings.runtime.watch_game_process_name = False
     settings.runtime.shutdown_on_game_exit = True
@@ -37,7 +37,7 @@ def test_start_game_watcher_creates_inert_watcher_without_target(settings, monke
 
 
 def test_start_game_watcher_arms_on_env_pid(settings, monkeypatch):
-    monkeypatch.setenv("SIMS_SENSE_GAME_PID", str(os.getpid()))
+    monkeypatch.setenv("SENSEWRIGHT_GAME_PID", str(os.getpid()))
     settings.runtime.shutdown_on_game_exit = True
 
     watcher = _start_game_watcher(_FakeApp(), settings)
@@ -57,10 +57,10 @@ def test_start_game_watcher_disabled(settings):
 
 
 def test_game_pid_from_env_parses_and_validates():
-    assert game_pid_from_env({"SIMS_SENSE_GAME_PID": "1234"}) == 1234
-    assert game_pid_from_env({"SIMS_SENSE_GAME_PID": " 42 "}) == 42
-    assert game_pid_from_env({"SIMS_SENSE_GAME_PID": "abc"}) is None
-    assert game_pid_from_env({"SIMS_SENSE_GAME_PID": "0"}) is None
+    assert game_pid_from_env({"SENSEWRIGHT_GAME_PID": "1234"}) == 1234
+    assert game_pid_from_env({"SENSEWRIGHT_GAME_PID": " 42 "}) == 42
+    assert game_pid_from_env({"SENSEWRIGHT_GAME_PID": "abc"}) is None
+    assert game_pid_from_env({"SENSEWRIGHT_GAME_PID": "0"}) is None
     assert game_pid_from_env({}) is None
 
 

@@ -6,16 +6,16 @@ from typing import Any
 
 import pytest
 
-from sims_sense_sidecar.agent import graph
-from sims_sense_sidecar.agent.agency import Agency
-from sims_sense_sidecar.config import (
+from sensewright_sidecar.agent import graph
+from sensewright_sidecar.agent.agency import Agency
+from sensewright_sidecar.config import (
     AgentsConfig,
     InitiativeConfig,
     LayersConfig,
     Settings,
     SocialConfig,
 )
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.schemas import (
     AutonomySimState,
     AutonomyTickRequest,
     SimRef,

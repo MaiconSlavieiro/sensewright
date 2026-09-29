@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import time
 
-from sims_sense_sidecar.tools.rails import (
+from sensewright_sidecar.tools.rails import (
     NEVER_TOOLS,
     DirectiveRails,
 )
-from sims_sense_sidecar.tools.registry import get_tool_schemas
+from sensewright_sidecar.tools.registry import get_tool_schemas
 
 
 class RecordingAudit:

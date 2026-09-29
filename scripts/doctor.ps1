@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    SimsSense doctor script - checks environment health.
+    Sensewright doctor script - checks environment health.
 
 .DESCRIPTION
     Validates the Python interpreters, uv, the sidecar virtual environment,
@@ -9,7 +9,7 @@
 
 $ErrorActionPreference = "Continue"
 
-Write-Host "=== SimsSense Environment Doctor ===" -ForegroundColor Cyan
+Write-Host "=== Sensewright Environment Doctor ===" -ForegroundColor Cyan
 Write-Host ""
 
 $allOk = $true
@@ -134,7 +134,7 @@ if ($sims4ModsPath -match "OneDrive") {
 # 6. Built mod artifact
 Write-Host ""
 Write-Host "--- Mod Build ---" -ForegroundColor Cyan
-$modDist = Join-Path $repoRoot "dist\SimsSense.ts4script"
+$modDist = Join-Path $repoRoot "dist\Sensewright.ts4script"
 if (Test-Path $modDist) {
     $size = (Get-Item $modDist).Length
     Write-Host "[OK] Mod package exists: $modDist" -ForegroundColor Green

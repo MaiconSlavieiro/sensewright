@@ -1,10 +1,10 @@
-"""Tests for the ai.probe autonomy snapshot helpers (F1)."""
+"""Tests for the sw.probe autonomy snapshot helpers (F1)."""
 
 from __future__ import annotations
 
 import json
 
-from simssense_mod import probe
+from sensewright_mod import probe
 
 
 class _Fake:
@@ -70,7 +70,7 @@ def test_dump_probe_writes_lines(monkeypatch):
     data = probe.dump_probe(None, include_modules=False)
 
     assert data["sim"]["available"] is False
-    assert any("=== ai.probe ===" in line for line in lines)
+    assert any("=== sw.probe ===" in line for line in lines)
 
 
 def test_render_probe_sanitizes_leaked_objects():

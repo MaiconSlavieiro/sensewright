@@ -1,4 +1,4 @@
-# SimsSense Makefile
+# Sensewright Makefile
 # Thin wrappers around scripts; use PowerShell scripts directly on Windows.
 
 .PHONY: install run doctor status logs build-mod install-mod check
@@ -8,7 +8,7 @@ install:
 	cd sidecar && uv sync --extra dev
 
 run:
-	cd sidecar && uv run python -m sims_sense_sidecar
+	cd sidecar && uv run python -m sensewright_sidecar
 
 doctor:
 	powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1

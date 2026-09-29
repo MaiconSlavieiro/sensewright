@@ -12,7 +12,7 @@ import sys
 mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
-from simssense_mod import sim_context
+from sensewright_mod import sim_context
 
 
 class _LocalizedLike(object):

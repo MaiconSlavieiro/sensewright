@@ -1,7 +1,9 @@
-# SimsSense — Status & Handoff
+# Sensewright — Status & Handoff
 
-> Last updated: **2026-09-29**. Build in the game: **`2026-09-29.1`**
-> (`.8` validated live; `.9` two fixes; `.10` `ai.hud`; `.11` autoboot finds its
+> Last updated: **2026-09-29**. Build in the game: **`2026-09-29.2`** (project renamed
+> **Sensewright**; cheats are now **`sw.*`**, artifact `Sensewright.ts4script`, install
+> folder `Mods\Sensewright\` — see `CHANGELOG.md`).
+> (`.8` validated live; `.9` two fixes; `.10` `sw.hud`; `.11` autoboot finds its
 > interpreter; `.12` notification diagnostics; `.13` notification rendering;
 > `.14` review-pass logging; `.15` `from __future__` removed, HUD on/off/error,
 > sidecar port guard; `.16` fixed the `python.txt` BOM; `.17` **reasoning**: default
@@ -21,12 +23,12 @@
 | Item | Value |
 |---|---|
 | Repo root | `C:\workspace\sims-sense-8-agent` (NOT a git repo yet) |
-| In-game mod | `mod/simssense_mod/` (Python 3.7, stdlib only) |
-| Sidecar | `sidecar/sims_sense_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
-| Build stamp | `mod/simssense_mod/main.py` → `_BUILD = "2026-09-27.18"` |
-| Installed artifact | `C:\Users\maico\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\SimsSense\SimsSense.ts4script` |
-| Sidecar data | `...\Mods\SimsSense\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
-| Mod log | `...\Mods\SimsSense\simssense_output.log` |
+| In-game mod | `mod/sensewright_mod/` (Python 3.7, stdlib only) |
+| Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
+| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-27.18"` |
+| Installed artifact | `C:\Users\maico\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\Sensewright\Sensewright.ts4script` |
+| Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
+| Mod log | `...\Mods\Sensewright\sensewright_output.log` |
 | Game install | `C:\Program Files\EA Games\The Sims 4` |
 | Tests | sidecar **406**, mod **305**; ruff clean; `py -3.7 mod/build.py` clean |
 
@@ -36,8 +38,8 @@ The mod **autoboots** it: `install-mod.ps1` writes the venv interpreter to
 hand:
 
 ```powershell
-& "C:\workspace\sims-sense-8-agent\sidecar\.venv\Scripts\python.exe" -m sims_sense_sidecar
-# working directory: C:\Users\maico\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\SimsSense\sidecar
+& "C:\workspace\sims-sense-8-agent\sidecar\.venv\Scripts\python.exe" -m sensewright_sidecar
+# working directory: C:\Users\maico\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\Sensewright\sidecar
 ```
 
 It auto-exits when The Sims 4 closes (game-process watchdog, validated live).
@@ -50,7 +52,7 @@ python mod\build.py
 powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1
 
 # Tests
-cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q; .\.venv\Scripts\python.exe -m ruff check sims_sense_sidecar tests
+cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q; .\.venv\Scripts\python.exe -m ruff check sensewright_sidecar tests
 python -m pytest mod\tests -q
 
 # Decompile the shipped scripts (needs unpyc37; decompyle3 also works)
@@ -76,17 +78,17 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
     both; `[agents.social]` cadence + cooldown. Wire: `AutonomyTickResponse.social`.
   - **R6 God director** — verified: the orchestrator only targets non-player Sims
     (`god/orchestrator.py`) and broadcasts world events to witnesses.
-  - **R7 panel** — verified: `ControlSpec` dials + `ai.agents` roster/frequency
-    fallback + `ai.lang` selector (the optional native visual panel stays gated).
+  - **R7 panel** — verified: `ControlSpec` dials + `sw.agents` roster/frequency
+    fallback + `sw.lang` selector (the optional native visual panel stays gated).
   - **F0** — `scripts/decompile-scripts.ps1`.
-  - **F1** — `mod/simssense_mod/probe.py` + `ai.probe` cheat.
+  - **F1** — `mod/sensewright_mod/probe.py` + `sw.probe` cheat.
 - **Lifecycle** — `sidecar/.../lifecycle.py` + `/v1/lifecycle/attach`; exits with the game.
 - **Validation logging** — `[validate]` lines (mod) and semantic `logger.info` (sidecar).
 - **Collector auto-start + heartbeat** — `state_collector.install_zone_hook()` wraps
   `zone.Zone.update`; starts once the active Sim is instanced and drives pulse/pull
   every 15 s (`ZONE_PULSE_INTERVAL_SECONDS`).
 - **Buffs** — `SimInfo.Buffs._active_buffs` → `Buff.buff_type.__name__` (sleep detection).
-- **Debug HUD** — `hud.py` + `ai.hud on|off|now|status`: periodic in-game status
+- **Debug HUD** — `hud.py` + `sw.hud on|off|now|status`: periodic in-game status
   line (`sidecar ON/OFF | HB #n | N sims | pulled n | ok n/total`) and a trace per
   executed intent. **Notifications fixed** (`chat_ui`): real
   `LocalizationHelperTuning.get_raw_text` strings instead of the invalid
@@ -96,8 +98,8 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
 
 ## 3. Validated live (in-game)
 
-- `ai.help`, `ai.status` (providers up), `ai.chat` (pt-BR reply + tool calls →
-  `/v1/tools/result`), `ai.probe` (full autonomy snapshot + module map).
+- `sw.help`, `sw.status` (providers up), `sw.chat` (pt-BR reply + tool calls →
+  `/v1/tools/result`), `sw.probe` (full autonomy snapshot + module map).
 - **Lifecycle**: `game watchdog attached to pid …` then `game process gone` → clean shutdown.
 - **Zone heartbeat (build `.8`)** — during normal play (no commands):
   `zone hook installed` → auto-start with `owner=object_sim` →
@@ -117,20 +119,20 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
 > Now confirm the `.9` fixes and the remaining layers.
 >
 > **Fast path on `.11`:** the sidecar now autoboots (the installer wrote
-> `sidecar/python.txt` with the venv interpreter). Open the game, run `ai.hud on`,
-> and watch for the periodic `SimsSense ● sidecar ON | HB #n | N sims …`
+> `sidecar/python.txt` with the venv interpreter). Open the game, run `sw.hud on`,
+> and watch for the periodic `Sensewright ● sidecar ON | HB #n | N sims …`
 > notifications. If they appear, the loop is alive and notifications render; type
-> `ai.hud now`/`ai.hud status` anytime. If you see `sidecar OFF`, autoboot failed —
+> `sw.hud now`/`sw.hud status` anytime. If you see `sidecar OFF`, autoboot failed —
 > check `sidecar/python.txt` and `sidecar.log`.
 
-1. **Debug HUD + notifications (build `.10`).** `ai.hud on` → periodic in-game
+1. **Debug HUD + notifications (build `.10`).** `sw.hud on` → periodic in-game
    status line; confirm `notify.*`/`notify.social.speech` also render (not just
    the cheat console).
 2. **`.9` speak fallback (re-run).** Repeat a session and confirm a targeted
    `speak`/`say_to` intent now logs `ok=True` with a text line (not
    `err=not_implemented`), and `bias_interaction` ack (`applied=false`), plus the
    impulse log no longer stores meta thoughts ("the user …").
-3. **Buffs**: `ai.probe` → `sections.buffs` populated; sleeping buffs drive `sleeping: true`.
+3. **Buffs**: `sw.probe` → `sections.buffs` populated; sleeping buffs drive `sleeping: true`.
 4. **Events delivered**: `[validate] event: <type>` on buffs/relationships/social.
 5. **God**: zeitgeist onboarding on first load; backgrounds pipeline cadence.
 6. **Memory cadence**: consolidation after the idle window; decay/deja-vu over long play.
@@ -139,13 +141,13 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
    `InteractionContext` import paths/signatures and candidate social affordances
    (best-effort), but `say_to` still needs live confirmation that the push
    succeeds in-game (otherwise it degrades to a notification). Resolve the real
-   social affordance + `push_super_affordance`/`move_to`/`cancel_all` (`ai.probe`).
+   social affordance + `push_super_affordance`/`move_to`/`cancel_all` (`sw.probe`).
 9. **R5 sim↔sim (build `.18`)**: with two seated non-player Sims on the lot, watch
    the log for `[validate] social: N dialogue pair(s)` and the sidecar's
    `social dialogue(s)`. Confirm the two lines surface (native `say_to` or the
    `notify.social.speech` fallback) and that the relationship moves in-game. If
    pairs never form, check that both Sims are non-player, awake and in seats
-   (`ai.agents`) and that `[agents.layers] social = true`.
+   (`sw.agents`) and that `[agents.layers] social = true`.
 
 ---
 
@@ -167,9 +169,9 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
 - **Sidecar needs the venv Python** until Phase 6 (PyInstaller). Autoboot now finds
   it via `sidecar/python.txt` (written by `install-mod.ps1`); if that file is
   missing/stale the spawn falls back to PATH Python, which lacks the deps — start
-  manually (`ai.start` won't help without the venv). Re-run the installer after a
+  manually (`sw.start` won't help without the venv). Re-run the installer after a
   venv change.
-- **`ai.probe`** now resolves `full_name` (via the tuning/`LocalizedString` path)
+- **`sw.probe`** now resolves `full_name` (via the tuning/`LocalizedString` path)
   and a real career name; `get_inventory` is implemented best-effort (returns an
   empty list when the inventory component is unavailable).
 - **R5** uses a deterministic template dialogue in native (0-key) mode, so
@@ -201,7 +203,7 @@ powershell -ExecutionPolicy Bypass -File scripts\decompile-scripts.ps1 -VerifyOn
 5. Before any commit: `git init` (so `research/ts4/` stays ignored) and follow the
    CHANGELOG format.
 
-**Current TODO on the board:** run `.18` with the sidecar up and `ai.hud on` to
+**Current TODO on the board:** run `.18` with the sidecar up and `sw.hud on` to
 confirm the HUD/notifications render → re-check the `.9` speak fallback + clean
 impulse thoughts → buffs/events live → **R5 sim↔sim** (`[validate] social:` line,
 two lines surface, relationship moves) → God/memory/UI → resolve a real social

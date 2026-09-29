@@ -9,13 +9,16 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from sims_sense_sidecar.config import LLMConfig, ProviderConfig, Settings
-from sims_sense_sidecar.llm.base import LLMError, LLMResponse
-from sims_sense_sidecar.llm.chain import ProviderChain
-from sims_sense_sidecar.llm.providers import PROVIDER_CLASSES
-from sims_sense_sidecar.llm.providers.gemini import GeminiProvider
-from sims_sense_sidecar.llm.providers.openai_compat import OpenAICompatProvider, OpenCodeZenProvider
-from sims_sense_sidecar.llm.registry import ProviderRegistry
+from sensewright_sidecar.config import LLMConfig, ProviderConfig, Settings
+from sensewright_sidecar.llm.base import LLMError, LLMResponse
+from sensewright_sidecar.llm.chain import ProviderChain
+from sensewright_sidecar.llm.providers import PROVIDER_CLASSES
+from sensewright_sidecar.llm.providers.gemini import GeminiProvider
+from sensewright_sidecar.llm.providers.openai_compat import (
+    OpenAICompatProvider,
+    OpenCodeZenProvider,
+)
+from sensewright_sidecar.llm.registry import ProviderRegistry
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
@@ -412,7 +415,7 @@ def make_settings() -> Settings:
 
 async def test_chain_forwards_tools_to_provider():
     settings = make_settings()
-    with patch("sims_sense_sidecar.llm.chain.PROVIDER_CLASSES", {}):
+    with patch("sensewright_sidecar.llm.chain.PROVIDER_CLASSES", {}):
         chain = ProviderChain(settings)
         provider = RecordingProvider()
         chain._providers = [provider]

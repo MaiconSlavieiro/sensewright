@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import random
 
-from sims_sense_sidecar.config import GodConfig
-from sims_sense_sidecar.god.interventions import Intervention
-from sims_sense_sidecar.god.orchestrator import GodOrchestrator
-from sims_sense_sidecar.god.world_model import SimProfile, WorldState
+from sensewright_sidecar.config import GodConfig
+from sensewright_sidecar.god.interventions import Intervention
+from sensewright_sidecar.god.orchestrator import GodOrchestrator
+from sensewright_sidecar.god.world_model import SimProfile, WorldState
 
 
 class FakeClock:

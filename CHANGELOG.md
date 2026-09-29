@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **SimsSense** are documented in this file.
+All notable changes to **Sensewright** are documented in this file.
 
 - Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,6 +11,28 @@ All notable changes to **SimsSense** are documented in this file.
 ---
 
 ## [Unreleased] — Phases 2, 2b, 3, 4, 5a, 5b, 5c + v0.2 §14: Directives, Census, Agents, Evolution, God foundation, backgrounds, orchestration & autonomous Sim agents
+
+### Changed — renamed the project to **Sensewright** (build `2026-09-29.2`)
+Full rename from `SimsSense` to **Sensewright** (descriptive subtitle: *for The Sims 4*;
+no "Sims" in technical identifiers). A git baseline was committed **before** the rename so
+it stays revertible.
+- **Packages:** `mod/simssense_mod` → `mod/sensewright_mod`; `sidecar/sims_sense_sidecar` →
+  `sidecar/sensewright_sidecar` (incl. `pyproject` `name`, console script and wheel package).
+- **Cheats (breaking):** every `ai.*` → **`sw.*`** (`sw.help`, `sw.chat`, `sw.hey`, `sw.status`,
+  `sw.reset`, `sw.forget`, `sw.autonomy`, `sw.lang`, `sw.hud`, `sw.uitest`, `sw.god`,
+  `sw.zeitgeist`, `sw.profile`, `sw.evolve`, `sw.agents`, `sw.probe`, `sw.start`), including the
+  `cmd.help.body` text in `en` + `pt-BR`.
+- **Wire/security:** auth header `X-SimsSense-Token` → `X-Sensewright-Token`; env vars
+  `SIMS_SENSE_*` → `SENSEWRIGHT_*` (`HOME`, `CONFIG`, `LANG`, `DEBUG`, `VALIDATION`,
+  `GAME_PID`, `PYTHON`, `TS4_STUBS`).
+- **Artifacts/paths:** `Sensewright.ts4script`, `Sensewright-sidecar.exe`,
+  `Mods\Sensewright\`, `sensewright.toml`, `sensewright_output.log`, sidecar window/log titles.
+- **Docs/scripts:** `PLANO.md`, `CHANGELOG.md`, `docs/*`, `SKILL.md`, `Makefile`,
+  `scripts/*.ps1`, `config.example.toml` updated.
+- **Repo:** `git init` + baseline commit; remote `https://github.com/MaiconSlavieiro/sensewright`.
+- Note: installs now land in `Mods\Sensewright\` — delete the old `Mods\SimsSense\` folder so
+  the game does not load both.
+- **Tests:** sidecar **406**, mod **305**; ruff + `py -3.7 mod/build.py` clean.
 
 ### Changed — code-review remediation + R1 hardening (build `2026-09-29.1`)
 Applied the full correction plan from `docs/code_review_2026-09-27.md` on the in-game mod
@@ -64,7 +86,7 @@ best-effort guard.
 - Removed the dead `StateCollector._register_handlers`; `rails.NEVER_TOOLS` no longer lists
   the non-existent `shell`/`http`; `note_executed` failures are logged; `probe` renders via
   the payload sanitizer (no `default=str` masking); `print` → `debug_log`; `cmd_zeitgeist
-  auto` forwards `lang`; `ai.autonomy` persists the level to `simssense.toml` and, with no
+  auto` forwards `lang`; `sw.autonomy` persists the level to `sensewright.toml` and, with no
   argument, re-applies it (`read_autonomy_level`); the sidecar already persists the
   per-Sim level in SQLite.
 - **Deferred (documented):** M9 (split the 1.5k-line `state_collector`), L10 (harden the
@@ -102,9 +124,9 @@ otherwise, per the locked decision §15.1 #5).
   `notify.social.speech` fallback). No new locale keys were needed.
 - **R6/R7 (verified code-complete).** The God orchestrator already targets only
   non-player Sims and broadcasts world events to witnesses; the agent-roster
-  panel is the `ai.agents` text fallback plus the `ControlSpec` dials and
-  `ai.lang`. Only the optional native visual panel remains gated.
-- **Data-quality nits (mod).** `ai.probe` now reports a real `full_name` and a
+  panel is the `sw.agents` text fallback plus the `ControlSpec` dials and
+  `sw.lang`. Only the optional native visual panel remains gated.
+- **Data-quality nits (mod).** `sw.probe` now reports a real `full_name` and a
   career name (was `""` / numeric); `get_inventory` is implemented best-effort
   instead of returning `not_implemented`.
 - **Tests.** sidecar 356 → **406** (`agent/social.py` unit tests + Agency/graph
@@ -178,7 +200,7 @@ A code review + architecture advisory pass on this session's changes. Applied:
   `hud.note_heartbeat` instead of a bare `except: pass` — so the validation log
   always shows why a pulse/event produced nothing.
 - **Spawn visibility (mod).** `main._spawn_sidecar` logs
-  `spawning sidecar: <cmd> (cwd=…, game_pid=…)` so `simssense_output.log` records
+  `spawning sidecar: <cmd> (cwd=…, game_pid=…)` so `sensewright_output.log` records
   exactly what was launched and with which PID.
 - **Impulse marker robustness (sidecar).** `_META_MARKERS` covers `I am Sim …`
   with `,`/`.`/space endings (kept the trailing space to avoid matching
@@ -206,26 +228,26 @@ watchdog false-triggered on every session.
 - **Tests.** sidecar 338 → **339** (access-denied counts as alive).
 
 ### Fixed — notifications now render (LocalizedString factory) (build `.13`)
-`ai.uitest` pinpointed the failure: `TypeError: 'LocalizedString' object is not
+`sw.uitest` pinpointed the failure: `TypeError: 'LocalizedString' object is not
 callable` at `ui_dialog._build_localized_string_msg` (`string(*tokens)`). The
 dialog resolves `text`/`title` by **calling** them with localization tokens, but
 `LocalizationHelperTuning.get_raw_text(...)` returns a `LocalizedString`, not a
 callable. `chat_ui._build_dialog` now passes small factories
 (`lambda *a, **k: loc`) so the dialog can call them. This is the real cause of
 "no UI appears" for the HUD, `notify.*` and `notify.social.speech`.
-- The earlier `ai.hud on` console-only result was this fallback; the HUD loop
+- The earlier `sw.hud on` console-only result was this fallback; the HUD loop
   itself was already running (`hud: … HB #3 … 6 sims` in the log).
 - **Tests.** mod **218** (unchanged; diagnostics test covers the failure path).
 
 ### Added — notification diagnostics + HUD log trace (build `.12`)
-`ai.hud on` still showed only the console ack, so the in-game UI path needs
+`sw.hud on` still showed only the console ack, so the in-game UI path needs
 pinpointing.
-- **`ai.uitest` cheat.** New `chat_ui.notification_diagnostics()` reports the
+- **`sw.uitest` cheat.** New `chat_ui.notification_diagnostics()` reports the
   exact failing layer of the dialog path (`build` vs `show_dialog`) and the error
-  string; `ai.uitest` prints `ok=… | layer=… | error=…` to the cheat console.
-  `show_notification` now logs the real exception to `simssense_output.log`.
+  string; `sw.uitest` prints `ok=… | layer=… | error=…` to the cheat console.
+  `show_notification` now logs the real exception to `sensewright_output.log`.
 - **HUD log trace.** Every HUD line is mirrored to the log as `hud: …`, so the
-  loop's liveness is provable from `simssense_output.log` even if notifications
+  loop's liveness is provable from `sensewright_output.log` even if notifications
   do not render.
 - **Tests.** mod 217 → **218** (`notification_diagnostics`).
 
@@ -236,22 +258,22 @@ of the sidecar deps (`fastapi`/`httpx`/`pydantic`) — those live in the workspa
 `.venv`. So the sidecar never came up unless started by hand.
 - **`install-mod.ps1` records the interpreter.** After copying, it resolves the
   dev venv (`sidecar\.venv\Scripts\python.exe`, else PATH `python`) and writes
-  it to `Mods/SimsSense/sidecar/python.txt`.
+  it to `Mods/Sensewright/sidecar/python.txt`.
 - **`config.find_python()` reads it.** New `read_interpreter_hint()` is consulted
   after the env override and the sidecar's own `.venv`, before PATH — so autoboot
   spawns an interpreter that actually has the deps. Missing/stale paths are
   ignored (falls through to PATH).
 - **Tests.** mod 214 → **217** (`read_interpreter_hint`, `find_python` hint).
 
-### Added — in-game debug HUD (`ai.hud`) + working notifications (build `.10`)
-- **Debug HUD (`mod/simssense_mod/hud.py`).** The mod runs behind the scenes, so
+### Added — in-game debug HUD (`sw.hud`) + working notifications (build `.10`)
+- **Debug HUD (`mod/sensewright_mod/hud.py`).** The mod runs behind the scenes, so
   a player could not tell whether the loop was alive. New opt-in overlay:
-  `ai.hud on|off|now|status` (empty toggles). While on, each zone heartbeat emits
+  `sw.hud on|off|now|status` (empty toggles). While on, each zone heartbeat emits
   a compact notification — `sidecar ON/OFF | HB #n | N sims | pulled n | ok n/total`
   — and every executed intent adds a one-line trace (`▶ kind name → status`);
   sidecar connect/loss flips announce immediately. Counters keep running while
-  off, so `ai.hud now` shows a reading at any time. New `cmd.hud.*`/`hud.*` keys in
-  `en` + `pt-BR`; `ai.hud` added to `ai.help`.
+  off, so `sw.hud now` shows a reading at any time. New `cmd.hud.*`/`hud.*` keys in
+  `en` + `pt-BR`; `sw.hud` added to `sw.help`.
 - **Fixed — notifications now actually render in-game (`chat_ui.show_notification`).**
   The dialog call passed `urgent=` (not a notification tunable) and wrapped the
   text in `TunableLocalizedStringFactory` (a tunable type, not a runtime string),
@@ -343,7 +365,7 @@ Found while validating (fixed below): targeted `say_to` intents failed with
   (`tool_executor.py`, `state_collector.py`.)
 - **Mod — roster + intent pull.** `state_collector.pull_and_execute_directives`
   now pulls `/v1/autonomy/intents` and translates via GameLever (speech shown
-  through `notify.social.speech`); new `ai.agents [<seats>|<sim_id> <freq>]` cheat
+  through `notify.social.speech`); new `sw.agents [<seats>|<sim_id> <freq>]` cheat
   and `god_ui.format_roster`; new keys in `en` + `pt-BR`.
 - **Tests.** sidecar 298 → **309** (`SeatManager`, `IntentBus`, seats/intents
   endpoints); mod 167 → **179** (GameLever, roster, intent pull, v0.2 fallback).
@@ -390,7 +412,7 @@ Root cause of the empty live sessions: the collector was only ever started from
 the **command paths** (`_ensure_ready`/`_output`), and its deferred event/alarm
 flush was only retried there. So a session where the player just *plays* never
 registered events or alarms — the `.5` session logged nothing until the final
-`ai.probe`, and only then (19 s before exit) did the alarms register.
+`sw.probe`, and only then (19 s before exit) did the alarms register.
 - **`state_collector.install_zone_hook()`** wraps `zone.Zone.update` to call
   `ensure_started()` on the first zone ticks (when a live Sim exists to own the
   alarms) and **self-uninstalls** once the collector is live, so it comes up
@@ -418,7 +440,7 @@ game-clock alarms still never fired and buffs were still empty, so:
 - **Tests.** mod 195 → **197** (event-pulse gating/throttle).
 
 ### Fixed — first live-validation pass (alarms never fired, census scope, buffs)
-Found while validating the R2/R3/R4 build in-game (only `ai.probe` was run):
+Found while validating the R2/R3/R4 build in-game (only `sw.probe` was run):
 - **Alarms never fired (blocker).** The pulse/pull/snapshot alarms registered but
   their owner was the zone/household/service, which the alarm service does not
   advance. `events._resolve_alarm_owner` now prefers the **active Sim instance**
@@ -445,24 +467,24 @@ Found while validating the R2/R3/R4 build in-game (only `ai.probe` was run):
 - **Mod — `debug_log.validation_log()`.** New semantic logging of the decisions
   that were invisible: each executed intent (`kind`/`name`/`sim`/`ok`/`err`) in
   `pull_and_execute_directives`, chat tool calls, zone-pulse Sim count, census
-  counts and the `ai.agents` roster. Prefixed `[validate]`, gated by
-  `SIMS_SENSE_VALIDATION` (on by default; `=0` mutes without touching errors).
-- **Mod — log rotation.** `simssense_output.log` no longer silently stops at the
-  size cap: it rotates (keeps the tail), so a late `ai.probe` dump is never lost;
+  counts and the `sw.agents` roster. Prefixed `[validate]`, gated by
+  `SENSEWRIGHT_VALIDATION` (on by default; `=0` mutes without touching errors).
+- **Mod — log rotation.** `sensewright_output.log` no longer silently stops at the
+  size cap: it rotates (keeps the tail), so a late `sw.probe` dump is never lost;
   cap raised to 1 MB.
 - **Sidecar — semantic logs (`logger.info`).** Pulse (`sims`/`sleeping`/
   `scheduled`/`seats`), stored intents (`kinds`), impulse outcome (`kind`/
   `autonomy`/`intents`/`thought`/`used_llm`), live cognition plan (`source`/
   `focus`/`goals`), event ingestion (`count`/`types`), intent pull (`count`/
   `kinds`) and census seat sync. Together with the existing uvicorn access log,
-  a session can be validated from `sidecar.log` + `simssense_output.log`.
+  a session can be validated from `sidecar.log` + `sensewright_output.log`.
 - **Tests.** sidecar 333 → **335** (pulse/intent log assertions); mod 188 → **191**
   (`test_debug_log.py`: validation prefix/mute + rotation).
 
 ### Added — sidecar lifecycle: exits with the game
 - **Game-process watchdog (`sidecar/.../lifecycle.py`).** The sidecar now shuts
   itself down when The Sims 4 exits, so it never lingers after the game closes.
-  The mod passes its PID via `SIMS_SENSE_GAME_PID` on spawn (`main._spawn_sidecar`);
+  The mod passes its PID via `SENSEWRIGHT_GAME_PID` on spawn (`main._spawn_sidecar`);
   a background thread watches that PID (Windows `ctypes` `OpenProcess` +
   `GetExitCodeProcess`; `os.kill(pid, 0)` elsewhere) with a grace period and asks
   uvicorn to stop (`app.state.server.should_exit`) for a graceful shutdown
@@ -485,10 +507,10 @@ Found while validating the R2/R3/R4 build in-game (only `ai.probe` was run):
   trigger/attach/name/stop, watcher factory, attach endpoint); mod 186 → **188**
   (`attach_lifecycle` payload + autoboot attaching on an already-running sidecar).
 
-### Added — v0.3 F0/F1: R1 research tooling (`ai.probe` + decompile script)
-- **F1 — `ai.probe` (mod).** New permanent dev cheat (`mod/.../probe.py`) that
+### Added — v0.3 F0/F1: R1 research tooling (`sw.probe` + decompile script)
+- **F1 — `sw.probe` (mod).** New permanent dev cheat (`mod/.../probe.py`) that
   dumps a JSON snapshot of the active Sim's autonomy surface to
-  `simssense_output.log`: the autonomy service/component, `si_state`, commodity
+  `sensewright_output.log`: the autonomy service/component, `si_state`, commodity
   (motive) values, buffs/traits, whims, relationship tracks and the interaction
   queue. It also attempts to import every module from the §15.7 module map and
   records which exist in the current patch plus their public names — the raw
@@ -500,7 +522,7 @@ Found while validating the R2/R3/R4 build in-game (only `ai.probe` was run):
   bytecode magic (`42 0D 0D 0A`) and decompiles with a configurable unpyc37
   command into the gitignored `research/ts4/`. `-VerifyOnly` runs without a
   decompiler.
-- **Docs.** Module map updated (`probe.py`); `ai.probe` added to `ai.help` and the
+- **Docs.** Module map updated (`probe.py`); `sw.probe` added to `sw.help` and the
   `en`/`pt-BR` locale tables.
 - **Tests.** mod 179 → **186** (`test_probe.py`: describe/prune/render, module
   importability, no-sim snapshot, log write).
@@ -511,7 +533,7 @@ Found while validating the R2/R3/R4 build in-game (only `ai.probe` was run):
   **daily plan** (`day_focus` + up to 3 `goals`) stored on the profile
   (`daily_plan`/`day_focus`/`goals`), with a deterministic template fallback so
   native mode keeps planning. Absorbs the Phase 4 reflection into the sleep
-  cycle; `ai.evolve` remains the manual trigger. Disabled via
+  cycle; `sw.evolve` remains the manual trigger. Disabled via
   `[agents.layers] cognition = false`.
 - **Graph (`agent/graph.py`).** `_sleep_consolidation` now runs the cognition
   layer after P1 absorption (one sleep = fold dialogue + drift psyche + plan the
@@ -534,7 +556,7 @@ Found while validating the R2/R3/R4 build in-game (only `ai.probe` was run):
   **intent model** with lifecycle (`expires_at`), the phases **R1–R7**, a **fix-point map**
   of the already-implemented code, and the v0.3 risks/config draft.
 - **Locked decisions.** Decompiled stubs in a gitignored `research/ts4/`; sequential internals
-  reading; permanent `ai.probe` cheat; **hybrid nudge** (pure bias when available, else a
+  reading; permanent `sw.probe` cheat; **hybrid nudge** (pure bias when available, else a
   gated candidate in the queue); sim↔sim **speech bubble with notification fallback**; seat
   eviction **on lot exit**; God **free/slow**; idle impulses **kept as a per-agent dial**.
 - **Research plan.** `F0` tooling (`unpyc37`, reproducible `scripts/decompile-scripts.ps1`),
@@ -620,14 +642,14 @@ failed at import and were never retried. Fixed:
   `SimInfo.get_traits()` / `TraitTracker.equipped_traits` (the tracker has no
   `get_traits`/`traits`); `_get_relationships` uses
   `RelationshipTracker.get_target_sim_infos()` + `get_relationship_depth(id)`.
-  Live check (build `.6`): `ai.chat lang='pt-BR' ... traits=65 rels=25`.
+  Live check (build `.6`): `sw.chat lang='pt-BR' ... traits=65 rels=25`.
 - **Save id (build `.7`).** `_get_save_id` reads the persistence service's
   `get_save_slot_proto_guid()` (stable per save) and skips `0`/empty, fixing the
   `save_id='0'` seen with `.6`.
 - **Locale (Sim replied in English).** `i18n` gained `_detect_game_locale()`
   (returns availability) and `ensure_locale()`, which re-detects in `auto` mode
   until a game locale API answers, then locks. `main._get_current_lang` calls it,
-  so requests carry `lang=pt-BR` when the game is Portuguese; `ai.lang` still
+  so requests carry `lang=pt-BR` when the game is Portuguese; `sw.lang` still
   forces an override.
 - **Silent tool-only replies.** `main._render_response` surfaces the text of a
   `spontaneous_line`/`say_to` tool call when the model returns no reply (a
@@ -639,9 +661,9 @@ failed at import and were never retried. Fixed:
   fallbacks, census bootstrap); sidecar **286** (chat/hey lang log only).
 
 ### Changed — Code review pass (mod robustness, from `code_review.md`)
-- **Swallowed-exception logging (review #1).** New `simssense_mod/debug_log.py`
-  writes to `simssense_output.log` (size-capped, de-duplicated per signature) behind a
-  `DEBUG_MODE` flag (`SIMS_SENSE_DEBUG=0` override). The `_safe_call`/`_safe_getattr`
+- **Swallowed-exception logging (review #1).** New `sensewright_mod/debug_log.py`
+  writes to `sensewright_output.log` (size-capped, de-duplicated per signature) behind a
+  `DEBUG_MODE` flag (`SENSEWRIGHT_DEBUG=0` override). The `_safe_call`/`_safe_getattr`
   guards in `sim_context.py`, `state_collector.py` and `tool_executor.py` now record
   the real exception + traceback; so do the collector's alarm/registration `except`
   blocks and the tool-result post. `main.py` delegates to the shared logger.
@@ -796,8 +818,8 @@ failed at import and were never retried. Fixed:
   `ingest_census`, `god_controls`, census cache, background staleness on zeitgeist
   change; the generated background is now rendered into the Sim prompt.
 - **Mod**: census builder + `send_census`; `god_ui.py` (vanilla-dialog zeitgeist
-  onboarding and household background prompt, with console fallback); `ai.zeitgeist`
-  cheat and `ai.god` controls summary; 52 `god.*` + 2 `cmd.zeitgeist.*` locale keys
+  onboarding and household background prompt, with console fallback); `sw.zeitgeist`
+  cheat and `sw.god` controls summary; 52 `god.*` + 2 `cmd.zeitgeist.*` locale keys
   in `en` and `pt-BR`.
 - **Tests**: sidecar 96 → **133**; mod 61 → **88**.
 
@@ -841,7 +863,7 @@ failed at import and were never retried. Fixed:
   `events.embedding_json` column + additive migration) and `search_events`
   ranks by cosine similarity, falling back to lexical.
 - **Sidecar — wire/endpoints**: `POST /v1/profile` (`ProfileRequest/Response`).
-- **Mod**: `ai.profile <one sentence>` cheat + `request_profile` client.
+- **Mod**: `sw.profile <one sentence>` cheat + `request_profile` client.
 
 ### Added — Phase 4 (Evolution): reflection & personality drift
 - **Sidecar — `agent/evolution.py`**: `reflect` (events → reflection JSON +
@@ -855,7 +877,7 @@ failed at import and were never retried. Fixed:
   (`EvolveRequest/Response`).
 - **Config**: `[agents.evolution]` (`enabled`, `min_events`, `cooldown_seconds`,
   `max_reflections_per_day`, `trait_swap`, `drift_strength`).
-- **Mod**: `ai.evolve [save]` cheat + `evolve` client; `error.budget_exhausted`,
+- **Mod**: `sw.evolve [save]` cheat + `evolve` client; `error.budget_exhausted`,
   `cmd.profile.*`, `cmd.evolve.*` locale keys in `en` and `pt-BR`.
 - **Tests**: sidecar 146 → **167** (profiler, evolution, phase 3/4 wiring).
 
@@ -894,12 +916,12 @@ failed at import and were never retried. Fixed:
   - Time spans use `date_and_time.create_time_span(days, hours, minutes)` (the old
     `sims4.math.TimeSpan` path never existed).
 - **Mod — sidecar autostart from source.** With no packaged `.exe` yet (PyInstaller
-  is Phase 6), `ai.start`/autoboot could not launch the sidecar, so it stayed down
-  and `ai.chat`/`ai.status` reported "sidecar unreachable". `config.sidecar_launch()`
+  is Phase 6), `sw.start`/autoboot could not launch the sidecar, so it stayed down
+  and `sw.chat`/`sw.status` reported "sidecar unreachable". `config.sidecar_launch()`
   now prefers the exe and otherwise runs the bundled source
-  (`python -m sims_sense_sidecar`), choosing the interpreter from
-  `SIMS_SENSE_PYTHON` → the sidecar `.venv` → `python`/`python3`/`py` on PATH.
-- **Mod — chat never fails silently.** `ai.chat`/`ai.hey` now run context
+  (`python -m sensewright_sidecar`), choosing the interpreter from
+  `SENSEWRIGHT_PYTHON` → the sidecar `.venv` → `python`/`python3`/`py` on PATH.
+- **Mod — chat never fails silently.** `sw.chat`/`sw.hey` now run context
   collection inside the `try` (a failure surfaces as a message instead of dying in
   the command system) and render through a shared `_render_response`: the dialog is
   tried first and the reply/fallback falls back to the cheat console. `chat_ui`
@@ -908,12 +930,12 @@ failed at import and were never retried. Fixed:
   `from __future__ import annotations`, so `message: str` reached the command system
   as the *string* `'str'`; the parser (`sims4/commands.py`) does
   `isinstance(arg_type, type)`/`issubclass`, so typed args never parsed and
-  `ai.chat`/`ai.profile`/`ai.zeitgeist` produced no request and no message. The
+  `sw.chat`/`sw.profile`/`sw.zeitgeist` produced no request and no message. The
   future-import was removed (the annotations are all 3.7-safe) and the free-text
   commands now use an unannotated ``message`` + ``*args`` hybrid joined together —
   a lone variadic can be rejected by the console and an annotated positional
-  collides with the injected ``_connection`` on multi-word input. `ai.chat` logs
-  its raw args plus a `_BUILD` stamp to `simssense_output.log` (and `ai.help` logs
+  collides with the injected ``_connection`` on multi-word input. `sw.chat` logs
+  its raw args plus a `_BUILD` stamp to `sensewright_output.log` (and `sw.help` logs
   the build) so the loaded build can be confirmed; the game only loads script mods
   at startup, so a full restart is required after each install.
 - **Mod — JSON payload with game objects (the "Internal error").** `http_client`
@@ -923,7 +945,7 @@ failed at import and were never retried. Fixed:
   request was sent**. Serialization now uses `default=str`, and
   `sim_context._get_relationships` coerces `target_name`/`track` to `str` and
   `depth` to `float`. The chat/hey handlers also log the real exception + traceback
-  to `simssense_output.log` instead of swallowing it.
+  to `sensewright_output.log` instead of swallowing it.
 - **Mod — language resolved at boot (Sim replied in English).** `i18n._current_locale`
   was never set: `resolve_locale()` returned the detected locale but did not apply
   it, so every request sent `lang="en"`. Added `i18n.init_locale()` (called from
@@ -954,9 +976,9 @@ failed at import and were never retried. Fixed:
   it was annotated `_connection: int = 0`, which made the command system treat it
   as a user argument instead of injecting the connection. Fixed by using
   `_connection=None` (unannotated) and emitting through `CheatOutput` first; a
-  best-effort `simssense_output.log` next to the mod records output for
+  best-effort `sensewright_output.log` next to the mod records output for
   troubleshooting. i18n also reads locale JSON from inside the `.ts4script`.
-- **Mod:** `ai.status` raised `TypeError` because `providers` is a list of dicts
+- **Mod:** `sw.status` raised `TypeError` because `providers` is a list of dicts
   on the wire, not strings; added `_format_providers`.
 - **Providers (found while configuring keys):**
   - Gemini API key was sent as a `?key=` query parameter, so httpx wrote the key
@@ -974,14 +996,14 @@ failed at import and were never retried. Fixed:
   of 3.7 bytecode and **loads from the OneDrive `Documents` folder**.
 - Mod → sidecar autoboot ping reaches the sidecar; Mods had been auto-disabled by
   the game (`modsdisabled=1`) after the patch — re-enabling is required.
-- Cheat commands now render in the console (`ai.help`), confirmed side-by-side
+- Cheat commands now render in the console (`sw.help`), confirmed side-by-side
   with an independent reference script mod with the same pattern.
 - **End-to-end LLM round-trip from inside the game**: `POST /v1/chat`,
   `POST /v1/profile` and `GET /v1/status` all returned 200 via Gemini
   (`gemini-2.5-flash`) in the sidecar logs, and the regenerated key never appears
   in the request URL (the `x-goog-api-key` header fix holds).
-- **`ai.chat` works in-game (builds `2026-09-26.3`/`.4`).** After the
-  command-annotation and JSON-serialization fixes above, typing `ai.chat <text>`
+- **`sw.chat` works in-game (builds `2026-09-26.3`/`.4`).** After the
+  command-annotation and JSON-serialization fixes above, typing `sw.chat <text>`
   reaches the sidecar (`POST /v1/chat → 200`, Gemini), the reply is rendered and the
   conversation is persisted in `memory.sqlite3` (`events`: user + assistant turns,
   e.g. `olá` stored as `ol\u00e1`). The earlier `olA` seen in the debug log was only
@@ -1016,12 +1038,12 @@ First end-to-end skeleton: sidecar boots by itself, mod handshake works, all UI 
 
 ### Added
 - **Foundation / wire contract**
-  - `sidecar/sims_sense_sidecar/schemas.py`: Pydantic v2 models for `/v1` (`ChatRequest`,
+  - `sidecar/sensewright_sidecar/schemas.py`: Pydantic v2 models for `/v1` (`ChatRequest`,
     `ChatResponse` with `message_key`/`message_args`, `ToolResultRequest`, `ResetRequest`,
     `AutonomyConfigRequest`, `LangConfigRequest`, `GodConfigRequest`, `StatusResponse`, …)
     plus `normalize_lang` and `SUPPORTED_LANGS = ("en", "pt-BR")`.
   - `config.py`: `config.toml` loader with `${ENV}` expansion, `[ui].language`, platform-aware home.
-  - `auth.py`: shared-token auth (`X-SimsSense-Token`), `runtime.json` writer, 0600 token file.
+  - `auth.py`: shared-token auth (`X-Sensewright-Token`), `runtime.json` writer, 0600 token file.
 - **Sidecar (Python 3.10+, FastAPI)**
   - `server.py` (`create_app` + lifespan) and `__main__.py` CLI.
   - Endpoints: `GET /v1/health`, `GET /v1/status`, `POST /v1/chat`, `/v1/hey`,
@@ -1042,10 +1064,10 @@ First end-to-end skeleton: sidecar boots by itself, mod handshake works, all UI 
   - `config.py` (install/sidecar discovery, `runtime.json` candidates), `http_client.py`
     (`urllib`, typed errors), `chat_ui.py` (notification → command → print fallback),
     `sim_context.py`, `events.py` (guarded `event_manager`/`sims4.alarms` scaffold),
-    `tool_executor.py` (8 tool stubs), `main.py` (cheats `ai.chat`, `ai.hey`, `ai.status`,
-    `ai.reset`, `ai.forget`, `ai.autonomy`, `ai.lang`, `ai.god`, `ai.start`, `ai.help`),
+    `tool_executor.py` (8 tool stubs), `main.py` (cheats `sw.chat`, `sw.hey`, `sw.status`,
+    `sw.reset`, `sw.forget`, `sw.autonomy`, `sw.lang`, `sw.god`, `sw.start`, `sw.help`),
     and sidecar autoboot (`CREATE_NO_WINDOW`).
-  - `mod/build.py`: compiles with Python 3.7 → `dist/SimsSense.ts4script`
+  - `mod/build.py`: compiles with Python 3.7 → `dist/Sensewright.ts4script`
     (`--python`, `PY37`, `py -3.7` detection; `--allow-any-python` for dev).
 - **Toolchain**
   - Root `Makefile` (`install`, `run`, `doctor`, `status`, `logs`, `build-mod`,
@@ -1063,7 +1085,7 @@ First end-to-end skeleton: sidecar boots by itself, mod handshake works, all UI 
 - `mod/build.py`: `py -3.7` was invoked as a single string (WinError 2); `compileall -v`
   is unsupported on 3.7. Now uses a command list, cleans stale bytecode, and omits `-v`.
 - `scripts/doctor.ps1`: PowerShell parse error (`$name:` drive reference) and wrong artifact path.
-- `scripts/dev.ps1`: reserved `$args` variable and wrong module entry point (`-m sims_sense_sidecar`).
+- `scripts/dev.ps1`: reserved `$args` variable and wrong module entry point (`-m sensewright_sidecar`).
 - `scripts/install-mod.ps1`: looked for the artifact under `mod/dist` instead of `dist`.
 - Sidecar `/v1/status` now returns a coherent provider list + chain health; `/v1/config/lang`
   no longer `await`s the synchronous `set_lang`.
@@ -1073,7 +1095,7 @@ First end-to-end skeleton: sidecar boots by itself, mod handshake works, all UI 
   (magic `42 0d 0d 0a`); sidecar runs on the existing Python 3.10.11.
 
 ### Known limitations
-- No packaged `SimsSense-sidecar.exe` yet (runs from source; PyInstaller is a later phase).
+- No packaged `Sensewright-sidecar.exe` yet (runs from source; PyInstaller is a later phase).
 - Tool execution and game events are guarded stubs; the `PLANO.md` §2.3 spike is not yet
   validated inside the live game.
 - With no API keys the agent runs in **native mode** (no LLM), by design.
@@ -1088,7 +1110,7 @@ First end-to-end skeleton: sidecar boots by itself, mod handshake works, all UI 
 | 1 — Skeleton | Toolchain, handshake, autoboot, i18n scaffold | ☑ Done (0.1.0) |
 | 2 — State & Directives | StateCollector, DirectiveExecutor v1, rails | ◐ Events/alarms now wired to the real API; in-game behavior pending |
 | 2b — Census & household events | `/v1/census`, neighborhoods/households schema, events | ◐ Census + schema done; `HouseholdChanged` validated, live detection pending |
-| 3 — Agents | Profiles, MemoryDB, ModelRouter + budgeter, chat | ◐ In-game `ai.chat` validated; provider chain live-tested (OpenRouter free + OpenCode Zen, pt-BR + tool calling); profile/memory visuals pending |
+| 3 — Agents | Profiles, MemoryDB, ModelRouter + budgeter, chat | ◐ In-game `sw.chat` validated; provider chain live-tested (OpenRouter free + OpenCode Zen, pt-BR + tool calling); profile/memory visuals pending |
 | 4 — Evolution | Reflection loop, personality drift, trait swaps | ◐ Reflection/drift/trait-swap proposal done; auto-apply pending |
 | 5a — Zeitgeist | Onboarding, 7 tags, suggest+rewrite, ControlSpec framework | ◐ Sidecar + mod wiring done; in-game dialog spike pending |
 | 5b — Backgrounds | Sim/household background writer, batch pipeline, thermometer | ◐ Generator + batch scheduler done; in-game validation pending |
@@ -1103,7 +1125,7 @@ First end-to-end skeleton: sidecar boots by itself, mod handshake works, all UI 
 ```powershell
 # Sidecar tests + lint
 cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q
-.\.venv\Scripts\python.exe -m ruff check sims_sense_sidecar tests
+.\.venv\Scripts\python.exe -m ruff check sensewright_sidecar tests
 
 # In-game mod tests + build (requires Python 3.7)
 python -m pytest mod\tests -q

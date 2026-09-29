@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sims_sense_sidecar.agent.evolution import (
+from sensewright_sidecar.agent.evolution import (
     REFLECTION_SHAPE,
     fallback_reflection,
     normalize_reflection,
@@ -12,7 +12,7 @@ from sims_sense_sidecar.agent.evolution import (
     reflect,
     should_reflect,
 )
-from sims_sense_sidecar.llm.base import LLMResponse
+from sensewright_sidecar.llm.base import LLMResponse
 
 
 class FakeRegistry:

@@ -15,8 +15,8 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from simssense_mod import events, http_client, sim_context, state_collector
-from simssense_mod.state_collector import StateCollector
+from sensewright_mod import events, http_client, sim_context, state_collector
+from sensewright_mod.state_collector import StateCollector
 
 
 # --- Fakes for the game path ---

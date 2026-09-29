@@ -14,7 +14,7 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from simssense_mod import debug_log, god_ui, http_client, i18n
+from sensewright_mod import debug_log, god_ui, http_client, i18n
 
 
 @pytest.fixture(autouse=True)
@@ -377,7 +377,7 @@ def test_zeitgeist_console_hint_is_localized(monkeypatch):
 
     assert result == "console"
     assert i18n.t("god.zeitgeist.title") in captured["msg"]
-    assert "ai.zeitgeist" in captured["msg"]
+    assert "sw.zeitgeist" in captured["msg"]
 
 
 def test_background_console_hint_is_localized(monkeypatch):

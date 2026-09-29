@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from sims_sense_sidecar.agent import graph
-from sims_sense_sidecar.agent.nodes import AgentNodes
-from sims_sense_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
-from sims_sense_sidecar.llm.base import LLMResponse, LLMToolCall
-from sims_sense_sidecar.memory.base import MemKey
-from sims_sense_sidecar.schemas import EventRecord, SimRef, ToolResultRequest
-from sims_sense_sidecar.tools.rails import DirectiveRails
+from sensewright_sidecar.agent import graph
+from sensewright_sidecar.agent.nodes import AgentNodes
+from sensewright_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
+from sensewright_sidecar.llm.base import LLMResponse, LLMToolCall
+from sensewright_sidecar.memory.base import MemKey
+from sensewright_sidecar.schemas import EventRecord, SimRef, ToolResultRequest
+from sensewright_sidecar.tools.rails import DirectiveRails
 
 
 class FakeMemory:

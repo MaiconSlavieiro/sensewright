@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from sims_sense_sidecar.config import MemoryConfig, Settings
-from sims_sense_sidecar.memory import build_memory_store
-from sims_sense_sidecar.memory.base import MemKey
-from sims_sense_sidecar.memory.decay import (
+from sensewright_sidecar.config import MemoryConfig, Settings
+from sensewright_sidecar.memory import build_memory_store
+from sensewright_sidecar.memory.base import MemKey
+from sensewright_sidecar.memory.decay import (
     DECAY_PRESETS,
     annotate,
     decay_lambda,

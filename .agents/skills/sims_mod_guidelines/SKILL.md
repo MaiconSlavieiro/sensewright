@@ -1,11 +1,11 @@
 ---
-name: SimsSense Mod Development Guidelines
-description: Architecture, constraints, patterns, and gotchas for agents working on the SimsSense Mod and its sidecar. Read this before writing any code.
+name: Sensewright Mod Development Guidelines
+description: Architecture, constraints, patterns, and gotchas for agents working on the Sensewright Mod and its sidecar. Read this before writing any code.
 ---
 
-# SimsSense Mod Development Guidelines
+# Sensewright Mod Development Guidelines
 
-When modifying or extending the SimsSense project, adhere to the following rules,
+When modifying or extending the Sensewright project, adhere to the following rules,
 patterns, and architecture constraints. **Read `PLANO.md` for the full design**;
 this skill covers the day-to-day coding rules.
 
@@ -17,17 +17,17 @@ this skill covers the day-to-day coding rules.
 
 ## 1. Two-Process Architecture
 
-SimsSense is split into two strictly isolated packages:
+Sensewright is split into two strictly isolated packages:
 
 | Layer | Package | Runtime | Deps allowed |
 |---|---|---|---|
-| **In-game mod** | `mod/simssense_mod/` | Python 3.7 (game sandbox) | **stdlib only** (no pip packages) |
-| **Sidecar** | `sidecar/sims_sense_sidecar/` | Python 3.12+ | Pydantic v2, FastAPI, httpx, SQLite (stdlib) |
+| **In-game mod** | `mod/sensewright_mod/` | Python 3.7 (game sandbox) | **stdlib only** (no pip packages) |
+| **Sidecar** | `sidecar/sensewright_sidecar/` | Python 3.12+ | Pydantic v2, FastAPI, httpx, SQLite (stdlib) |
 
 **The sidecar never imports game modules. The mod never imports third-party libs.**
 
 The mod communicates with the sidecar over HTTP (`127.0.0.1:8765`, `/v1/*` routes).
-The shared wire contract lives in `sidecar/sims_sense_sidecar/schemas.py` (Pydantic
+The shared wire contract lives in `sidecar/sensewright_sidecar/schemas.py` (Pydantic
 models) and is mirrored by plain dicts in the mod's `http_client.py`.
 
 ---
@@ -43,11 +43,11 @@ simulation loops.
   instead of raising exceptions.
 - **Log exceptions, don't swallow:** Never use bare `pass` in `except Exception:`
   blocks for non-trivial errors. Use `debug_log._debug_log()` or `_log_exception()`
-  to write to `simssense_output.log` so developers can debug without crashing the
-  game. Logging is gated behind `DEBUG_MODE` (`SIMS_SENSE_DEBUG` env var).
+  to write to `sensewright_output.log` so developers can debug without crashing the
+  game. Logging is gated behind `DEBUG_MODE` (`SENSEWRIGHT_DEBUG` env var).
 - **Validation logging:** use `validation_log()` for the **semantic** decisions
   (which intent/tool ran, seat sync, roster) — it prefixes `[validate]` and is
-  gated by `SIMS_SENSE_VALIDATION` (on by default). The sidecar mirrors this with
+  gated by `SENSEWRIGHT_VALIDATION` (on by default). The sidecar mirrors this with
   `logger.info` (pulse/intent/cognition/event summaries). Together with the
   uvicorn access log, an in-game session can be validated from the two logs.
 - **Services may not exist at import time:** The game loads script mods before
@@ -58,7 +58,7 @@ simulation loops.
 
 ## 3. Python Version Constraints
 
-- **Mod (`mod/simssense_mod/`):** Python 3.7 **only**. You **cannot** use:
+- **Mod (`mod/sensewright_mod/`):** Python 3.7 **only**. You **cannot** use:
   - Walrus operator (`:=`)
   - `match` statements
   - Modern union types (`int | str` — use `Union[int, str]`)
@@ -67,25 +67,25 @@ simulation loops.
     annotations cause the parser to fail silently)
   - Third-party libraries (no `pydantic`, `requests`, `dataclasses` beyond stdlib)
   - `asyncio` (the game is single-threaded with GIL)
-- **Sidecar (`sidecar/sims_sense_sidecar/`):** Python 3.12+. Modern features and
+- **Sidecar (`sidecar/sensewright_sidecar/`):** Python 3.12+. Modern features and
   external libraries are fine.
 
 ---
 
 ## 4. Module Map
 
-### In-game mod (`simssense_mod/`)
+### In-game mod (`sensewright_mod/`)
 
 ```
-simssense_mod/
+sensewright_mod/
 ├── __init__.py          # registers cheat commands at import
 ├── config.py            # sidecar URL + timeouts; reads port/token/lang
-├── debug_log.py         # gated best-effort logging to simssense_output.log
+├── debug_log.py         # gated best-effort logging to sensewright_output.log
 ├── i18n.py              # locale loader + t(key, **args) + game-language detection
 ├── locales/
 │   ├── en.json          # default locale (source of truth)
 │   └── pt-BR.json       # Brazilian Portuguese translation
-├── main.py              # @sims4.commands.Command bindings (ai.chat, ai.help, etc.)
+├── main.py              # @sims4.commands.Command bindings (sw.chat, sw.help, etc.)
 ├── sim_context.py       # collects Sim state → primitive-only dicts
 ├── state_collector.py   # zone pulse, census, event ingestion, directive pull, sleep
 ├── events.py            # event subscriptions + alarm management (deferred flush)
@@ -93,19 +93,19 @@ simssense_mod/
 ├── tool_executor.py     # dispatches tool_calls → game functions → POST result
 ├── rails.py             # mod-side rate limit + player-priority lock + never-tools
 ├── chat_ui.py           # notification → dialog → console fallback for chat
-├── hud.py               # ai.hud debug HUD: periodic in-game status line
+├── hud.py               # sw.hud debug HUD: periodic in-game status line
 ├── god_ui.py            # zeitgeist onboarding / household background dialogs
-└── probe.py             # ai.probe: live autonomy dump (dev, R1/F1)
+└── probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
 ```
 
-### Sidecar (`sims_sense_sidecar/`)
+### Sidecar (`sensewright_sidecar/`)
 
 ```
-sims_sense_sidecar/
+sensewright_sidecar/
 ├── server.py            # FastAPI app + lifespan
 ├── config.py            # Pydantic Settings, config.toml loader
 ├── schemas.py           # Pydantic v2 wire models (THE contract with the mod)
-├── auth.py              # shared-token auth (X-SimsSense-Token)
+├── auth.py              # shared-token auth (X-Sensewright-Token)
 ├── lifecycle.py         # game-process watchdog: exits with The Sims 4
 ├── locales.py           # sidecar-side i18n for system messages
 ├── routers/             # FastAPI route modules
@@ -350,9 +350,9 @@ These bugs were found during in-game validation and are critical to avoid:
 
 ## 13. Build and Deploy
 
-- **Mod build:** `python mod/build.py` compiles with Python 3.7 → `dist/SimsSense.ts4script`.
+- **Mod build:** `python mod/build.py` compiles with Python 3.7 → `dist/Sensewright.ts4script`.
   The bytecode magic must be `42 0d 0d 0a` (3.7). Use `--allow-any-python` for dev.
-- **Sidecar:** Currently runs from source (`python -m sims_sense_sidecar`).
+- **Sidecar:** Currently runs from source (`python -m sensewright_sidecar`).
   PyInstaller packaging is planned for Phase 6.
 - **Install:** `scripts/install-mod.ps1` copies the `.ts4script` + sidecar to the
   game's Mods folder.
@@ -371,7 +371,7 @@ These bugs were found during in-game validation and are critical to avoid:
 > verified** (`agent/seats.py`, `agent/intents.py`, `agent/cognition.py`,
 > `agent/social.py`, `agent/context_forge.py`, `graph.py`,
 > `routers/autonomy.py`, `config.py`, plus the mod's `execute_intent` +
-> `ai.agents`). Only R1 (lever spike) still needs live runtime validation; the
+> `sw.agents`). Only R1 (lever spike) still needs live runtime validation; the
 > rest of this section is the design context.
 
 The mod is transitioning from **command-centric** (LLM emits tool calls that puppet

@@ -9,23 +9,23 @@ import sys
 mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
-from simssense_mod import config  # noqa: E402
+from sensewright_mod import config  # noqa: E402
 
 
 def test_sidecar_launch_prefers_packaged_exe(monkeypatch):
-    exe = r"C:\mods\SimsSense\sidecar\SimsSense-sidecar.exe"
+    exe = r"C:\mods\Sensewright\sidecar\Sensewright-sidecar.exe"
     monkeypatch.setattr(config, "sidecar_exe", lambda: exe)
     monkeypatch.setattr(config, "_safe_exists", lambda path: path == exe)
-    monkeypatch.setattr(config, "sidecar_dir", lambda: r"C:\mods\SimsSense\sidecar")
+    monkeypatch.setattr(config, "sidecar_dir", lambda: r"C:\mods\Sensewright\sidecar")
 
     command, cwd = config.sidecar_launch()
 
     assert command == [exe]
-    assert cwd == r"C:\mods\SimsSense\sidecar"
+    assert cwd == r"C:\mods\Sensewright\sidecar"
 
 
 def test_sidecar_launch_falls_back_to_source(monkeypatch):
-    monkeypatch.setattr(config, "sidecar_exe", lambda: r"C:\x\SimsSense-sidecar.exe")
+    monkeypatch.setattr(config, "sidecar_exe", lambda: r"C:\x\Sensewright-sidecar.exe")
     monkeypatch.setattr(config, "_safe_exists", lambda path: False)
     monkeypatch.setattr(config, "_safe_isdir", lambda path: True)
     monkeypatch.setattr(config, "sidecar_dir", lambda: r"C:\x\sidecar")
@@ -33,7 +33,7 @@ def test_sidecar_launch_falls_back_to_source(monkeypatch):
 
     command, cwd = config.sidecar_launch()
 
-    assert command == [r"C:\py\python.exe", "-m", "sims_sense_sidecar"]
+    assert command == [r"C:\py\python.exe", "-m", "sensewright_sidecar"]
     assert cwd == r"C:\x\sidecar"
 
 
@@ -49,13 +49,13 @@ def test_sidecar_launch_empty_without_python(monkeypatch):
 def test_find_python_env_override_wins(monkeypatch, tmp_path):
     interpreter = tmp_path / "python.exe"
     interpreter.write_text("", encoding="utf-8")
-    monkeypatch.setenv("SIMS_SENSE_PYTHON", str(interpreter))
+    monkeypatch.setenv("SENSEWRIGHT_PYTHON", str(interpreter))
 
     assert config.find_python() == str(interpreter)
 
 
 def test_find_python_prefers_sidecar_venv(monkeypatch, tmp_path):
-    monkeypatch.delenv("SIMS_SENSE_PYTHON", raising=False)
+    monkeypatch.delenv("SENSEWRIGHT_PYTHON", raising=False)
     sidecar = tmp_path / "sidecar"
     venv_python = sidecar / ".venv" / "Scripts" / "python.exe"
     venv_python.parent.mkdir(parents=True)
@@ -98,7 +98,7 @@ def test_read_interpreter_hint_ignores_stale_path(monkeypatch, tmp_path):
 
 
 def test_find_python_uses_interpreter_hint_without_venv(monkeypatch, tmp_path):
-    monkeypatch.delenv("SIMS_SENSE_PYTHON", raising=False)
+    monkeypatch.delenv("SENSEWRIGHT_PYTHON", raising=False)
     interpreter = tmp_path / "python.exe"
     interpreter.write_text("", encoding="utf-8")
     sidecar = tmp_path / "sidecar"
@@ -114,13 +114,13 @@ def test_write_autonomy_level_creates_agents_section(monkeypatch, tmp_path):
 
     assert config.write_autonomy_level("semi") is True
 
-    content = (tmp_path / "simssense.toml").read_text(encoding="utf-8")
+    content = (tmp_path / "sensewright.toml").read_text(encoding="utf-8")
     assert "[agents]" in content
     assert 'autonomy = "semi"' in content
 
 
 def test_write_autonomy_level_updates_existing_preserving_other_keys(monkeypatch, tmp_path):
-    toml_path = tmp_path / "simssense.toml"
+    toml_path = tmp_path / "sensewright.toml"
     toml_path.write_text(
         '[ui]\nlanguage = "pt-BR"\n\n[agents]\nautonomy = "off"\n',
         encoding="utf-8",
@@ -136,7 +136,7 @@ def test_write_autonomy_level_updates_existing_preserving_other_keys(monkeypatch
 
 
 def test_write_autonomy_level_does_not_clobber_autonomy_default(monkeypatch, tmp_path):
-    toml_path = tmp_path / "simssense.toml"
+    toml_path = tmp_path / "sensewright.toml"
     toml_path.write_text(
         '[agents]\nautonomy_default = "semi"\n',
         encoding="utf-8",

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from sims_sense_sidecar.config import AgentsConfig, LLMConfig, ProviderConfig, Settings
-from sims_sense_sidecar.god.controls import (
+from sensewright_sidecar.config import AgentsConfig, LLMConfig, ProviderConfig, Settings
+from sensewright_sidecar.god.controls import (
     apply_values_to_agents_config,
     get_control,
     values_from_settings,
 )
-from sims_sense_sidecar.llm.base import normalize_reasoning_effort
+from sensewright_sidecar.llm.base import normalize_reasoning_effort
 
 
 def test_normalize_reasoning_effort():

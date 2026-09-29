@@ -6,9 +6,9 @@ import random
 
 import pytest
 
-from sims_sense_sidecar.config import GodConfig
-from sims_sense_sidecar.god.orchestrator import GodOrchestrator
-from sims_sense_sidecar.god.world_model import SimProfile, WorldState, aggregates
+from sensewright_sidecar.config import GodConfig
+from sensewright_sidecar.god.orchestrator import GodOrchestrator
+from sensewright_sidecar.god.world_model import SimProfile, WorldState, aggregates
 
 
 class FakeClock:

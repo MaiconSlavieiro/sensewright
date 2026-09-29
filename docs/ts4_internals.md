@@ -94,7 +94,7 @@ The whole §15.7 module map imports successfully except
 - Owner resolution: `services.client_manager().get_first_client()` →
   `client.active_sim` / `active_sim_info`; prefer a **Sim instance** when the
   SimInfo has `get_sim_instance()`.
-- Implemented in `mod/simssense_mod/chat_ui.py` (`show_notification`) and used by
+- Implemented in `mod/sensewright_mod/chat_ui.py` (`show_notification`) and used by
   the debug HUD (`hud.py`).
 
 ## Status

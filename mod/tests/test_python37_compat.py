@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-_PKG_DIR = os.path.join(os.path.dirname(__file__), "..", "simssense_mod")
+_PKG_DIR = os.path.join(os.path.dirname(__file__), "..", "sensewright_mod")
 _FORBIDDEN = "from __future__ import annotations"
 
 

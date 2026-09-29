@@ -9,8 +9,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from sims_sense_sidecar.auth import ensure_token
-from sims_sense_sidecar.config import (
+from sensewright_sidecar.auth import ensure_token
+from sensewright_sidecar.config import (
     AgentsConfig,
     GodConfig,
     LLMConfig,
@@ -20,13 +20,13 @@ from sims_sense_sidecar.config import (
     Settings,
     UiConfig,
 )
-from sims_sense_sidecar.server import create_app
+from sensewright_sidecar.server import create_app
 
 
 @pytest.fixture
 def tmp_home(tmp_path: Path) -> Path:
     """Temporary home directory for tests."""
-    home = tmp_path / "sims_sense_home"
+    home = tmp_path / "sensewright_home"
     home.mkdir(parents=True, exist_ok=True)
     (home / "data").mkdir(exist_ok=True)
     return home
@@ -72,4 +72,4 @@ async def client(app) -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 def auth_headers(token: str) -> dict[str, str]:
     """Authorization headers with valid token."""
-    return {"X-SimsSense-Token": token}
+    return {"X-Sensewright-Token": token}

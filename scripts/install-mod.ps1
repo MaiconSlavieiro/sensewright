@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    SimsSense mod installer - copies the built .ts4script and sidecar to Mods.
+    Sensewright mod installer - copies the built .ts4script and sidecar to Mods.
 
 .DESCRIPTION
     Copies the built mod package and the sidecar folder to:
-    Documents\Electronic Arts\The Sims 4\Mods\SimsSense
+    Documents\Electronic Arts\The Sims 4\Mods\Sensewright
 
     Note: until the PyInstaller packaging phase, the sidecar is shipped as
     Python source. This script records the interpreter that has the sidecar
@@ -16,14 +16,14 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
-Write-Host "=== SimsSense Mod Installer ===" -ForegroundColor Cyan
+Write-Host "=== Sensewright Mod Installer ===" -ForegroundColor Cyan
 
-$modDist = Join-Path $repoRoot "dist\SimsSense.ts4script"
+$modDist = Join-Path $repoRoot "dist\Sensewright.ts4script"
 $sidecarSrc = Join-Path $repoRoot "sidecar"
 $configExample = Join-Path $repoRoot "config.example.toml"
 
 $docsPath = [Environment]::GetFolderPath("MyDocuments")
-$modsDest = Join-Path $docsPath "Electronic Arts\The Sims 4\Mods\SimsSense"
+$modsDest = Join-Path $docsPath "Electronic Arts\The Sims 4\Mods\Sensewright"
 $sidecarDest = Join-Path $modsDest "sidecar"
 
 if (-not (Test-Path $modDist)) {
@@ -43,7 +43,7 @@ if (-not (Test-Path $modsDest)) {
 # Copy .ts4script
 Write-Host "Copying mod package..." -ForegroundColor Cyan
 Copy-Item -Path $modDist -Destination $modsDest -Force
-Write-Host "  Copied: SimsSense.ts4script" -ForegroundColor Green
+Write-Host "  Copied: Sensewright.ts4script" -ForegroundColor Green
 
 # Copy sidecar source (excluding venvs, caches, tests, locks)
 Write-Host "Copying sidecar..." -ForegroundColor Cyan
@@ -96,15 +96,15 @@ if ($interpreter) {
     [System.IO.File]::WriteAllText($hintFile, $interpreter, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "  Autoboot interpreter: $interpreter" -ForegroundColor Green
 } else {
-    Write-Host "  [WARN] No interpreter found; start the sidecar manually (ai.start)" -ForegroundColor Yellow
+    Write-Host "  [WARN] No interpreter found; start the sidecar manually (sw.start)" -ForegroundColor Yellow
 }
 
 # Verify critical files
 Write-Host "Verifying critical files..." -ForegroundColor Cyan
 $criticalFiles = @(
-    (Join-Path $modsDest "SimsSense.ts4script"),
-    (Join-Path $sidecarDest "sims_sense_sidecar\__main__.py"),
-    (Join-Path $sidecarDest "sims_sense_sidecar\server.py"),
+    (Join-Path $modsDest "Sensewright.ts4script"),
+    (Join-Path $sidecarDest "sensewright_sidecar\__main__.py"),
+    (Join-Path $sidecarDest "sensewright_sidecar\server.py"),
     $destConfig
 )
 foreach ($file in $criticalFiles) {
@@ -122,6 +122,6 @@ Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Enable 'Script Mods Allowed' in Game Options > Other"
 Write-Host "  2. Restart The Sims 4"
-Write-Host "  3. Open the cheat console (Ctrl+Shift+C) and type: ai.help"
+Write-Host "  3. Open the cheat console (Ctrl+Shift+C) and type: sw.help"
 Write-Host ""
 Write-Host "Note: if Documents is inside OneDrive, script mods may not load." -ForegroundColor Yellow

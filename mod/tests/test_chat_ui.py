@@ -9,7 +9,7 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from simssense_mod import chat_ui, i18n
+from sensewright_mod import chat_ui, i18n
 
 
 @pytest.fixture(autouse=True)

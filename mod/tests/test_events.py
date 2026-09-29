@@ -20,7 +20,7 @@ sys.path.insert(0, mod_dir)
 
 import pytest  # noqa: E402
 
-from simssense_mod import events  # noqa: E402
+from sensewright_mod import events  # noqa: E402
 
 
 def _fake_test_events():
@@ -249,7 +249,7 @@ def test_resolve_alarm_owner_returns_none_without_live_instance(monkeypatch):
 
 def test_shared_safe_helpers_are_the_debug_log_ones():
     """H5: events uses the shared, logging helpers (no local duplicates)."""
-    from simssense_mod import debug_log
+    from sensewright_mod import debug_log
 
     assert events._safe_getattr is debug_log.safe_getattr
     assert events._safe_call is debug_log.safe_call

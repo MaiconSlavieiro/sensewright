@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from simssense_mod import god_ui, http_client, tool_executor
+from sensewright_mod import god_ui, http_client, tool_executor
 
 
 @pytest.fixture(autouse=True)

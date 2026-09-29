@@ -5,13 +5,13 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from sims_sense_sidecar.agent.intents import (
+from sensewright_sidecar.agent.intents import (
     IntentBus,
     intent_from_directive,
     normalize_intent,
 )
-from sims_sense_sidecar.agent.seats import SeatManager
-from sims_sense_sidecar.schemas import IntentResponse, RosterResponse
+from sensewright_sidecar.agent.seats import SeatManager
+from sensewright_sidecar.schemas import IntentResponse, RosterResponse
 
 # ─── SeatManager ──────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ def test_intent_bus_store_pull_filter_and_clear():
 def configured_graph(settings):
     import asyncio
 
-    from sims_sense_sidecar.agent import graph
+    from sensewright_sidecar.agent import graph
 
     graph.configure(settings)
     yield settings

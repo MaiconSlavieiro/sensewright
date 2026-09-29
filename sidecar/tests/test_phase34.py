@@ -8,16 +8,16 @@ from pathlib import Path
 import httpx
 import pytest
 
-from sims_sense_sidecar.agent import graph
-from sims_sense_sidecar.config import (
+from sensewright_sidecar.agent import graph
+from sensewright_sidecar.config import (
     AgentsConfig,
     EvolutionConfig,
     LLMConfig,
     MemoryConfig,
     Settings,
 )
-from sims_sense_sidecar.llm.budgeter import ChatBudgeter
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.llm.budgeter import ChatBudgeter
+from sensewright_sidecar.schemas import (
     EventIngestRequest,
     EventRecord,
     EvolveRequest,
@@ -109,7 +109,7 @@ async def test_chat_budget_blocks_when_exhausted(agent_settings, monkeypatch):
     graph._chat_budget = ChatBudgeter(per_sim_per_day=1)
     monkeypatch.setattr(graph, "_effective_registry", lambda: object())
 
-    from sims_sense_sidecar.schemas import ChatRequest
+    from sensewright_sidecar.schemas import ChatRequest
 
     first = await graph.handle_chat(ChatRequest(sim=SIM, message="hello", lang="en"))
     second = await graph.handle_chat(ChatRequest(sim=SIM, message="again", lang="en"))

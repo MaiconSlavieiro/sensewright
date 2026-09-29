@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from sims_sense_sidecar.agent import graph
-from sims_sense_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
-from sims_sense_sidecar.schemas import ChatRequest, HeyRequest, SimRef
+from sensewright_sidecar.agent import graph
+from sensewright_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
+from sensewright_sidecar.schemas import ChatRequest, HeyRequest, SimRef
 
 
 def make_test_settings_no_llm(tmp_path: Path) -> Settings:
@@ -193,7 +193,7 @@ async def test_handle_tool_result(temp_settings):
     """Test handle_tool_result returns ok."""
     graph.configure(temp_settings)
 
-    from sims_sense_sidecar.schemas import ToolResultRequest
+    from sensewright_sidecar.schemas import ToolResultRequest
     req = ToolResultRequest(tool_call_id="test-123", ok=True, result={"success": True})
 
     result = await graph.handle_tool_result(req)

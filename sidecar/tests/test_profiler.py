@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from sims_sense_sidecar.agent.profiler import (
+from sensewright_sidecar.agent.profiler import (
     PROFILE_SHAPE,
     fallback_profile,
     generate_profile,
     normalize_profile,
 )
-from sims_sense_sidecar.llm.base import LLMResponse
+from sensewright_sidecar.llm.base import LLMResponse
 
 NATIVE = {
     "full_name": "Bella Goth",

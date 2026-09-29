@@ -15,7 +15,7 @@ mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
 import pytest
-from simssense_mod import tool_executor as ex
+from sensewright_mod import tool_executor as ex
 
 
 def _fake_module(name, **attrs):
@@ -616,7 +616,7 @@ def test_build_interaction_context_one_arg_fallback(monkeypatch):
     monkeypatch.setitem(sys.modules, "interactions.context",
                         _fake_module("interactions.context",
                                      InteractionContext=InteractionContext))
-    monkeypatch.setattr(ex, "_PRIORITY_MODULES", ("simssense_nope.priority",))
+    monkeypatch.setattr(ex, "_PRIORITY_MODULES", ("sensewright_nope.priority",))
 
     sim = object()
     result = ex._build_interaction_context(sim)
@@ -654,7 +654,7 @@ def test_build_interaction_context_uses_interaction_priority_module(monkeypatch)
 
 def test_build_interaction_context_returns_none_without_module(monkeypatch):
     monkeypatch.setattr(ex, "_INTERACTION_CONTEXT_MODULES",
-                        ("simssense_nope.interactions.context",))
+                        ("sensewright_nope.interactions.context",))
 
     assert ex._build_interaction_context(object()) is None
 

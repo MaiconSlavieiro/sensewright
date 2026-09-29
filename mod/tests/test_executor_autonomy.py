@@ -14,8 +14,8 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from simssense_mod import state_collector
-from simssense_mod import tool_executor as ex
+from sensewright_mod import state_collector
+from sensewright_mod import tool_executor as ex
 
 
 @pytest.fixture(autouse=True)

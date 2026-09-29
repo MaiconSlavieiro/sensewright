@@ -13,7 +13,7 @@ mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
 import pytest
-from simssense_mod.rails import (
+from sensewright_mod.rails import (
     NEVER_TOOLS,
     DirectiveRails,
     RailDecision,

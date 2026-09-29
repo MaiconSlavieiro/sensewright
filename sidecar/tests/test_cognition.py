@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from sims_sense_sidecar.agent.cognition import (
+from sensewright_sidecar.agent.cognition import (
     CognitionLayer,
     make_daily_plan,
     render_plan,
     template_plan,
 )
-from sims_sense_sidecar.config import AgentsConfig, LayersConfig, Settings
+from sensewright_sidecar.config import AgentsConfig, LayersConfig, Settings
 
 
 class FakeResponse:
@@ -81,7 +81,7 @@ def test_render_plan_empty_without_plan():
 
 
 def test_impulse_prompt_includes_daily_plan():
-    from sims_sense_sidecar.agent.initiative import _describe_profile
+    from sensewright_sidecar.agent.initiative import _describe_profile
 
     text = _describe_profile(
         {"daily_plan": {"day_focus": "Write the book", "goals": ["Write"]}}

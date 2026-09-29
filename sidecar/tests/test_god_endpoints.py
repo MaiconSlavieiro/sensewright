@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.schemas import (
     AckResponse,
     BackgroundResponse,
     CensusResponse,

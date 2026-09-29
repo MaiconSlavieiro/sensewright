@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from sims_sense_sidecar.agent import graph
-from sims_sense_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.agent import graph
+from sensewright_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
+from sensewright_sidecar.schemas import (
     AutonomySimState,
     AutonomyTickRequest,
     CensusHousehold,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sims_sense_sidecar.god.backgrounder import (
+from sensewright_sidecar.god.backgrounder import (
     BACKGROUND_SHAPE,
     fallback_household_background,
     fallback_sim_background,
@@ -12,7 +12,7 @@ from sims_sense_sidecar.god.backgrounder import (
     generate_sim_background,
     is_stale,
 )
-from sims_sense_sidecar.llm.base import LLMResponse
+from sensewright_sidecar.llm.base import LLMResponse
 
 SIM = {
     "sim_id": 1,

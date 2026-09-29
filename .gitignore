@@ -15,7 +15,7 @@ dist/
 *.exe
 *.spec
 
-# SimsSense runtime / secrets
+# Sensewright runtime / secrets
 sidecar/config.toml
 sidecar/data/
 **/sidecar.log

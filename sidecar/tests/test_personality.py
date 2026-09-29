@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from sims_sense_sidecar.agent.personality import (
+from sensewright_sidecar.agent.personality import (
     absorb,
     absorb_events,
     decay_psyche,
@@ -16,8 +16,8 @@ from sims_sense_sidecar.agent.personality import (
     salience,
     should_absorb,
 )
-from sims_sense_sidecar.config import PersonalityConfig
-from sims_sense_sidecar.llm.base import LLMResponse
+from sensewright_sidecar.config import PersonalityConfig
+from sensewright_sidecar.llm.base import LLMResponse
 
 NOW = 10_000_000_000.0
 DAY = 86400.0

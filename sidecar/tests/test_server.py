@@ -1,4 +1,4 @@
-"""Tests for the SimsSense sidecar HTTP server."""
+"""Tests for the Sensewright sidecar HTTP server."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from sims_sense_sidecar.auth import ensure_token
-from sims_sense_sidecar.config import (
+from sensewright_sidecar.auth import ensure_token
+from sensewright_sidecar.config import (
     AgentsConfig,
     GodConfig,
     LLMConfig,
@@ -17,14 +17,14 @@ from sims_sense_sidecar.config import (
     Settings,
     UiConfig,
 )
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.schemas import (
     AckResponse,
     ChatResponse,
     HealthResponse,
     StatusResponse,
     normalize_lang,
 )
-from sims_sense_sidecar.server import create_app
+from sensewright_sidecar.server import create_app
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ async def test_client(test_app) -> httpx.AsyncClient:
 
 @pytest.fixture
 def auth_headers(test_token: str) -> dict[str, str]:
-    return {"X-SimsSense-Token": test_token}
+    return {"X-Sensewright-Token": test_token}
 
 
 class TestHealthEndpoint:
@@ -306,7 +306,7 @@ class TestNormalizeLang:
 def test_port_in_use_detects_a_bound_socket():
     import socket
 
-    from sims_sense_sidecar.__main__ import _port_in_use
+    from sensewright_sidecar.__main__ import _port_in_use
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
@@ -317,7 +317,7 @@ def test_port_in_use_detects_a_bound_socket():
 def test_port_in_use_false_for_free_port():
     import socket
 
-    from sims_sense_sidecar.__main__ import _port_in_use
+    from sensewright_sidecar.__main__ import _port_in_use
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))

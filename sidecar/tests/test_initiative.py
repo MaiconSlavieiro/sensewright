@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from sims_sense_sidecar.agent.agency import ImpulseJob
-from sims_sense_sidecar.agent.initiative import (
+from sensewright_sidecar.agent.agency import ImpulseJob
+from sensewright_sidecar.agent.initiative import (
     _clean_thought,
     build_impulse,
     build_impulse_prompt,

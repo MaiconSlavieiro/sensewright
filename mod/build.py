@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for SimsSense .ts4script package.
+Build script for Sensewright .ts4script package.
 Compiles Python 3.7 bytecode and creates the zip archive.
 Must be run with Python 3.7 (or --allow-any-python).
 """
@@ -99,10 +99,10 @@ def create_ts4script(package_dir: Path, output_path: Path, verbose: bool = False
     """
     Create the .ts4script zip file containing the package with .pyc files.
     The archive structure should be:
-    simssense_mod/
-    simssense_mod/__init__.pyc
-    simssense_mod/*.pyc
-    simssense_mod/locales/*.json
+    sensewright_mod/
+    sensewright_mod/__init__.pyc
+    sensewright_mod/*.pyc
+    sensewright_mod/locales/*.json
     """
     try:
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -156,8 +156,8 @@ def clean_build(package_dir: Path) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build SimsSense .ts4script package")
-    parser.add_argument("--out", default="dist/SimsSense.ts4script", help="Output path for .ts4script")
+    parser = argparse.ArgumentParser(description="Build Sensewright .ts4script package")
+    parser.add_argument("--out", default="dist/Sensewright.ts4script", help="Output path for .ts4script")
     parser.add_argument("--python", help="Path to Python 3.7 interpreter")
     parser.add_argument("--allow-any-python", action="store_true", help="Allow any Python version (not recommended)")
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts before building")
@@ -167,7 +167,7 @@ def main():
     # Paths
     repo_root = Path(__file__).parent.parent
     mod_dir = repo_root / "mod"
-    package_dir = mod_dir / "simssense_mod"
+    package_dir = mod_dir / "sensewright_mod"
     output_path = Path(args.out)
 
     if not package_dir.exists():

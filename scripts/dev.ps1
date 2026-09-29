@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    SimsSense development script - starts the sidecar in the foreground.
+    Sensewright development script - starts the sidecar in the foreground.
 
 .DESCRIPTION
     Runs the sidecar FastAPI server using the sidecar's virtual environment.
@@ -10,7 +10,7 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "Starting SimsSense sidecar (development mode)..." -ForegroundColor Cyan
+Write-Host "Starting Sensewright sidecar (development mode)..." -ForegroundColor Cyan
 
 $sidecarDir = Join-Path $PSScriptRoot "..\sidecar"
 $venvPython = Join-Path $sidecarDir ".venv\Scripts\python.exe"
@@ -22,7 +22,7 @@ if (-not (Test-Path $venvPython)) {
 
 Set-Location $sidecarDir
 
-$sidecarArgs = @("-m", "sims_sense_sidecar")
+$sidecarArgs = @("-m", "sensewright_sidecar")
 
 Write-Host "Running: $venvPython $($sidecarArgs -join ' ')" -ForegroundColor Gray
 & $venvPython @sidecarArgs

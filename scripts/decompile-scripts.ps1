@@ -138,7 +138,7 @@ $gameplayZips = @(
 # ── 2. Stage the bytecode ────────────────────────────────────────────────
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $OutDir) { $OutDir = Join-Path $repoRoot "research\ts4" }
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("simssense-ts4-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
+$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("sensewright-ts4-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 Write-Step "Staging bytecode in $staging"
@@ -173,7 +173,7 @@ if (-not $magicCounts.ContainsKey("42 0D 0D 0A")) {
 
 if ($VerifyOnly) {
     Write-Step "Verify-only complete. Staging kept at: $staging"
-    Write-Host "Set SIMS_SENSE_TS4_STUBS=$staging to reuse it." -ForegroundColor DarkGray
+    Write-Host "Set SENSEWRIGHT_TS4_STUBS=$staging to reuse it." -ForegroundColor DarkGray
     exit 0
 }
 
@@ -184,7 +184,7 @@ if (-not $Unpyc37Script) {
     Write-Host "  Get unpyc37 (S4S starter project's decompile_all.py, or" -ForegroundColor Yellow
     Write-Host "  https://github.com/andrews4s/unpyc37), then re-run with:" -ForegroundColor Yellow
     Write-Host "    -Unpyc37Script tools/unpyc37/unpyc37.py -Unpyc37Args '{input}'" -ForegroundColor Yellow
-    Write-Host "  Staging: $staging (set SIMS_SENSE_TS4_STUBS to reuse)." -ForegroundColor DarkGray
+    Write-Host "  Staging: $staging (set SENSEWRIGHT_TS4_STUBS to reuse)." -ForegroundColor DarkGray
     exit 2
 }
 if (-not (Test-Path -LiteralPath $Unpyc37Script)) {

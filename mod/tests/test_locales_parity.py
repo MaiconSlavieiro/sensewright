@@ -16,15 +16,15 @@ import pytest
 
 def load_locale(locale: str) -> dict:
     """Load a locale file directly."""
-    locale_path = os.path.join(mod_dir, "simssense_mod", "locales", "{}.json".format(locale))
+    locale_path = os.path.join(mod_dir, "sensewright_mod", "locales", "{}.json".format(locale))
     with open(locale_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def test_both_locales_exist():
     """Test that both locale files exist."""
-    en_path = os.path.join(mod_dir, "simssense_mod", "locales", "en.json")
-    ptbr_path = os.path.join(mod_dir, "simssense_mod", "locales", "pt-BR.json")
+    en_path = os.path.join(mod_dir, "sensewright_mod", "locales", "en.json")
+    ptbr_path = os.path.join(mod_dir, "sensewright_mod", "locales", "pt-BR.json")
 
     assert os.path.exists(en_path), "en.json not found"
     assert os.path.exists(ptbr_path), "pt-BR.json not found"

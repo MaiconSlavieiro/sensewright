@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sims_sense_sidecar.agent.social import (
+from sensewright_sidecar.agent.social import (
     DEFAULT_MAX_PAIRS,
     DEFAULT_PAIR_COOLDOWN_SECONDS,
     DIALOGUE_MAX_LINES,
@@ -12,7 +12,7 @@ from sims_sense_sidecar.agent.social import (
     render_dialogue,
     template_dialogue,
 )
-from sims_sense_sidecar.config import AgentsConfig, LayersConfig, Settings
+from sensewright_sidecar.config import AgentsConfig, LayersConfig, Settings
 
 
 class FakeResponse:

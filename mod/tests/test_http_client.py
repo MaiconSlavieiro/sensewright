@@ -15,8 +15,8 @@ mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
 import pytest
-from simssense_mod import http_client
-from simssense_mod.http_client import SidecarUnreachable, SidecarError
+from sensewright_mod import http_client
+from sensewright_mod.http_client import SidecarUnreachable, SidecarError
 
 
 class MockResponse:
@@ -102,7 +102,7 @@ def test_sidecar_error_on_http_error():
 def test_sidecar_error_401_clears_cache():
     """Test that 401 errors clear the runtime cache."""
     # Patch the function where it's used in http_client module
-    with patch("simssense_mod.http_client.clear_runtime_cache") as mock_clear:
+    with patch("sensewright_mod.http_client.clear_runtime_cache") as mock_clear:
         class MockHTTPError(urllib.error.HTTPError):
             def __init__(self, code, msg):
                 self.code = code
@@ -124,7 +124,7 @@ def test_chat_endpoint():
 
     with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
         with patch.object(http_client, "get_base_url", return_value="http://127.0.0.1:8765"):
-            with patch.object(http_client, "get_auth_header", return_value={"X-SimsSense-Token": "test"}):
+            with patch.object(http_client, "get_auth_header", return_value={"X-Sensewright-Token": "test"}):
                 result = http_client.chat(
                     sim={"player_id": "local", "save_id": "save1", "sim_id": 123},
                     message="Hello",
@@ -195,7 +195,7 @@ def test_health_endpoint_no_auth():
         assert result == {"ok": True, "version": "0.1.0"}
         call_args = mock_urlopen.call_args[0][0]
         # Health should not have auth header
-        assert "X-SimsSense-Token" not in call_args.headers
+        assert "X-Sensewright-Token" not in call_args.headers
 
 
 def test_health_omits_auth_but_other_calls_send_it():
@@ -204,16 +204,16 @@ def test_health_omits_auth_but_other_calls_send_it():
 
     with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
         with patch.object(http_client, "get_auth_header",
-                          return_value={"X-SimsSense-Token": "test-token"}):
+                          return_value={"X-Sensewright-Token": "test-token"}):
             http_client.health()
             health_request = mock_urlopen.call_args[0][0]
             health_headers = {k.lower(): v for k, v in health_request.headers.items()}
-            assert "x-simssense-token" not in health_headers
+            assert "x-sensewright-token" not in health_headers
 
             http_client.get_json("/v1/status")
             status_request = mock_urlopen.call_args[0][0]
             status_headers = {k.lower(): v for k, v in status_request.headers.items()}
-            assert status_headers.get("x-simssense-token") == "test-token"
+            assert status_headers.get("x-sensewright-token") == "test-token"
 
 
 def test_serialization_failure_raises_unreachable(monkeypatch):

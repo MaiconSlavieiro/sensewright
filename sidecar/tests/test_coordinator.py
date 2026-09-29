@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sims_sense_sidecar.agent.coordinator import (
+from sensewright_sidecar.agent.coordinator import (
     REASON_AGENT_OWNS_PLAYED,
     REASON_GOD_NEVER_CONTROLS_PLAYED,
     Coordinator,

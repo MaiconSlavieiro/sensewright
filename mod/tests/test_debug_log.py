@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from simssense_mod import debug_log
+from sensewright_mod import debug_log
 
 
 def test_validation_log_prefixes_when_enabled(monkeypatch):
@@ -32,6 +32,6 @@ def test_debug_log_rotates_instead_of_stopping(monkeypatch, tmp_path):
     for index in range(60):
         debug_log.debug_log("line {:02d} padding padding padding".format(index))
 
-    data = (tmp_path / "simssense_output.log").read_text(encoding="utf-8")
+    data = (tmp_path / "sensewright_output.log").read_text(encoding="utf-8")
     assert "line 59" in data  # the tail survives
     assert "... [log truncated] ..." in data

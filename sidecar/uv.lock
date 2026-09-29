@@ -496,7 +496,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sims-sense-sidecar"
+name = "sensewright-sidecar"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

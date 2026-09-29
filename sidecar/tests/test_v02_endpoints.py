@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.schemas import (
     AggregatesResponse,
     AutonomyTickResponse,
     DirectivesResponse,
@@ -21,7 +21,7 @@ def configured_graph(settings):
     """
     import asyncio
 
-    from sims_sense_sidecar.agent import graph
+    from sensewright_sidecar.agent import graph
 
     graph.configure(settings)
     yield settings

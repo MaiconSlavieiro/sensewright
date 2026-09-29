@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from sims_sense_sidecar.agent.agency import Agency, ImpulseJob
-from sims_sense_sidecar.config import (
+from sensewright_sidecar.agent.agency import Agency, ImpulseJob
+from sensewright_sidecar.config import (
     AgentsConfig,
     InitiativeConfig,
     PersonalityConfig,
     Settings,
 )
-from sims_sense_sidecar.god.budgeter import BackgroundBudgeter
-from sims_sense_sidecar.schemas import (
+from sensewright_sidecar.god.budgeter import BackgroundBudgeter
+from sensewright_sidecar.schemas import (
     AutonomySimState,
     AutonomyTickRequest,
     SimRef,
@@ -331,7 +331,7 @@ async def test_ingest_tick_logs_pulse(caplog):
 
     agency = Agency(make_settings(max_impulses_per_tick=1), clock=FakeClock())
 
-    with caplog.at_level(logging.INFO, logger="sims_sense_sidecar.agent.agency"):
+    with caplog.at_level(logging.INFO, logger="sensewright_sidecar.agent.agency"):
         await agency.ingest_tick(tick([(10, "semi", False)]))
 
     assert any("pulse save=" in record.getMessage() for record in caplog.records)
@@ -347,7 +347,7 @@ async def test_process_once_logs_stored_intents(caplog):
     )
     await agency.ingest_tick(tick([(10, "semi", False)]))
 
-    with caplog.at_level(logging.INFO, logger="sims_sense_sidecar.agent.agency"):
+    with caplog.at_level(logging.INFO, logger="sensewright_sidecar.agent.agency"):
         await agency.process_once()
 
     assert any("intent(s) stored" in record.getMessage() for record in caplog.records)

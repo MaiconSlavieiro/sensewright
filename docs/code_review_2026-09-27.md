@@ -1,4 +1,4 @@
-# Code Review — SimsSense Mod (in-game, Python 3.7)
+# Code Review — Sensewright Mod (in-game, Python 3.7)
 
 > **Status (resolved in build `2026-09-29.1`):** the correction plan below was
 > applied — C1, H1–H6, M1–M8, L1–L9 (see `CHANGELOG.md` [Unreleased]). Deferred:
@@ -6,7 +6,7 @@
 > TOML parser), **L3** (duplicate Sim-ref helpers). `tool_executor` R1 native-lever
 > hardening is defensive and still needs live validation.
 
-> Escopo: `mod/simssense_mod/` (o mod in-game). Revisão de 2026-09-27.
+> Escopo: `mod/sensewright_mod/` (o mod in-game). Revisão de 2026-09-27.
 > Método: leitura integral dos módulos + verificação manual dos achados mais
 > críticos antes de registrar (falsos positivos descartados em §5).
 > Referências de arquitetura: `.agents/skills/sims_mod_guidelines/SKILL.md`.
@@ -44,7 +44,7 @@ Prioridades: (1) armar o player-priority lock; (2) adicionar log a todos os
 ### CRITICAL
 
 **C1 — Player-priority lock nunca é armado em produção.**
-`mod/simssense_mod/rails.py:74` define `record_player_activity`, mas o único uso
+`mod/sensewright_mod/rails.py:74` define `record_player_activity`, mas o único uso
 fora de `rails.py` são os testes (`mod/tests/test_executor.py`,
 `mod/tests/test_rails.py`). Nenhum caminho de produção (main/state_collector/
 tool_executor/events) chama esse método. Resultado: `_last_activity` fica vazio
@@ -156,8 +156,8 @@ tuning id. A §7 do guia exige tuning id exato.
 
 **M6 — Strings hardcoded em fallbacks de UI.**
 `god_ui.py:393-398` e `439-444` (`_output_hint`) montam texto fixo em vez de
-`i18n.t(...)`; `chat_ui.py:196,201` usam títulos `"SimsSense"` /
-`"SimsSense Error"` fixos. São visíveis ao jogador.
+`i18n.t(...)`; `chat_ui.py:196,201` usam títulos `"Sensewright"` /
+`"Sensewright Error"` fixos. São visíveis ao jogador.
 
 *Fix:* adicionar chaves em `en.json`/`pt-BR.json` e usar `i18n.t`.
 
