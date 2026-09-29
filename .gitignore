@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.ts4script
+*.exe
+*.spec
+
+# SimsSense runtime / secrets
+sidecar/config.toml
+sidecar/data/
+**/sidecar.log
+*.log
+
+# Decompiled EA game scripts (proprietary — never commit)
+research/ts4/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
