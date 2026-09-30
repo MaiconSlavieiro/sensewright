@@ -10,7 +10,7 @@ best-effort: public functions never block and never raise.
 import time
 from typing import Any, Dict, List, Optional
 
-from . import chat_ui, events, god_ui, http_client, hud, i18n, sim_context, tool_executor
+from . import chat_ui, events, god_ui, http_client, hud, i18n, integrations, sim_context, tool_executor
 from .debug_log import debug_log, log_exception, validation_log
 
 
@@ -249,8 +249,36 @@ def _enum_name(value: Any) -> str:
     return _name_of(value)
 
 
+def _s4cl_enum_name(utils_getter, method_name: str, sim_info) -> str:
+    """Call an S4CL getter that returns an enum and return its ``.name``.
+
+    Returns ``""`` when the library, the method or a usable name is unavailable,
+    so the caller can fall back to the native attribute probe.
+    """
+    utils = utils_getter()
+    if utils is None:
+        return ""
+    getter = _safe_getattr(utils, method_name, None)
+    if not callable(getter):
+        return ""
+    value = _safe_call(getter, sim_info)
+    if value is None:
+        return ""
+    name = _safe_getattr(value, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return _enum_name(value)
+
+
 def _age_of(sim_info) -> str:
-    """Best-effort age/life-stage string."""
+    """Best-effort age/life-stage string.
+
+    Prefers S4CL ``CommonAgeUtils.get_age`` (stack base); falls back to the native
+    ``age``/``age_state``/``life_stage`` attributes.
+    """
+    s4cl = _s4cl_enum_name(integrations.s4cl_age_utils, "get_age", sim_info)
+    if s4cl:
+        return s4cl
     for attr in ("age", "age_state", "life_stage"):
         value = _safe_getattr(sim_info, attr, None)
         if value is None:
@@ -262,7 +290,14 @@ def _age_of(sim_info) -> str:
 
 
 def _gender_of(sim_info) -> str:
-    """Best-effort gender string."""
+    """Best-effort gender string.
+
+    Prefers S4CL ``CommonGenderUtils.get_gender`` (stack base); falls back to the
+    native ``gender``/``gender_type`` attributes.
+    """
+    s4cl = _s4cl_enum_name(integrations.s4cl_gender_utils, "get_gender", sim_info)
+    if s4cl:
+        return s4cl
     for attr in ("gender", "gender_type"):
         value = _safe_getattr(sim_info, attr, None)
         if value is None:
@@ -410,14 +445,47 @@ def _buff_type_name(buff: Any) -> str:
     return ""
 
 
+def _s4cl_buff_names(sim_info) -> List[str]:
+    """Active buff tuning ids via S4CL ``CommonBuffUtils``, or ``None``.
+
+    The exact tuning id (``_buff_type_name``) is preferred over S4CL's display
+    name so the sleep-id rule still matches whole identifiers (SKILL §7). ``None``
+    signals the native ``BuffComponent`` path should run instead.
+    """
+    utils = integrations.s4cl_buff_utils()
+    if utils is None:
+        return None
+    getter = _safe_getattr(utils, "get_buffs", None)
+    if not callable(getter):
+        return None
+    buffs = _safe_call(getter, sim_info)
+    if buffs is None:
+        return None
+    names: List[str] = []
+    for buff in buffs:
+        name = _buff_type_name(buff)
+        if not name:
+            get_name = _safe_getattr(utils, "get_buff_name", None)
+            if callable(get_name):
+                name = _safe_call(get_name, buff)
+        if name:
+            names.append(name)
+    return names
+
+
 def _buff_names_of(sim_info) -> List[str]:
     """List active buff/moodlet tuning ids for a SimInfo.
 
-    Confirmed against the shipped scripts (``sims/sim_info.py``): the buffs live
-    on ``SimInfo.Buffs`` (a ``BuffComponent``), whose active buffs are in
-    ``_active_buffs`` (handle id -> ``Buff``); each ``Buff`` exposes
-    ``buff_type`` (the tuning, whose ``__name__`` is e.g. ``buff_Sleeping``).
+    Prefers S4CL ``CommonBuffUtils`` (stack base); falls back to the native
+    script surface confirmed against the shipped ``sims/sim_info.py``: the buffs
+    live on ``SimInfo.Buffs`` (a ``BuffComponent``), whose active buffs are in
+    ``_active_buffs`` (handle id -> ``Buff``); each ``Buff`` exposes ``buff_type``
+    (the tuning, whose ``__name__`` is e.g. ``buff_Sleeping``).
     """
+    s4cl = _s4cl_buff_names(sim_info)
+    if s4cl is not None:
+        return s4cl
+
     names: List[str] = []
 
     component = _safe_getattr(sim_info, "Buffs", None)

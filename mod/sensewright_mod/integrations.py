@@ -416,6 +416,36 @@ def s4cl_utils(dotted_module: str, *class_names: str) -> Optional[Any]:
     return _attr(module, *class_names)
 
 
+def s4cl_trait_utils() -> Optional[Any]:
+    """``CommonTraitUtils`` (read a Sim's traits)."""
+    return s4cl_utils("sims4communitylib.utils.sims.common_trait_utils",
+                      "CommonTraitUtils")
+
+
+def s4cl_buff_utils() -> Optional[Any]:
+    """``CommonBuffUtils`` (read a Sim's active buffs/moodlets)."""
+    return s4cl_utils("sims4communitylib.utils.sims.common_buff_utils",
+                      "CommonBuffUtils")
+
+
+def s4cl_sim_career_utils() -> Optional[Any]:
+    """``CommonSimCareerUtils`` (read a Sim's careers)."""
+    return s4cl_utils("sims4communitylib.utils.sims.common_sim_career_utils",
+                      "CommonSimCareerUtils")
+
+
+def s4cl_age_utils() -> Optional[Any]:
+    """``CommonAgeUtils`` (read a Sim's age/life stage)."""
+    return s4cl_utils("sims4communitylib.utils.sims.common_age_utils",
+                      "CommonAgeUtils")
+
+
+def s4cl_gender_utils() -> Optional[Any]:
+    """``CommonGenderUtils`` (read a Sim's gender)."""
+    return s4cl_utils("sims4communitylib.utils.sims.common_gender_utils",
+                      "CommonGenderUtils")
+
+
 # --- native fallbacks that must exist when a lib is missing ------------------
 # These mirror the previously valid-free native module paths, so a missing lib
 # degrades to the raw game API rather than breaking the module.

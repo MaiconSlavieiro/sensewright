@@ -12,7 +12,7 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from sensewright_mod import events, http_client, state_collector
+from sensewright_mod import events, http_client, integrations, state_collector
 from sensewright_mod.state_collector import StateCollector
 
 
@@ -383,6 +383,93 @@ def test_buff_type_name_never_returns_localized_name():
     assert state_collector._buff_type_name(Buff()) == ""
     assert state_collector._buff_type_name(Localized()) == ""
     assert state_collector._buff_type_name(None) == ""
+
+
+def test_buff_names_of_prefers_s4cl(monkeypatch):
+    class BuffType(object):
+        __name__ = "buff_Sleeping"
+
+    class Buff(object):
+        buff_type = BuffType()
+
+    class FakeBuffUtils(object):
+        @staticmethod
+        def get_buffs(sim_info):
+            return [Buff()]
+
+    monkeypatch.setattr(integrations, "s4cl_buff_utils", lambda: FakeBuffUtils())
+
+    class SimInfo(object):
+        Buffs = None
+
+    assert state_collector._buff_names_of(SimInfo()) == ["buff_Sleeping"]
+
+
+def test_buff_names_of_falls_back_when_s4cl_missing(monkeypatch):
+    monkeypatch.setattr(integrations, "s4cl_buff_utils", lambda: None)
+
+    class BuffType(object):
+        __name__ = "buff_Happy"
+
+    class Buff(object):
+        buff_type = BuffType()
+
+    class Component(object):
+        _active_buffs = {0: Buff()}
+
+    class SimInfo(object):
+        Buffs = Component()
+
+    assert state_collector._buff_names_of(SimInfo()) == ["buff_Happy"]
+
+
+def test_age_of_prefers_s4cl(monkeypatch):
+    class Age(object):
+        name = "YOUNGADULT"
+
+    class FakeAgeUtils(object):
+        @staticmethod
+        def get_age(sim_info):
+            return Age()
+
+    monkeypatch.setattr(integrations, "s4cl_age_utils", lambda: FakeAgeUtils())
+
+    class SimInfo(object):
+        age = "native_should_not_be_used"
+
+    assert state_collector._age_of(SimInfo()) == "YOUNGADULT"
+
+
+def test_gender_of_prefers_s4cl(monkeypatch):
+    class Gender(object):
+        name = "FEMALE"
+
+    class FakeGenderUtils(object):
+        @staticmethod
+        def get_gender(sim_info):
+            return Gender()
+
+    monkeypatch.setattr(integrations, "s4cl_gender_utils", lambda: FakeGenderUtils())
+
+    class SimInfo(object):
+        gender = "native_should_not_be_used"
+
+    assert state_collector._gender_of(SimInfo()) == "FEMALE"
+
+
+def test_age_gender_fall_back_when_s4cl_missing(monkeypatch):
+    monkeypatch.setattr(integrations, "s4cl_age_utils", lambda: None)
+    monkeypatch.setattr(integrations, "s4cl_gender_utils", lambda: None)
+
+    class AgeEnum(object):
+        name = "ADULT"
+
+    class SimInfo(object):
+        age_state = AgeEnum()
+        gender_type = "MALE"
+
+    assert state_collector._age_of(SimInfo()) == "ADULT"
+    assert state_collector._gender_of(SimInfo()) == "MALE"
 
 
 def test_send_logs_sidecar_failure(monkeypatch):

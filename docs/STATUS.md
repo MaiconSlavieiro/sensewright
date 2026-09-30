@@ -1,6 +1,6 @@
 # Sensewright — Status & Handoff
 
-> Last updated: **2026-09-29 (afternoon)**. In-game build: **`2026-09-29.23`**;
+> Last updated: **2026-09-30**. In-game build: **`2026-09-29.24`**;
 > **in-game layer migrated to the stack base (S4CL + Lot 51 Core)** on branch
 > **`migrate-s4cl-lot51`** (repo moved to `C:\workspace\sensewright`). Cheats are
 > **`sw.*`**, artifacts `Sensewright.ts4script` + `Sensewright.package` (tuning),
@@ -23,13 +23,13 @@
 | Repo root | `C:\workspace\sensewright` (git repo, branch **`migrate-s4cl-lot51`**; pre-migration on `main` / tag `pre-migracao`) |
 | In-game mod | `mod/sensewright_mod/` (Python 3.7; **stdlib + S4CL + Lot 51 Core**) |
 | Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
-| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.22"` |
+| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.24"` |
 | Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` + `Sensewright.package` (tuning; XmlInjector retired) |
 | Stack libs | `...\Mods\` root: `sims4communitylib*.ts4script` + `lot51_core*.ts4script` (required) |
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
 | Game install | `C:\Program Files\EA Games\The Sims 4` |
-| Tests | sidecar **461**, mod **360**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
+| Tests | sidecar **461**, mod **375**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
 
 **Sidecar runs from source with the workspace venv** (no PyInstaller yet — Phase 6).
 The mod **autoboots** it (`install-mod.ps1` writes the venv interpreter to
@@ -150,7 +150,18 @@ native API map learned in P0 still applies to that fallback:
 
 ---
 
-## 4. What changed in `.23` / `.22` / `.21` / `.20`
+## 4. What changed in `.24` / `.23` / `.22` / `.21` / `.20`
+
+**`.24` (Fase E, needs a live re-check):** the collectors read trait/buff/career/
+age/gender through S4CL utilities first, native fallback kept:
+
+1. `integrations.py` adds `s4cl_trait_utils` / `s4cl_buff_utils` /
+   `s4cl_sim_career_utils` / `s4cl_age_utils` / `s4cl_gender_utils`.
+2. `sim_context._get_traits` / `_get_careers` and `state_collector._buff_names_of`
+   / `_age_of` / `_gender_of` prefer S4CL; a failure or a missing library falls
+   through to the validated native reads. The buff path still uses the exact
+   tuning id (`_buff_type_name`), never a display name.
+3. Tests: mod **366 -> 375**.
 
 **`.23` (needs a live re-check):** the God **orchestration loop** is now live
 in-game (Phase 5c gap closed) - **code + tests done**, not yet validated live:
@@ -320,9 +331,11 @@ session, in order:
    corrected (registry path, dialog/notification signatures, choose-response
    dialog). Fix anything the live run still proves wrong and update the API table in
    `docs/stack_migration.md`.
-3. **Fase E (deferred)**: migrate `sim_context.py`/census trait/buff/career reads to
-   S4CL utilities (`CommonTraitUtils`/`CommonBuffUtils`), keeping the
-   primitive-coercion contract and exact tuning-id matching (SKILL §7).
+3. **Fase E — done offline (build `.24`)**: the collectors now prefer the S4CL
+   utilities (`CommonTraitUtils`/`CommonBuffUtils`/`CommonSimCareerUtils`/
+   `CommonAgeUtils`/`CommonGenderUtils`) with the validated native paths as
+   fallback, keeping the primitive-coercion contract and **exact** tuning-id
+   matching (SKILL §7). Needs a live re-check (trait/buff/career reads).
 4. **Optional**: move the remaining native alarms to a Lot 51 custom service and
    drop the fallback once the tick path is proven stable.
 5. Then resume the previous board: God submenu (computer), agent submenu (Sim),

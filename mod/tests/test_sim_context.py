@@ -12,7 +12,7 @@ import sys
 mod_dir = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, mod_dir)
 
-from sensewright_mod import sim_context
+from sensewright_mod import integrations, sim_context
 
 
 class _LocalizedLike(object):
@@ -67,6 +67,80 @@ def test_get_traits_reads_equipped_traits():
         trait_tracker = FakeTracker()
 
     assert sim_context._get_traits(FakeInfo()) == ["trait_Ambitious", "trait_Ambitious"]
+
+
+def test_get_traits_prefers_s4cl(monkeypatch):
+    class FakeTrait(object):
+        __name__ = "trait_Foodie"
+
+    class FakeTraitUtils(object):
+        @staticmethod
+        def get_traits(sim_info):
+            return [FakeTrait()]
+
+        @staticmethod
+        def get_trait_name(trait):
+            return trait.__name__
+
+    monkeypatch.setattr(integrations, "s4cl_trait_utils", lambda: FakeTraitUtils())
+
+    class FakeInfo(object):
+        def get_traits(self):
+            return ["native_should_not_be_used"]
+
+    assert sim_context._get_traits(FakeInfo()) == ["trait_Foodie"]
+
+
+def test_get_traits_falls_back_when_s4cl_raises(monkeypatch):
+    class BrokenUtils(object):
+        @staticmethod
+        def get_traits(sim_info):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(integrations, "s4cl_trait_utils", lambda: BrokenUtils())
+
+    class FakeInfo(object):
+        def get_traits(self):
+            return ["trait_Native"]
+
+    assert sim_context._get_traits(FakeInfo()) == ["trait_Native"]
+
+
+def test_get_careers_prefers_s4cl(monkeypatch):
+    class FakeCareer(object):
+        __name__ = "career_Astronaut"
+        level = 3
+        is_active_career = True
+
+    class FakeCareerUtils(object):
+        @staticmethod
+        def get_all_careers_for_sim_gen(sim_info):
+            return iter([FakeCareer()])
+
+    monkeypatch.setattr(integrations, "s4cl_sim_career_utils",
+                        lambda: FakeCareerUtils())
+
+    class FakeInfo(object):
+        career_tracker = None
+
+    assert sim_context._get_careers(FakeInfo()) == [
+        {"name": "career_Astronaut", "level": 3, "is_active": True}
+    ]
+
+
+def test_get_careers_falls_back_when_s4cl_missing(monkeypatch):
+    monkeypatch.setattr(integrations, "s4cl_sim_career_utils", lambda: None)
+
+    class FakeTracker(object):
+        def careers(self):
+            return [_FakeCareer()]
+
+    class FakeInfo(object):
+        career_tracker = FakeTracker()
+
+    assert sim_context._get_careers(FakeInfo()) == [
+        {"name": "career_TechGuru", "level": 5, "is_active": True}
+    ]
 
 
 def test_get_relationships_uses_target_infos():

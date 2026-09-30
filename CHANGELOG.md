@@ -67,8 +67,26 @@ library access is isolated in `mod/sensewright_mod/integrations.py`.
   cloned library sources) and the pie-menu display-name localization is pending
   (`docs/stack_migration.md`).
 - Next session: install S4CL + Lot 51 Core at the Mods root, run the
-  `docs/stack_migration.md` checklist, then continue with Fase E (S4CL utilities in
-  `sim_context`/census). See `docs/STATUS.md` §5/§8.
+  `docs/stack_migration.md` checklist. See `docs/STATUS.md` §5/§8.
+
+### Changed - Fase E: the collectors read through S4CL utilities (build `2026-09-29.24`)
+The in-game collectors now prefer the S4CL utility classes over raw game objects,
+finishing the stack migration for trait/buff/career/age/gender reads. Each S4CL
+path is guarded and falls back to the validated native surface, so offline tests
+and a missing library both degrade instead of crashing.
+
+- **`integrations.py`**: new guarded seams `s4cl_trait_utils`,
+  `s4cl_buff_utils`, `s4cl_sim_career_utils`, `s4cl_age_utils`,
+  `s4cl_gender_utils` (thin wrappers over `s4cl_utils`).
+- **`sim_context.py`**: `_get_traits` uses `CommonTraitUtils.get_traits` +
+  `get_trait_name`; `_get_careers` uses
+  `CommonSimCareerUtils.get_all_careers_for_sim_gen`. Both keep the native
+  fallback and the primitive-coercion contract.
+- **`state_collector.py`**: `_buff_names_of` uses `CommonBuffUtils.get_buffs`,
+  still resolving the **exact tuning id** via `_buff_type_name` so the sleep rule
+  matches whole identifiers (SKILL §7); `_age_of`/`_gender_of` use
+  `CommonAgeUtils`/`CommonGenderUtils`.
+- Tests: mod **366 -> 375** (S4CL preference + native fallback paths).
 
 ### Changed - Sidecar content localization is data-driven (sidecar only)
 All deterministic (no-LLM) content strings moved out of Python into flat JSON

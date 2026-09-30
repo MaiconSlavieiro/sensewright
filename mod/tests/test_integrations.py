@@ -49,6 +49,12 @@ def test_s4cl_helpers_are_safe_without_lib():
     assert integrations.s4cl_interaction_handler_base() is None
     assert integrations.s4cl_interaction_type("ON_SCRIPT_OBJECT_LOAD") is None
     assert integrations.s4cl_register_interaction_handler(None, None) is False
+    assert integrations.s4cl_utils("no.such.module", "Nope") is None
+    assert integrations.s4cl_trait_utils() is None
+    assert integrations.s4cl_buff_utils() is None
+    assert integrations.s4cl_sim_career_utils() is None
+    assert integrations.s4cl_age_utils() is None
+    assert integrations.s4cl_gender_utils() is None
 
 
 def test_native_localized_string_returns_input_offline():

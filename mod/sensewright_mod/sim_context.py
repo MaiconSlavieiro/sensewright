@@ -8,6 +8,7 @@ Outside the game returns {} plus keys without crashing.
 
 from typing import Any, Dict, List
 
+from . import integrations
 from .debug_log import log_exception
 
 
@@ -247,13 +248,46 @@ def _get_needs(sim_info) -> Dict[str, float]:
     return needs
 
 
+def _s4cl_trait_names(sim_info) -> List[str]:
+    """Trait names via S4CL ``CommonTraitUtils``, or ``None`` when unavailable.
+
+    S4CL owns the tuning-id plumbing (``get_traits`` returns the ``Trait`` tuning
+    instances; ``get_trait_name`` resolves ``__name__``). ``None`` signals the
+    caller to fall back to the native path; an empty list is a real answer.
+    """
+    utils = integrations.s4cl_trait_utils()
+    if utils is None:
+        return None
+    get_traits = _safe_getattr(utils, "get_traits", None)
+    if not callable(get_traits):
+        return None
+    traits = _safe_call(get_traits, sim_info)
+    if traits is None:
+        return None
+    get_name = _safe_getattr(utils, "get_trait_name", None)
+    names: List[str] = []
+    for trait in traits:
+        name = None
+        if callable(get_name):
+            name = _safe_call(get_name, trait)
+        name = name or _as_str(trait)
+        if name:
+            names.append(name)
+    return names
+
+
 def _get_traits(sim_info) -> List[str]:
     """Get trait names.
 
-    The trait API on the live patch (1.113) is ``SimInfo.get_traits()``
-    (``HasTraitTrackerMixin``) and ``TraitTracker.equipped_traits``; the tracker
-    has neither ``get_traits`` nor ``traits`` (those were the bugs logged before).
+    Prefers S4CL ``CommonTraitUtils`` (stack base); falls back to the native
+    patch-1.113 surface: ``SimInfo.get_traits()`` (``HasTraitTrackerMixin``) and
+    ``TraitTracker.equipped_traits``; the tracker has neither ``get_traits`` nor
+    ``traits`` (those were the bugs logged before).
     """
+    s4cl = _s4cl_trait_names(sim_info)
+    if s4cl is not None:
+        return s4cl
+
     traits: List[str] = []
     try:
         traits_list = None
@@ -324,8 +358,47 @@ def _career_display_name(career) -> str:
     return _as_str(career)
 
 
+def _s4cl_careers(sim_info) -> List[Dict[str, Any]]:
+    """Careers via S4CL ``CommonSimCareerUtils``, or ``None`` when unavailable.
+
+    ``get_all_careers_for_sim_gen`` yields ``Career`` instances; the display name
+    and level are read from the instance (primitive coercion via
+    ``_career_display_name``). ``None`` means fall back to the native tracker.
+    """
+    utils = integrations.s4cl_sim_career_utils()
+    if utils is None:
+        return None
+    getter = _safe_getattr(utils, "get_all_careers_for_sim_gen", None)
+    if not callable(getter):
+        return None
+    found = _safe_call(getter, sim_info)
+    if found is None:
+        return None
+    careers = []
+    for career in found:
+        level = _safe_getattr(career, "level", 0)
+        try:
+            level = int(level)
+        except (TypeError, ValueError):
+            level = 0
+        careers.append({
+            "name": _career_display_name(career),
+            "level": level,
+            "is_active": bool(_safe_getattr(career, "is_active_career", False)),
+        })
+    return careers
+
+
 def _get_careers(sim_info) -> List[Dict[str, Any]]:
-    """Get career information (primitive-only; no game objects leak)."""
+    """Get career information (primitive-only; no game objects leak).
+
+    Prefers S4CL ``CommonSimCareerUtils`` (stack base); falls back to the native
+    ``career_tracker.careers`` surface.
+    """
+    s4cl = _s4cl_careers(sim_info)
+    if s4cl is not None:
+        return s4cl
+
     careers = []
     try:
         career_tracker = _safe_getattr(sim_info, "career_tracker", None)
