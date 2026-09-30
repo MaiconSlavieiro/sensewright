@@ -29,7 +29,7 @@
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
 | Game install | `C:\Program Files\EA Games\The Sims 4` |
-| Tests | sidecar **461**, mod **384**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
+| Tests | sidecar **463**, mod **384**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
 
 **Sidecar runs from source with the workspace venv** (no PyInstaller yet — Phase 6).
 The mod **autoboots** it (`install-mod.ps1` writes the venv interpreter to
@@ -80,6 +80,11 @@ python -m pytest mod\tests -q
 - **Lifecycle**, **validation logging**, **collector auto-start** (Lot 51
   `GAME_TICK`, native `zone.Zone.update` fallback; ~15 s pulse), **buffs**
   (`SimInfo.Buffs._active_buffs` → `Buff.buff_type.__name__`).
+- **Sidecar offline-green gate fixed (sidecar only, no build stamp)**: the social
+  pair cooldown no longer blocks the first-ever pair on a freshly-booted machine
+  (`time.monotonic()` starts at boot, not at `0.0`), and `graph.configure()` now
+  releases the previous memory store's SQLite connection (no leak on reconfigure;
+  fixes the Windows temp-dir teardown errors). Sidecar **461 -> 463**.
 
 ### 2a. In-game UI on the stack (S4CL + Lot 51)
 
@@ -275,6 +280,29 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 4. **Pie menu polish** (next features): a real **God submenu** on the computer, an
    **agent submenu** on the Sim, a **custom “Sensewrightâ€ category**, and **our own
    icons** (SVG→DDS→`.package`).
+
+---
+
+## 5a. Pendências técnicas (follow-ups)
+
+> Board of fixes/features that are **known but not done**, ordered by priority.
+> Keep this list current when a session closes.
+
+| # | Pendência | Tipo | Notas |
+|---|---|---|---|
+| P0 | **Live-validate the stack migration** | validation | `docs/stack_migration.md` checklist; requires S4CL + Lot 51 Core at the Mods root and the game open. Only remaining step *of the migration itself*. |
+| P0 | **R1 `say_to` native lever** | fix (runtime) | `tool_executor` tries several `InteractionContext` paths; confirm the native push works, else it degrades to a notification (`PLANO.md` §15.8). |
+| P1 | **`.22` player-activity + precise `cancel_current`** | validation | Play a click/pie interaction; confirm the player-priority lock arms on both sides and the agent's own pushes do not. |
+| P1 | **God orchestration loop (`.23`) + Fase E reads (`.24`) + Lot 51 service (`.25`) + God UI seam (`.26`)** | validation | All offline-complete; need one live pass (`STATUS` §5). |
+| P1 | **Drop the native alarm safety net** | cleanup | Once the Lot 51 `GAME_TICK` pulse is proven live, the `zone.Zone.update` / native alarm fallback can be removed (`state_collector`, `events`). |
+| P2 | **Custom `Sensewright` `PieMenuCategory` + SimData + submenus** | feature | God submenu (computer), agent submenu (Sim). Needs extra DBPF resource types in `build_package.py` (`PLANO.md` §15.8 / `stack_migration.md`). |
+| P2 | **Own pie-menu icons (SVG→DDS→`.package`)** | feature | Currently uses the packaged STBL names only. |
+| P2 | **Levers catalog runtime validation (`docs/ts4_internals.md`)** | docs/validation | F2 produced the autonomy/levers map; entries still marked code-validated vs runtime-validated. |
+| P3 | **Phase 6 — packaging** | feature | PyInstaller/Nuitka for the sidecar exe, README (OneDrive warning), 0-key mode (`PLANO.md` §11). |
+| P3 | **Doc encoding cleanup** | chore | `CHANGELOG.md` / old docs contain double-encoded UTF-8 (`â€"` for `—`, `Â§`). Never rewrite with PowerShell `Set-Content -Encoding UTF8` (SKILL §12.12); fix entry-by-entry with the editor tools. |
+
+**Recently closed (this session, sidecar only):** social cooldown epoch bug and
+the `graph.configure()` SQLite leak (sidecar **461 -> 463**). See `CHANGELOG.md`.
 
 ---
 

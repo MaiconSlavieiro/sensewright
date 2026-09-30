@@ -423,8 +423,12 @@ class SocialLayer:
                 if b_id in used:
                     continue
                 pair_key = frozenset({a_id, b_id})
-                last = self._last_pair_at.get(pair_key, 0.0)
-                if now_ts - last < self.pair_cooldown:
+                # A pair that was never seen has no cooldown. Using ``0.0`` as
+                # the default here was a bug: the clock (``time.monotonic``)
+                # starts at boot, so on a freshly-booted machine the first-ever
+                # pair was wrongly blocked until the uptime passed the cooldown.
+                last = self._last_pair_at.get(pair_key)
+                if last is not None and now_ts - last < self.pair_cooldown:
                     continue
                 pairs.append((a, b))
                 used.add(a_id)

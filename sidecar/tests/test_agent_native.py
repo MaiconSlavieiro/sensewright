@@ -212,6 +212,21 @@ async def test_configure_idempotent(temp_settings):
 
 
 @pytest.mark.asyncio
+async def test_configure_releases_previous_memory(temp_settings):
+    """Regression: a reconfigure must close the old store's DB handle.
+
+    The previous store used to be replaced without closing it, leaking a
+    connection to its data dir (Windows then failed to remove the temp dir).
+    """
+    graph.configure(temp_settings)
+    first = graph._memory
+    graph.configure(temp_settings)
+    assert first is not graph._memory
+    # SQLiteMemory releases its connection synchronously on reconfigure.
+    assert getattr(first, "_conn", "unused") is None
+
+
+@pytest.mark.asyncio
 async def test_shutdown(temp_settings):
     """Test shutdown cleans up."""
     graph.configure(temp_settings)

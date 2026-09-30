@@ -12,6 +12,25 @@ All notable changes to **Sensewright** are documented in this file.
 
 ## [Unreleased] â€” Phases 2, 2b, 3, 4, 5a, 5b, 5c + v0.2 Â§14: Directives, Census, Agents, Evolution, God foundation, backgrounds, orchestration & autonomous Sim agents
 
+### Fixed - sidecar offline-green gate (social cooldown epoch + memory reconfigure leak) (sidecar only)
+The sidecar test suite was reported as 461 green but failed on a freshly-booted
+machine (8 failed + 2 errors). Two real defects were fixed; **no wire-contract or
+gameplay change**.
+
+- **Social pair cooldown epoch (`agent/social.py`)**: `pick_pairs` defaulted a
+  never-seen pair's last-paired time to `0.0`, but `time.monotonic()` starts at
+  *boot*. On a machine up for less than `pair_cooldown_seconds` (180 s default)
+  the first-ever dialogue pair was wrongly suppressed. Now an absent pair key
+  means "never paired" (allowed); the cooldown only applies to repeats.
+- **Memory store leak on reconfigure (`agent/graph.py`, `memory/sqlite_store.py`)**:
+  `graph.configure()` replaced `_memory` without closing the previous store, so a
+  second `configure()` (config reload, or repeated configure in tests) leaked a
+  SQLite connection to the old data dir. On Windows this broke temp-dir teardown
+  (`PermissionError` on `memory.sqlite3`). Added `SQLiteMemory.close_sync()`
+  (connection-only, loop-free) and `configure()` now releases the previous store.
+- Tests: sidecar **461 -> 463** (fresh-boot first-pair regression; reconfigure
+  releases the previous DB handle). `ruff` clean.
+
 ### In-game stack migration: S4CL + Lot 51 Core
 The in-game mod is now **based on S4CL and Lot 51 Core** (branch
 `migrate-s4cl-lot51`); the player installs both libraries at the Mods root. All

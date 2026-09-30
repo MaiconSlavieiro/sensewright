@@ -798,6 +798,23 @@ class SQLiteMemory:
                 forgotten += 1
         return forgotten
 
+    def close_sync(self) -> None:
+        """Close the SQLite connection synchronously (best-effort).
+
+        Safe to call outside an event loop. Used when the store is replaced by
+        ``graph.configure`` (so the DB file handle is released and the old
+        connection does not outlive its settings). The async :meth:`close` also
+        awaits the embedding provider.
+        """
+        with self._lock:
+            if self._conn:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+                logger.info("Memory database closed")
+
     async def close(self) -> None:
         close_embeddings = getattr(self._embeddings, "close", None)
         if callable(close_embeddings):
@@ -805,11 +822,7 @@ class SQLiteMemory:
                 await close_embeddings()
             except Exception:
                 pass
-        with self._lock:
-            if self._conn:
-                self._conn.close()
-                self._conn = None
-                logger.info("Memory database closed")
+        self.close_sync()
 
 
 def build_memory_store(settings: Settings) -> MemoryStore:

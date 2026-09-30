@@ -441,6 +441,22 @@ def test_pick_pairs_pairs_two_household_sims():
     assert len(pairs) == 1
 
 
+def test_pick_pairs_first_pair_allowed_before_uptime_reaches_cooldown():
+    """Regression: a never-seen pair must pair even when the clock epoch is low.
+
+    ``time.monotonic`` starts at boot, so on a freshly-booted machine the first
+    pair was wrongly blocked until uptime passed ``pair_cooldown`` (the old code
+    defaulted the last-paired time to ``0.0``).
+    """
+    sims = [
+        {"sim_id": 1, "sleeping": False, "autonomy": "full", "is_player": False},
+        {"sim_id": 2, "sleeping": False, "autonomy": "full", "is_player": False},
+    ]
+    layer = SocialLayer(max_pairs=1, clock=lambda: 5.0)  # well below 180s
+    pairs = layer.pick_pairs(sims)
+    assert len(pairs) == 1
+
+
 def test_pick_pairs_enforces_cooldown():
     sims = [
         {"sim_id": 1, "sleeping": False, "autonomy": "full", "is_player": False},

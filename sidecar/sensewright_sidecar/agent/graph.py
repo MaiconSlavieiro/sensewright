@@ -112,6 +112,17 @@ def configure(settings: Settings) -> None:
         audit=audit,
     )
 
+    # Release the previous store's DB file handle before replacing it, else a
+    # reconfigure (e.g. config reload or repeated ``configure`` in tests) leaks a
+    # connection to the old data dir.
+    if _memory is not None:
+        close_previous = getattr(_memory, "close_sync", None)
+        if callable(close_previous):
+            try:
+                close_previous()
+            except Exception:
+                pass
+
     # Build memory store
     try:
         _memory = build_memory_store(settings)
