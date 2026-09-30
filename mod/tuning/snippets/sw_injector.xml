@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<I c="XmlInjector" i="snippet" m="xml_injector.snippet" n="Sensewright:PieInjector" s="16907674085427773441">
+  <L n="add_interactions_to_sims">
+    <T>16907656493241729025</T>
+    <T>16907656493241729026</T>
+    <T>16907656493241729027</T>
+    <T>16907656493241729028</T>
+  </L>
+  <L n="add_interactions_to_objects">
+    <U>
+      <V n="object_selection" t="objects_with_tag">
+        <U n="objects_with_tag">
+          <E n="tag">Func_Computer</E>
+        </U>
+      </V>
+      <L n="_super_affordances">
+        <T>16907656493241729025</T>
+      </L>
+    </U>
+  </L>
+</I>

@@ -1,0 +1,220 @@
+# ─── Sensewright — config.toml (example) ────────────────────────────────
+# Copy to <Mods>/Sensewright/sidecar/config.toml and fill in only the keys
+# you want. With NO KEYS AT ALL the mod already runs in "native mode".
+
+[ui]
+# Player-facing language for in-game text: "auto" or any locale code present in
+# the locale manifest (shipped: en, pt-BR). "auto" follows the game language and
+# falls back to the default. The set of languages is data-driven: adding one is a
+# JSON file + a manifest entry, never a code change (see the mod's locales/).
+language = "auto"
+
+[network]
+host = "127.0.0.1"
+port = 8765
+
+[logging]
+level = "INFO"
+file = "data/sidecar.log"
+audit = "data/audit.log"
+
+# ─── LLM ──────────────────────────────────────────────────────────────
+[llm]
+# Fallback order among enabled providers. Providers without a key are skipped,
+# so it is safe to list more than you have configured. OpenRouter leads (most
+# stable free tier); Gemini is last because its free tier rate-limits hard.
+chain = ["openrouter", "opencode", "gemini"]
+budget_per_sim_per_day = 500
+# How much hidden reasoning a model may spend before its visible answer:
+# none | minimal | low | medium | high ("off"/"" = leave it to the model).
+# Defaults to "none": agent impulses are a single short line, and reasoning
+# models otherwise burn the whole output budget on a hidden "thinking process"
+# (truncating the answer). The per-agent override below wins.
+reasoning_effort = "none"
+
+# `rpm`/`rpd` are the provider's real limits (requests/minute and requests/day).
+# When set, the chain skips a provider that would exceed them and falls through
+# to the next one instead of burning a 429. Omit them (or 0) to disable. Each
+# provider also tries its own `model`/`models` in order before the chain moves on.
+[llm.providers.openrouter]
+enabled = true
+models = ["nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free", "google/gemma-4-31b-it:free"]
+api_key = "${OPENROUTER_API_KEY}"
+base_url = "https://openrouter.ai/api/v1"
+# Hard billing guard: only ids containing ":free" are ever called, so a
+# misconfigured list can never fall back to a paid model.
+free_only = true
+# Accepts the OpenAI-compatible `reasoning` parameter, so the per-agent effort
+# is forwarded as `reasoning.effort` on each request.
+supports_reasoning = true
+rpm = 20
+rpd = 50                 # 1000 RPD with a one-time $10 credit (PLANO.md §5.4)
+
+# OpenCode Zen gateway (OpenAI-compatible, Bearer token). Optional power tier:
+# it needs an OpenCode Zen API key (https://opencode.ai/auth). IMPORTANT: Zen's
+# free tier is restricted to the OpenCode client (HTTP 403 "free tier can only
+# be used from within OpenCode"), so most *-free slugs DO NOT work from the
+# sidecar. The exception validated here is `space-bunny-free`. Paid Zen models
+# work but are billed.
+[llm.providers.opencode]
+enabled = false
+models = ["space-bunny-free"]
+api_key = "${OPENCODE_API_KEY}"
+base_url = "https://opencode.ai/zen/v1"
+# rpm = 20
+# rpd = 200
+
+# Google AI Studio: demoted to last resort (aggressive free-tier rate limits).
+[llm.providers.gemini]
+enabled = true
+model = "gemini-2.5-flash"
+api_key = "${GEMINI_API_KEY}"
+rpm = 15
+rpd = 1500
+
+[llm.providers.deepseek]        # paid, God agent only
+enabled = false
+model = "deepseek-chat"
+api_key = "${DEEPSEEK_API_KEY}"
+base_url = "https://api.deepseek.com/v1"
+
+# ─── MEMORY ───────────────────────────────────────────────────────────
+[memory]
+provider = "sqlite"
+embedding_provider = "none"      # none | cloudflare (BGE-M3 free)
+retention_days = 180
+# v0.2 M1: consolidate raw chat turns into one memory after a silence window
+# (`dialogue_idle_seconds`). Raw turns are archived, never deleted.
+consolidation_enabled = true
+dialogue_idle_seconds = 300.0
+# v0.2 M2: graded forgetting. `strength` decays lazily; used memories are
+# touched back up; forgotten ones can resurface as déjà vu.
+decay_preset = "normal"          # fast | normal | slow
+weaken_threshold = 0.5
+forget_threshold = 0.2
+dejavu_chance = 0.05
+
+# Credentials for the embedding provider (only needed for "cloudflare").
+[memory.embedding_provider_config]
+# account_id = "..."
+# api_token = "..."
+
+# ─── AGENTS ───────────────────────────────────────────────────────────
+[agents]
+# `agent_seats` is the v0.3 agent-seat pool (how many Sims may hold a live
+# agent at once; active household first, then instanced visitors). It overrides
+# the legacy `max_active` when set.
+agent_seats = 12
+max_active = 12                  # legacy alias for agent_seats
+evolution_speed = "normal"       # slow | normal | fast
+autonomy_default = "semi"        # off | observe | suggest | semi | full
+# Safety rails (Phase 2): cap directive tool calls per Sim and hold off after
+# the player acts, so the AI never fights the player for control.
+tool_calls_per_minute = 10
+player_lock_seconds = 10.0
+
+# Reflection/evolution loop (Phase 4): compress events into reflections and
+# drift personality. `trait_swap`: off | propose | auto.
+[agents.evolution]
+enabled = true
+min_events = 8
+cooldown_seconds = 900.0
+max_reflections_per_day = 24
+trait_swap = "propose"
+drift_strength = 0.2
+
+# v0.2 A2/A3: per-Sim initiative loop. `level`: minimal | moderate | full;
+# the player's own Sim gets its own (usually lower) `player_sim_level`.
+[agents.initiative]
+level = "full"
+player_sim_level = "suggest"
+cooldown_sim_minutes = 8.0
+event_react_threshold = 1.0
+spontaneous_lines = true
+quota_fraction = 0.8             # target fraction of the free-tier RPM
+max_impulses_per_tick = 1
+# v0.3 §15.6: impulse/thought frequency dials. 0 = sleep-only. The agent-roster
+# panel (`sw.agents`) adjusts these live; a per-Sim override wins.
+impulse_frequency = 0.2
+player_sim_impulse_frequency = 0.0
+# Salient event reactions stay on independently of the impulse dial.
+reactions_enabled = true
+# Per-agent hidden-reasoning budget for impulses: none|minimal|low|medium|high.
+# Omit/None to inherit [llm] reasoning_effort ("none").
+# reasoning_effort = "none"
+
+# v0.2 P1: living personality — psyche blocks + life story, consolidated
+# during sleep, with intensity decaying unless reinforced.
+[agents.personality]
+absorption_enabled = true
+salience_threshold = 1.5
+max_traumas = 5
+max_beliefs = 10
+trauma_decay = "slow"            # fast | normal | slow
+sleep_consolidation = true
+
+# v0.3 §15.11: per-layer enable toggles. A disabled layer degrades to the
+# native deterministic path instead of running an LLM call.
+[agents.layers]
+memory = true
+cognition = true
+social = true
+
+# v0.3 R5: sim<->sim dialogue channel. Two seated, non-player Sims may exchange
+# a short (1-2 line) conversation per zone pulse; the spoken lines reach the
+# game through the normal intent pull, and a per-pair cooldown avoids repeats.
+[agents.social]
+max_pairs_per_tick = 1
+pair_cooldown_seconds = 180.0
+line_max_tokens = 200
+
+# ─── RUNTIME ──────────────────────────────────────────────────────────
+[runtime]
+# Expose the live agent roster + dials to the mod panel (`sw.agents`).
+expose_roster = true
+# Lifecycle: shut the sidecar down when The Sims 4 exits, so it never lingers
+# after the game closes. The mod passes its own PID via SENSEWRIGHT_GAME_PID when
+# it spawns the sidecar; `game_pid` is a manual override. If the sidecar was
+# already running, the mod arms it at boot through POST /v1/lifecycle/attach.
+shutdown_on_game_exit = true
+# game_pid = 1234
+# Fallback: watch by process name (off by default; can false-positive in dev).
+watch_game_process_name = false
+game_process_name = "TS4_x64.exe"
+game_watch_interval_seconds = 2.0
+game_watch_grace_seconds = 5.0
+
+# ─── GOD ──────────────────────────────────────────────────────────────
+# Defaults only. The neighborhood zeitgeist and per-save overrides live in the
+# sidecar SQLite (neighborhoods table), keyed by save_id. See GET /v1/god/controls
+# for the full ControlSpec registry.
+[god]
+enabled = false
+preset = "novela"                # novela | sitcom | drama | caos | terror | romance | filme_adolescente
+intervention_frequency = 0.5     # 0..1
+intensity = 0.5                  # 0..1
+mood_influence = 0.5             # 0..1  zeitgeist influence over backgrounds/mood
+autonomy_degree = 0.5            # 0..1
+chaos_degree = 0.3               # 0..1
+# Slowest cadence between two God interventions (seconds). The frequency and
+# autonomy dials shorten it down to a 30 s floor (Phase 5c orchestration).
+base_interval_seconds = 600.0
+powers = { spawn_npc = true, apply_trait = true, force_social = true,
+           gossip = true, relationship_shift = true, extreme_events = false }
+
+# Free-form ControlSpec-validated overrides.
+[god.settings]
+evolution_speed = "normal"       # slow | normal | fast
+
+# Progressive background pipeline (Phase 5b): writes Sim/household backgrounds
+# off the request path on the free tier, active-zone first, then related NPCs.
+# Its budgeter is separate from the chat path so it never steals a chat slot.
+[god.backgrounds]
+enabled = true
+batch_size = 2                   # jobs per tick
+interval_seconds = 15.0          # pause between non-empty ticks
+idle_seconds = 30.0              # pause when the queue is empty
+per_minute = 6                   # burst cap (0 = unlimited)
+daily_limit = 120                # background generations per day (0 = unlimited)
+max_queue = 200                  # queued job cap
+max_attempts = 2                 # retries per job before giving up
