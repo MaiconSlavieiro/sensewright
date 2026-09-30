@@ -332,10 +332,11 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 4. Commit on the branch and follow the CHANGELOG format (keep `research/ts4/` and
    `research/ui-refs/` gitignored).
 
-**Current TODO on the board — resume the stack migration.** The in-game layer is
-already based on **S4CL + Lot 51 Core** (branch `migrate-s4cl-lot51`), offline-green
-(384 mod tests, `py -3.7 mod/build.py` builds the `.ts4script` + `.package`). Next
-session, in order:
+**Current TODO on the board — the stack migration is offline-complete (build
+`.26`).** The in-game layer is based on **S4CL + Lot 51 Core** (branch
+`migrate-s4cl-lot51`), offline-green (384 mod tests, `py -3.7 mod/build.py` builds
+the `.ts4script` + `.package`, no direct library import outside `integrations.py`).
+**Only live validation remains.** Next session, in order:
 
 1. **Validate the stack live** (`docs/stack_migration.md` checklist): install S4CL +
    Lot 51 Core at the Mods root, then confirm the import paths resolve
@@ -346,8 +347,9 @@ session, in order:
 2. **API surface** — done offline: paths were verified against the cloned S4CL /
    Lot 51 sources (`research/ui-refs/`) and `integrations.py` + `pie_menu.py` were
    corrected (registry path, dialog/notification signatures, choose-response
-   dialog). Fix anything the live run still proves wrong and update the API table in
-   `docs/stack_migration.md`.
+   dialog). Every dialog (notifications, ok/cancel, God UI) now goes through the
+   seam (`.26`). Fix anything the live run still proves wrong and update the API
+   table in `docs/stack_migration.md`.
 3. **Fase E — done offline (build `.24`)**: the collectors now prefer the S4CL
    utilities (`CommonTraitUtils`/`CommonBuffUtils`/`CommonSimCareerUtils`/
    `CommonAgeUtils`/`CommonGenderUtils`) with the validated native paths as

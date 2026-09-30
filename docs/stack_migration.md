@@ -30,6 +30,21 @@ seam. Every helper is guarded and returns `None`/`False` when a library (or the
 game) is absent, so the offline test suite runs on plain CPython and the game stays
 safe if a patch changes an import path.
 
+## Migration status
+
+**Offline-complete** as of build `2026-09-29.26` (mod tests **384** green,
+`py -3.7 mod/build.py` builds both artifacts; no direct `lot51_core`/`sims4communitylib`
+import exists outside `integrations.py`):
+
+- done: API surface verified against the cloned sources + tuning `.package`;
+  pie menu on `CommonInteractionRegistry`; S4CL notifications/dialogs;
+  Fase E collector reads; Lot 51 custom service lifecycle; God UI through the seam.
+- **remaining: live validation only** — the exact import paths and every gameplay
+  flow must be confirmed in-game (see the checklist below). Not yet shipped: a
+  custom `Sensewright` `PieMenuCategory` + SimData and submenus (needs extra DBPF
+  resource types; kept as a follow-up), and the optional removal of the native
+  alarm safety net once the tick path is proven live.
+
 ## Libraries and locale
 
 The data-driven locale system is **preserved**: `locales/manifest.json` + `i18n.t`
