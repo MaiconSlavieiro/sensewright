@@ -69,6 +69,18 @@ library access is isolated in `mod/sensewright_mod/integrations.py`.
 - Next session: install S4CL + Lot 51 Core at the Mods root, run the
   `docs/stack_migration.md` checklist. See `docs/STATUS.md` §5/§8.
 
+### Changed - God UI dialogs go through the stack seam (build `2026-09-29.26`)
+The God onboarding/background dialogs were the last surface still building
+native dialogs directly, bypassing the stack seam.
+
+- **`god_ui.py`**: `_show_ok_cancel` now prefers S4CL
+  (`integrations.s4cl_ok_cancel` + `s4cl_show_ok_cancel`, forwarding the
+  confirm callback) and keeps the validated native `UiDialogOkCancel` as the
+  fallback; `_localize` delegates to `integrations.native_localized_string` (all
+  stack access now goes through `integrations.py`, SKILL §17).
+- Tests: mod **381 -> 384** (S4CL preference + native fallback + the `_localize`
+  seam).
+
 ### Added - Lot 51 custom service owns the collector lifecycle (build `2026-09-29.25`)
 The stack base now owns the in-game startup lifecycle through a **Lot 51 custom
 service** (registered at load, driven by the game's service manager) instead of

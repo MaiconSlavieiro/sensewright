@@ -10,7 +10,7 @@ functions are best-effort: they never block and never raise.
 
 from typing import Any, Dict, Optional
 
-from . import http_client, i18n, sim_context
+from . import http_client, i18n, integrations, sim_context
 from .debug_log import (
     debug_log,
     log_exception,
@@ -258,32 +258,27 @@ def _try_import_dialog_class():
 
 
 def _localize(text: str) -> Any:
-    """Wrap a plain string in a game localized string when possible."""
-    try:
-        from sims4.localization import LocalizationHelperTuning  # type: ignore
-    except Exception:
-        return text
-    for method_name in (
-        "get_localized_string",
-        "get_localized_string_from_string",
-        "to_localized_string",
-    ):
-        method = getattr(LocalizationHelperTuning, method_name, None)
-        if not callable(method):
-            continue
-        try:
-            return method(text)
-        except Exception as exc:
-            log_exception("god_ui._localize", exc)
-            continue
-    return text
+    """Wrap a plain string in a game localized string (via the stack seam)."""
+    return integrations.native_localized_string(text)
 
 
 def _show_ok_cancel(sim_info, title: str, text: str, on_ok) -> bool:
     """
-    Best-effort vanilla ok/cancel dialog. Returns True when a dialog was shown,
-    False when the UI is unavailable (caller should fall back to console).
+    Best-effort ok/cancel dialog. The stack base (S4CL) is preferred; the
+    validated native ``UiDialogOkCancel`` is the fallback. Returns True when a
+    dialog was shown, False when the UI is unavailable (caller falls back to
+    console).
     """
+    # Layer 0: S4CL ok/cancel (the stack base).
+    try:
+        dialog = integrations.s4cl_ok_cancel(title, text)
+        if dialog is not None and integrations.s4cl_show_ok_cancel(
+                dialog, sim_info, on_confirm=on_ok):
+            return True
+    except Exception as exc:
+        log_exception("god_ui._show_ok_cancel.s4cl", exc)
+
+    # Layer 1: native UiDialogOkCancel (validated fallback).
     dialog_class = _try_import_dialog_class()
     if dialog_class is None:
         return False

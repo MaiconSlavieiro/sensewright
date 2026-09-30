@@ -14,7 +14,7 @@ sys.path.insert(0, mod_dir)
 
 import pytest
 
-from sensewright_mod import debug_log, god_ui, http_client, i18n
+from sensewright_mod import debug_log, god_ui, http_client, i18n, integrations
 
 
 @pytest.fixture(autouse=True)
@@ -402,6 +402,39 @@ def test_output_hint_falls_back_to_debug_log(monkeypatch):
 
     assert god_ui._output_hint("hello") is True
     assert any("hello" in message for message in logged)
+
+
+def test_show_ok_cancel_prefers_s4cl(monkeypatch):
+    sentinel = object()
+    captured = {}
+    monkeypatch.setattr(integrations, "s4cl_ok_cancel", lambda title, text: sentinel)
+
+    def fake_show(dialog, sim_info=None, on_confirm=None, on_cancel=None):
+        captured["dialog"] = dialog
+        captured["on_confirm"] = on_confirm
+        return True
+
+    monkeypatch.setattr(integrations, "s4cl_show_ok_cancel", fake_show)
+    called = []
+    monkeypatch.setattr(god_ui, "_try_import_dialog_class",
+                        lambda: (_ for _ in ()).throw(AssertionError("native")))
+
+    assert god_ui._show_ok_cancel(None, "t", "d", lambda: called.append(True)) is True
+    assert captured["dialog"] is sentinel
+    captured["on_confirm"]()
+    assert called == [True]
+
+
+def test_show_ok_cancel_falls_back_when_s4cl_absent(monkeypatch):
+    monkeypatch.setattr(integrations, "s4cl_ok_cancel", lambda title, text: None)
+    monkeypatch.setattr(god_ui, "_try_import_dialog_class", lambda: None)
+
+    assert god_ui._show_ok_cancel(None, "t", "d", lambda: None) is False
+
+
+def test_localize_delegates_to_stack_seam():
+    # Offline the seam returns the plain string unchanged.
+    assert god_ui._localize("hello") == "hello"
 
 
 if __name__ == "__main__":

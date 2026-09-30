@@ -19,7 +19,7 @@ at the Mods **root** (top level or one folder deep).
 | Pie menu | tuning XML + DBPF `.package` + **XmlInjector** | tuning XML + `.package` (**kept** — S4CL needs a tuning per custom interaction) + S4CL `CommonInteractionRegistry` handler (`pie_menu.install`) |
 | Pulse loop | `Zone.update` wrapper (native) | **Lot 51 `CoreEvent.GAME_TICK`** first, native wrapper as fallback (`state_collector.install_zone_hook`) |
 | Notifications | native `UiDialogNotification` | **S4CL `CommonBasicNotification`** first, native path as fallback (`chat_ui.show_notification`) |
-| Confirmation | native ok/cancel | **S4CL ok/cancel** first, native path as fallback (`dialogs.confirm`) |
+| Confirmation | native ok/cancel | **S4CL ok/cancel** first, native path as fallback (`dialogs.confirm`, `god_ui._show_ok_cancel`) |
 | Config panel (R7/P2) | `sw.uitest` spike | real `panel_ui.open_panel` over `GET /v1/god/controls`; `sw.panel` cheat + pie-menu entry |
 | Collector lifecycle | command paths + `Zone.update` start | **Lot 51 custom service** (`stack_service.py`: `on_zone_load` → `ensure_started`, `stop` → `stop`), native hook as fallback |
 | Collector reads (Fase E) | raw game objects | **S4CL utilities first** (`CommonTraitUtils`/`CommonBuffUtils`/`CommonSimCareerUtils`/`CommonAgeUtils`/`CommonGenderUtils`), native paths as fallback |

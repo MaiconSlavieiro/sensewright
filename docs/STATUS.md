@@ -1,6 +1,6 @@
 # Sensewright — Status & Handoff
 
-> Last updated: **2026-09-30**. In-game build: **`2026-09-29.25`**;
+> Last updated: **2026-09-30**. In-game build: **`2026-09-29.26`**;
 > **in-game layer migrated to the stack base (S4CL + Lot 51 Core)** on branch
 > **`migrate-s4cl-lot51`** (repo moved to `C:\workspace\sensewright`). Cheats are
 > **`sw.*`**, artifacts `Sensewright.ts4script` + `Sensewright.package` (tuning),
@@ -23,13 +23,13 @@
 | Repo root | `C:\workspace\sensewright` (git repo, branch **`migrate-s4cl-lot51`**; pre-migration on `main` / tag `pre-migracao`) |
 | In-game mod | `mod/sensewright_mod/` (Python 3.7; **stdlib + S4CL + Lot 51 Core**) |
 | Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
-| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.25"` |
+| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.26"` |
 | Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` + `Sensewright.package` (tuning; XmlInjector retired) |
 | Stack libs | `...\Mods\` root: `sims4communitylib*.ts4script` + `lot51_core*.ts4script` (required) |
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
 | Game install | `C:\Program Files\EA Games\The Sims 4` |
-| Tests | sidecar **461**, mod **381**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
+| Tests | sidecar **461**, mod **384**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
 
 **Sidecar runs from source with the workspace venv** (no PyInstaller yet — Phase 6).
 The mod **autoboots** it (`install-mod.ps1` writes the venv interpreter to
@@ -150,7 +150,12 @@ native API map learned in P0 still applies to that fallback:
 
 ---
 
-## 4. What changed in `.25` / `.24` / `.23` / `.22` / `.21` / `.20`
+## 4. What changed in `.26` / `.25` / `.24` / `.23` / `.22` / `.21` / `.20`
+
+**`.26` (God UI through the seam):** `god_ui._show_ok_cancel` prefers S4CL
+(`integrations.s4cl_ok_cancel`/`s4cl_show_ok_cancel`) with the native
+`UiDialogOkCancel` fallback; `_localize` uses
+`integrations.native_localized_string`. Tests: mod **381 -> 384**.
 
 **`.25` (Lot 51 custom service, needs a live re-check):** the stack base owns the
 collector lifecycle:
@@ -329,7 +334,7 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 
 **Current TODO on the board — resume the stack migration.** The in-game layer is
 already based on **S4CL + Lot 51 Core** (branch `migrate-s4cl-lot51`), offline-green
-(381 mod tests, `py -3.7 mod/build.py` builds the `.ts4script` + `.package`). Next
+(384 mod tests, `py -3.7 mod/build.py` builds the `.ts4script` + `.package`). Next
 session, in order:
 
 1. **Validate the stack live** (`docs/stack_migration.md` checklist): install S4CL +

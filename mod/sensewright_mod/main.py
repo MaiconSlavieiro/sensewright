@@ -79,7 +79,7 @@ VALID_LANGUAGES = tuple(["auto"] + list(i18n.available_locales()))
 
 # Bumped on each in-game behaviour change so the loaded build can be confirmed
 # from `sensewright_output.log` (the game only loads script mods at startup).
-_BUILD = "2026-09-29.25"
+_BUILD = "2026-09-29.26"
 
 
 def _join_args(first, rest) -> str:
