@@ -401,7 +401,7 @@ These bugs were found during in-game validation and are critical to avoid:
 
 12. **Never rewrite `.md`/`.json` with PowerShell `Set-Content -Encoding UTF8`.** The
     Windows PowerShell 5.1 encoder writes a BOM and, combined with mis-decoding, turns
-    `—` into `â€"` and `§` into `Â§` (double-encoded UTF-8). This is how this very skill
+    `—` into `â€"` and `§` into `§` (double-encoded UTF-8). This is how this very skill
     got corrupted. Use the editor/Write tools, a UTF-8 no-BOM .NET write
     (`[System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($false)))`),
     or Python `open(path, "w", encoding="utf-8")`.

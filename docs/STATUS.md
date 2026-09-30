@@ -232,7 +232,7 @@ keys), so no live check needed beyond the rebuilt artifact loading.
    `[validate] god: directive ...` lines, a narrator notification, and the
    mapped tool landing (trait/buff/social) on an unplayed Sim.
 4. **Pie menu polish** (next features): a real **God submenu** on the computer, an
-   **agent submenu** on the Sim, a **custom “Sensewrightâ€ category**, and **our own
+   **agent submenu** on the Sim, a **custom “Sensewright” category**, and **our own
    icons** (SVG→DDS→`.package`).
 
 ---
@@ -294,5 +294,5 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 **P2** (the native config panel over the P1 sidecar: `panel_ui.py` + `sw.set`/
 `sw.panel`, `http_client.set_god_controls`, boot-notification button). After that
 the recommended order is **(a)** real **God submenu** on the computer, **(b)**
-real **agent submenu** on the Sim, **(c)** custom **“Sensewrightâ€ pie category** +
+real **agent submenu** on the Sim, **(c)** custom **“Sensewright” pie category** +
 **own icons** (DDS pipeline).
