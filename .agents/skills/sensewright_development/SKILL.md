@@ -15,8 +15,9 @@ this skill covers the day-to-day coding rules.
 > reintroduce them.
 
 > **Starting a new session?** Read, in order: **`docs/STATUS.md`** (current build,
-> what's validated live, pending checks, known issues) → **`docs/ts4_internals.md`**
-> (confirmed game APIs) → **`docs/ui_panel.md`** (native panel plan) → `PLANO.md`.
+> what's validated live, pending checks, known issues) → **`docs/stack_migration.md`**
+> (S4CL + Lot 51 base, the seam and the live checklist) → **`docs/ts4_internals.md`**
+> (confirmed game APIs) → **`docs/ui_panel.md`** (panel plan) → `PLANO.md`.
 
 ---
 

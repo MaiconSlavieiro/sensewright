@@ -44,9 +44,16 @@ library access is isolated in `mod/sensewright_mod/integrations.py`.
 - `mod/tuning/**`, `mod/build_package.py`, `mod/sensewright_mod/ui_probe.py` and the
   `sw.uitest` cheat (XML/package/XmlInjector pipeline retired).
 
-**Notes**
+**Notes / resume here**
+- Repo moved to `C:\workspace\sensewright`; the pre-migration state is preserved on
+  `main` + tag `pre-migracao`; the migration is on branch `migrate-s4cl-lot51`
+  (commit `66481d2`). Mod tests **360** green; `py -3.7 mod/build.py` clean.
 - Live validation of the exact S4CL/Lot 51 import paths and the pie-menu
-  display-name localization is pending (see `docs/stack_migration.md`).
+  display-name localization is pending (`docs/stack_migration.md`).
+- Next session: install S4CL + Lot 51 Core at the Mods root, run the
+  `docs/stack_migration.md` checklist, fix `integrations.py` paths as needed, then
+  continue with Fase E (S4CL utilities in `sim_context`/census). See
+  `docs/STATUS.md` §5/§8.
 
 ### Changed - Sidecar content localization is data-driven (sidecar only)
 All deterministic (no-LLM) content strings moved out of Python into flat JSON

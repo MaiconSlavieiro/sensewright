@@ -1,11 +1,18 @@
 # Sensewright — Status & Handoff
 
-> Last updated: **2026-09-29**. Build in the game: **`2026-09-29.23`** (project
-> renamed **Sensewright**; cheats are **`sw.*`**, artifact `Sensewright.ts4script`,
-> install folder `Mods\Sensewright\` — see `CHANGELOG.md`).
+> Last updated: **2026-09-29 (afternoon)**. In-game build: **`2026-09-29.23`**;
+> **in-game layer migrated to the stack base (S4CL + Lot 51 Core)** on branch
+> **`migrate-s4cl-lot51`** (repo moved to `C:\workspace\sensewright`). Cheats are
+> **`sw.*`**, artifact `Sensewright.ts4script`, install folder `Mods\Sensewright\`
+> (no `.package`, no XmlInjector — see `CHANGELOG.md`).
+>
+> **⚠️ The stack migration is code-complete and offline-green but NOT yet validated
+> in-game.** The exact S4CL/Lot 51 import paths must be confirmed live; start with
+> **`docs/stack_migration.md`** and §5 item 0.
 >
 > This file is the entry point for a new session. Read it, then
-> `docs/ts4_internals.md`, `PLANO.md`, `docs/ui_panel.md`, and `CHANGELOG.md`.
+> `docs/stack_migration.md`, `docs/ts4_internals.md`, `PLANO.md`,
+> `docs/ui_panel.md`, and `CHANGELOG.md`.
 
 ---
 
@@ -52,6 +59,10 @@ python -m pytest mod\tests -q
 
 ## 2. What is implemented
 
+- **Stack base (S4CL + Lot 51 Core)**: the in-game layer is now built on the two
+  community libraries (branch `migrate-s4cl-lot51`); all access is isolated in
+  `mod/sensewright_mod/integrations.py`. Offline-green; **live validation of the
+  import paths is pending** (`docs/stack_migration.md`).
 - **Phases 1–5c** (skeleton → God orchestration): code-complete.
 - **v0.2 §14** (M1/M2 memory, A1–A3 agency, P1 personality, G1 God scoping): code-complete.
 - **v0.3 §15**:
@@ -59,33 +70,31 @@ python -m pytest mod\tests -q
     **R4 cognition** (`agent/cognition.py`), **R6 God director**, **F0/F1** decompiler + `sw.probe`.
   - **R5 sim↔sim channel** (`agent/social.py`): two seated Sims get a 1–2 line exchange
     (LLM + template fallback) → two `speak` intents (executed by the GameLever).
-  - **R7 panel** — dials + `sw.agents` + `sw.lang`; full native panel specified in
-    `docs/ui_panel.md`.
+  - **R7 panel** — `panel_ui.py` (S4CL) + `sw.panel`, plus the `sw.agents` roster
+    and `sw.lang`; see `docs/ui_panel.md`.
   - **God orchestration loop (`.23`)** — `state_collector.maybe_god_tick` runs the
     Phase 5c tick from the zone heartbeat and executes the directives;
     `sw.god on|off|tick|preset|set` controls it.
-- **Lifecycle**, **validation logging**, **collector auto-start** (`zone.Zone.update`
-  heartbeat every 15 s), **buffs** (`SimInfo.Buffs._active_buffs` → `Buff.buff_type.__name__`).
+- **Lifecycle**, **validation logging**, **collector auto-start** (Lot 51
+  `GAME_TICK`, native `zone.Zone.update` fallback; ~15 s pulse), **buffs**
+  (`SimInfo.Buffs._active_buffs` → `Buff.buff_type.__name__`).
 
-### 2a. In-game native UI (P0 spike — validated live)
+### 2a. In-game UI on the stack (S4CL + Lot 51)
 
-`mod/sensewright_mod/ui_probe.py` + `sw.uitest <kind>` (also `all`, `probe`, `pie`):
-
-- Dialog kinds (all `ok=True` live): `notification`, `okcancel`, `picker`,
-  `picker_icons` (EA icons), `picker_text`, `dropdown`, `labeled_icons`,
-  `info_columns`, `response` (`SEND_COMMAND` button), `input` (numeric), `multi`.
-- **Navigable panel mock**: `sw.uitest panel` / `sw.uitest panel_home`
-  (sections → settings → best widget per kind).
+The P0 native-dialog spike (`ui_probe.py` + `sw.uitest`) was **validated live and
+then retired** with the stack migration. Notifications/dialogs now prefer the S4CL
+APIs via `integrations.py`; the native dialog classes remain the fallback. The
+native API map learned in P0 still applies to that fallback:
 - **API map learned** (from the shipped `simulation.zip` bytecode): dialog
   **title/text/text_ok** = factories; picker **row name/description** =
   `LocalizedString`; **row tooltip** = factory; **row icon** = `ResourceKey`;
   `response_command` = namedtuple + `CommandArgType`; `UiTextInput` needs a
   `length_restriction`.
 
-### 2b. In-game configuration panel (P1 done, P2 next)
+### 2b. In-game configuration panel (P1 + P2 done)
 
-`docs/ui_panel.md`: native dialogs only (no Flash/slider), `data/panel.toml`
-overlay (never touches `config.toml`), `sw.set`/`sw.panel`.
+`docs/ui_panel.md`: S4CL dialogs (no Flash/slider), `data/panel.toml` overlay
+(never touches `config.toml`), `sw.panel`.
 
 - **P1 — done (build `.21`)**: all §1.4 settings promoted into `ControlSpec`
   with `target`/`path` (+ `restart_only`); generic `apply_values_to_settings` /
@@ -93,36 +102,32 @@ overlay (never touches `config.toml`), `sw.set`/`sw.panel`.
   `panel_store.py` overlay (`POST /v1/config/god?persist` → `data/panel.toml`,
   deep-merged in `load_settings`, `POST /v1/config/panel/reset` deletes it);
   label/desc i18n keys for every spec (en + pt-BR). Sidecar-only + locales.
-- **P2 — next**: `mod/sensewright_mod/panel_ui.py` (model + native renderer +
-  console fallback), `sw.set`/`sw.panel`, `http_client.set_god_controls`,
-  boot-notification button.
+- **P2 — implemented (stack base)**: `mod/sensewright_mod/panel_ui.py` groups the
+  ControlSpec list from `GET /v1/god/controls` into sections and renders them with
+  S4CL dialogs (+ console fallback); opened via `sw.panel` and the pie menu. Live
+  validation of the S4CL dialog navigation is pending.
 
-### 2c. Pie menu (interaction menu) — WORKS via XmlInjector (builds `.12`→`.20`)
+### 2c. Pie menu (interaction menu) — S4CL registration (stack base)
 
-- **`mod/tuning/interactions/*.xml`** — 4 `ImmediateSuperInteraction`s:
-  `SensewrightPanelInteraction`, `…ChatInteraction`, `…ConfirmInteraction`,
-  `…HudInteraction` (module `sensewright_mod.pie_menu`).
-- **`mod/tuning/snippets/sw_injector.xml`** — an **XmlInjector** snippet
-  (`m="xml_injector.snippet"`, type `0x7DF2169C`) that injects the 4 interactions
-  into the **Sim** (`add_interactions_to_sims`) and the Panel into **computers**
-  (`add_interactions_to_objects` + tag `Func_Computer`).
-- **`mod/build_package.py`** — pure-Python DBPF writer: packs the interaction XML
-  (type `0xE882D22F`), the snippet (`0x7DF2169C`), and two STBLs (type `0x220557DA`)
-  into `dist/Sensewright.package`. **Tuning must be zlib-compressed XML**
-  (`sf = 0x80000000|compressed`, `size=uncompressed`, flag `0x00015A42`); STBL is
-  uncompressed (flag `0x00010000`).
-- **STBL language = top byte of the instance**: `0x00` ENG_US, `0x11` POR_BR
-  (group `0`). The package ships **both** tables.
-- **`mod/sensewright_mod/pie_menu.py`** — the interactions dispatch to real native
-  dialogs (`panel` → panel mock, `chat` → text input → `main.run_chat`,
-  `confirm` → Ok/Cancel, `hud` → toggle).
-- **`mod/sensewright_mod/dialogs.py`** — native **text input** + **confirmation**
-  helpers (production, reusable by the panel).
-- Live: the items **appear and run**; text (pt-BR/en) resolved via the STBL fix.
+- **`mod/sensewright_mod/pie_menu.py`** — 4 `CommonImmediateSuperInteraction`
+  classes (`Sensewright{Panel,Chat,Confirm,Hud}Interaction`) registered in Python
+  via `pie_menu.install()` (called from `__init__`). **No tuning XML, no DBPF
+  `.package`, no XmlInjector.**
+- Display names come from the data-driven locales (`cmd.pie.*`) and resolve at
+  interaction time, so `sw.lang` switches language at runtime (**needs live check**).
+- Dispatch runs the same actions as before (`panel` → `panel_ui.open_panel`,
+  `chat` → text input → `main.run_chat`, `confirm` → Ok/Cancel, `hud` → toggle).
+- The previous XML/XmlInjector pipeline (`mod/tuning/**`, `build_package.py`) and
+  the P0 dialog spike (`ui_probe.py`, `sw.uitest`) were **removed**.
 
 ---
 
 ## 3. Validated live (in-game)
+
+> **Pre-migration baseline.** Everything below was validated with the **native**
+> implementation. The S4CL/Lot 51 migration (branch `migrate-s4cl-lot51`) reuses
+> these flows but its library paths are **not yet validated in-game** — see
+> `docs/stack_migration.md` and §5 item 0.
 
 - `sw.help`, `sw.status`, `sw.chat` (pt-BR reply + tool calls), `sw.probe`.
 - **Lifecycle**: watchdog attached → clean shutdown with the game.
@@ -238,26 +243,26 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 
 ## 6. Known issues / mitigations
 
-- **Pie menu requires XmlInjector** installed in the Mods **root**. A bare
-  `interaction` tuning is **not offered** by the game — it must be injected; that
-  was the multi-build wall (`test()` was never called until injection).
-- **STBL language** is the **top byte of the instance** (`0x00` en, `0x11` pt-BR);
-  a wrong byte → blank item names. The pie-menu tables are data-driven
-  (`mod/tuning/stbl.json`).
+- **Stack base (S4CL + Lot 51 Core) must be installed at the Mods root.**
+  Sensewright no longer ships a `.package` or needs XmlInjector: the pie menu is
+  registered in Python (`pie_menu.install`) and library access is isolated in
+  `integrations.py`. The exact S4CL/Lot 51 import paths need live validation
+  (`docs/stack_migration.md`).
 - **Locales are data-driven.** Do not hardcode `("en","pt-BR")`/`_LANG_NAMES` or
   inline translated content. Mod UI: `locales/manifest.json` + `i18n.py`. Sidecar
   content: `locales_content/manifest.json` + `content_i18n.py` (+ `lexicon.json`).
   Adding a language = drop a JSON + a manifest entry (SKILL §9).
 - **`.package` HEADER**: index offset lives at `0x40` (64-bit); write `0` at
   `0x28` (matches S4S-built packages).
-- **Game-clock alarms** are unreliable (validated: don't tick). Use the
-  `zone.Zone.update` heartbeat. Alarm callbacks **must accept `*args`** (the game
-  passes the handle) — `.13` fixed the crash.
+- **Game-clock alarms** are unreliable (validated: don't tick). The pulse loop is
+  driven by the **Lot 51 `GAME_TICK`** (`events.register_lot51_tick`), falling back
+  to the native `zone.Zone.update` wrapper. Alarm callbacks **must accept `*args`**
+  (the game passes the handle) — `.13` fixed the crash.
 - **Player-priority lock is per-Sim** (intended).
 - **Sidecar needs the venv Python** until Phase 6; re-run the installer after a
   venv change.
-- **`sw.uitest` is a dev spike** and its `input` kind is **numeric** (intentional);
-  production text input is `dialogs.prompt_text`.
+- **`sw.uitest`/`ui_probe` were removed** with the stack migration; the real panel
+  is `panel_ui.py` (open with **`sw.panel`** or the pie-menu entry).
 - **Docs encoding**: do **not** rewrite `.md`/`.json` with PowerShell
   `Set-Content -Encoding UTF8` (it double-encodes accents); use the editor tools.
 
@@ -269,8 +274,8 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 - **UI plan**: `docs/ui_panel.md` (native panel, settings inventory, `panel.toml`).
 - **Confirmed game APIs**: `docs/ts4_internals.md`.
 - **Change log**: `CHANGELOG.md` (`[Unreleased]` has builds `.3`–`.23`).
-- **Pie menu**: `mod/tuning/**` (incl. `stbl.json`), `mod/build_package.py`,
-  `mod/sensewright_mod/pie_menu.py`, `dialogs.py`, `ui_probe.py`.
+- **Stack migration**: `docs/stack_migration.md` (API surface + live checklist);
+  `mod/sensewright_mod/integrations.py` (the seam), `pie_menu.py`, `panel_ui.py`.
 - **Localization**: `mod/sensewright_mod/locales/manifest.json` + `i18n.py`;
   `sidecar/sensewright_sidecar/locales_content/` + `content_i18n.py` (SKILL §9).
 - **God orchestration**: `sidecar/.../god/orchestrator.py` + `routers/god.py`;
@@ -286,12 +291,25 @@ keys), so no live check needed beyond the rebuilt artifact loading.
    only at boot).
 3. Validate §4/§5 in-game; keep the loop: implement → test → build → install →
    validate live → document (`CHANGELOG.md` + this file) → update test counts in SKILL.
-4. Before committing: `git init` (keep `research/ts4/` ignored) and follow the
-   CHANGELOG format.
+4. Commit on the branch and follow the CHANGELOG format (keep `research/ts4/` and
+   `research/ui-refs/` gitignored).
 
-**Current TODO on the board:** validate the `.20` improvements live; then build
-**P2** (the native config panel over the P1 sidecar: `panel_ui.py` + `sw.set`/
-`sw.panel`, `http_client.set_god_controls`, boot-notification button). After that
-the recommended order is **(a)** real **God submenu** on the computer, **(b)**
-real **agent submenu** on the Sim, **(c)** custom **“Sensewrightâ€ pie category** +
-**own icons** (DDS pipeline).
+**Current TODO on the board — resume the stack migration.** The in-game layer is
+already based on **S4CL + Lot 51 Core** (branch `migrate-s4cl-lot51`), offline-green
+(360 mod tests, `py -3.7 mod/build.py`). Next session, in order:
+
+1. **Validate the stack live** (`docs/stack_migration.md` checklist): install S4CL +
+   Lot 51 Core at the Mods root, then confirm the import paths resolve
+   (`integrations`), `lot51_status()` reports `available/tick=true`, the pulse runs
+   on `CoreEvent.GAME_TICK`, S4CL notifications render, the pie menu shows the 4
+   items **without XmlInjector**, display names follow `sw.lang`, and `sw.panel`
+   opens.
+2. **Fix the import paths** the live run proves wrong (all in `integrations.py`) and
+   update the API table in `docs/stack_migration.md`.
+3. **Fase E (deferred)**: migrate `sim_context.py`/census trait/buff/career reads to
+   S4CL utilities (`CommonTraitUtils`/`CommonBuffUtils`), keeping the
+   primitive-coercion contract and exact tuning-id matching (SKILL §7).
+4. **Optional**: move the remaining native alarms to a Lot 51 custom service and
+   drop the fallback once the tick path is proven stable.
+5. Then resume the previous board: God submenu (computer), agent submenu (Sim),
+   custom pie category + own icons (DDS pipeline).
