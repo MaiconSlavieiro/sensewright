@@ -9,7 +9,7 @@ reproduced here as required by their licenses.
 
 ## Sims 4 Community Library (S4CL) - runtime dependency
 
-- Source: <https://github.com/ColonolNutty/Sims4CommunityLibrary>
+- Source: <https://github.com/DeviantGameMods/Sims4CommunityLibrary>
 - License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 - Copyright (c) ColonolNutty / DeviantGameMods
 

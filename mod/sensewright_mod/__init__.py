@@ -32,7 +32,8 @@ except Exception:
     # Silent fail - mod stays functional in native mode
     pass
 
-# Register the pie-menu interactions with S4CL (stack base; no XML package).
+# Register the pie-menu interactions with S4CL (stack base). The interaction
+# tuning lives in Sensewright.package; no XmlInjector.
 try:
     from . import pie_menu
     pie_menu.install()

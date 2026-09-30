@@ -210,6 +210,17 @@ def main():
     if not create_ts4script(package_dir, output_path, args.verbose):
         return 1
 
+    # Build the tuning package (custom pie-menu interactions). S4CL needs a
+    # tuning resource per custom interaction; XmlInjector is no longer used.
+    print("Building tuning package...")
+    try:
+        import build_package
+        package_path = build_package.build_package()
+        print("Built tuning package: {}".format(package_path))
+    except Exception as e:
+        print("ERROR building tuning package: {}".format(e))
+        return 1
+
     # List contents
     contents = list_archive_contents(output_path)
     print("\nArchive contents ({} files):".format(len(contents)))

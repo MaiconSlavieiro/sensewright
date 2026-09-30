@@ -47,6 +47,18 @@ def test_dispatch_never_raises():
     pie_menu._dispatch("panel")
 
 
+def test_tuning_ids_match_packaged_xml():
+    assert pie_menu.TUNING_PANEL == 16907656493241729025
+    assert pie_menu.TUNING_CHAT == 16907656493241729026
+    assert pie_menu.TUNING_CONFIRM == 16907656493241729027
+    assert pie_menu.TUNING_HUD == 16907656493241729028
+
+
+def test_build_handlers_without_s4cl_is_empty():
+    # No S4CL on the test host: no handlers can be built.
+    assert pie_menu._build_handlers() == ()
+
+
 def test_install_without_s4cl_is_safe():
     # On the test host S4CL is absent: install must return False, not raise.
-    assert pie_menu.install() in (True, False)
+    assert pie_menu.install() is False

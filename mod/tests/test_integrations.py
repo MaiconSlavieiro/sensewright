@@ -42,8 +42,13 @@ def test_s4cl_helpers_are_safe_without_lib():
     assert integrations.s4cl_show_notification(None) is False
     assert integrations.s4cl_ok_cancel("t", "d") is None
     assert integrations.s4cl_show_ok_cancel(None) is False
+    assert integrations.s4cl_choose_option("t", "d", [(1, "a")]) is None
+    assert integrations.s4cl_show_choose_option(None) is False
     assert integrations.s4cl_interaction_base() is None
-    assert integrations.s4cl_register_interaction(None) is False
+    assert integrations.s4cl_interaction_registry() is None
+    assert integrations.s4cl_interaction_handler_base() is None
+    assert integrations.s4cl_interaction_type("ON_SCRIPT_OBJECT_LOAD") is None
+    assert integrations.s4cl_register_interaction_handler(None, None) is False
 
 
 def test_native_localized_string_returns_input_offline():

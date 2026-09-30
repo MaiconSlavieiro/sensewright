@@ -24,6 +24,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Write-Host "=== Sensewright Mod Installer ===" -ForegroundColor Cyan
 
 $modDist = Join-Path $repoRoot "dist\Sensewright.ts4script"
+$packageDist = Join-Path $repoRoot "dist\Sensewright.package"
 $sidecarSrc = Join-Path $repoRoot "sidecar"
 $sidecarConfig = Join-Path $sidecarSrc "config.toml"
 $configExample = Join-Path $repoRoot "config.example.toml"
@@ -38,6 +39,10 @@ if (-not (Test-Path $modDist)) {
     Write-Error "Mod package not found at $modDist. Run 'make build-mod' first."
     exit 1
 }
+if (-not (Test-Path $packageDist)) {
+    Write-Error "Tuning package not found at $packageDist. Run 'make build-mod' first."
+    exit 1
+}
 if (-not (Test-Path $sidecarSrc)) {
     Write-Error "Sidecar folder not found at $sidecarSrc."
     exit 1
@@ -48,14 +53,16 @@ if (-not (Test-Path $modsDest)) {
     New-Item -ItemType Directory -Path $modsDest -Force | Out-Null
 }
 
-# Copy .ts4script
+# Copy .ts4script and the tuning .package
 Write-Host "Copying mod package..." -ForegroundColor Cyan
 Copy-Item -Path $modDist -Destination $modsDest -Force
 Write-Host "  Copied: Sensewright.ts4script" -ForegroundColor Green
+Copy-Item -Path $packageDist -Destination $modsDest -Force
+Write-Host "  Copied: Sensewright.package" -ForegroundColor Green
 
 # Stack base libraries (S4CL + Lot 51 Core) must be installed by the player at
-# the Mods ROOT. Sensewright no longer ships a .package or XmlInjector: the pie
-# menu is now registered in Python through S4CL.
+# the Mods ROOT. Sensewright ships a tuning .package for the custom interactions
+# and registers them through S4CL's CommonInteractionRegistry (no XmlInjector).
 $requiredLibs = @("sims4communitylib", "lot51_core")
 $missingLibs = @()
 foreach ($lib in $requiredLibs) {
@@ -161,6 +168,7 @@ if ($interpreter) {
 Write-Host "Verifying critical files..." -ForegroundColor Cyan
 $criticalFiles = @(
     (Join-Path $modsDest "Sensewright.ts4script"),
+    (Join-Path $modsDest "Sensewright.package"),
     (Join-Path $sidecarDest "sensewright_sidecar\__main__.py"),
     (Join-Path $sidecarDest "sensewright_sidecar\server.py"),
     $destConfig

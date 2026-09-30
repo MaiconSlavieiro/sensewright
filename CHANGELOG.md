@@ -34,26 +34,41 @@ library access is isolated in `mod/sensewright_mod/integrations.py`.
 - Tests: `test_integrations.py`, `test_panel_ui.py`; rewrote `test_pie_menu.py`.
 
 **Changed**
-- **Pie menu** is now S4CL Python registration (`pie_menu.install`) - no XmlInjector
-  and no tuning `.package`.
+- **Pie menu**: restored the tuning `.package` (S4CL requires a tuning resource
+  per custom interaction - see `mod/tuning/interactions/*.xml`); the interactions
+  are now wired to targets with S4CL's `CommonInteractionRegistry` instead of
+  XmlInjector. `pie_menu.install` registers two handlers (all four interactions on
+  Sims; the panel entry on `Func_Computer` objects).
 - `docs/stack_migration.md` documents the API surface used and the live-validation
   checklist. `SKILL.md` / `PLANO.md` §2.4 / `THIRD_PARTY_NOTICES.md` (S4CL CC BY 4.0
   + Lot 51 MIT) / `install-mod.ps1` / `doctor.ps1` / `Makefile` updated.
 
 **Removed**
-- `mod/tuning/**`, `mod/build_package.py`, `mod/sensewright_mod/ui_probe.py` and the
-  `sw.uitest` cheat (XML/package/XmlInjector pipeline retired).
+- XmlInjector (no snippet tuning), `mod/sensewright_mod/ui_probe.py` and the
+  `sw.uitest` cheat. The tuning `.package` (`mod/tuning/**`,
+  `mod/build_package.py`) is **kept** - S4CL custom interactions need it.
+
+**Fixed**
+- Pie menu could never appear: the old `integrations.s4cl_register_interaction`
+  targeted a non-existent S4CL module and treated an interaction *class* as an
+  interaction *id*. Corrected the S4CL API surface against the real library
+  source - the registry lives in
+  `sims4communitylib.services.interactions.interaction_registration_service`, and
+  `CommonOkCancelDialog.show(on_ok_selected=, on_cancel_selected=)` /
+  `CommonBasicNotification.show()` (global, no Sim) / `CommonChooseResponseDialog`
+  replace the previous guessed signatures.
 
 **Notes / resume here**
 - Repo moved to `C:\workspace\sensewright`; the pre-migration state is preserved on
-  `main` + tag `pre-migracao`; the migration is on branch `migrate-s4cl-lot51`
-  (commit `66481d2`). Mod tests **360** green; `py -3.7 mod/build.py` clean.
-- Live validation of the exact S4CL/Lot 51 import paths and the pie-menu
-  display-name localization is pending (`docs/stack_migration.md`).
+  `main` + tag `pre-migracao`; the migration is on branch `migrate-s4cl-lot51`.
+  Mod tests **366** green; `py -3.7 mod/build.py` clean (builds both
+  `dist/Sensewright.ts4script` and `dist/Sensewright.package`).
+- Live validation of the exact S4CL/Lot 51 import paths (now verified against the
+  cloned library sources) and the pie-menu display-name localization is pending
+  (`docs/stack_migration.md`).
 - Next session: install S4CL + Lot 51 Core at the Mods root, run the
-  `docs/stack_migration.md` checklist, fix `integrations.py` paths as needed, then
-  continue with Fase E (S4CL utilities in `sim_context`/census). See
-  `docs/STATUS.md` §5/§8.
+  `docs/stack_migration.md` checklist, then continue with Fase E (S4CL utilities in
+  `sim_context`/census). See `docs/STATUS.md` §5/§8.
 
 ### Changed - Sidecar content localization is data-driven (sidecar only)
 All deterministic (no-LLM) content strings moved out of Python into flat JSON

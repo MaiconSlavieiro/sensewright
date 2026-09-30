@@ -96,20 +96,7 @@ def _show_choice(sim_info, title: str, text: str, options, on_select) -> bool:
     dialog = integrations.s4cl_choose_option(title, text, options)
     if dialog is None:
         return False
-    show = getattr(dialog, "show", None)
-    if not callable(show):
-        return False
-    for attempt in (
-        lambda: show(sim_info, on_select=on_select),
-        lambda: show(sim_info, on_selection=on_select),
-        lambda: show(sim_info),
-    ):
-        try:
-            attempt()
-            return True
-        except Exception:
-            continue
-    return False
+    return integrations.s4cl_show_choose_option(dialog, sim_info, on_select)
 
 
 def open_panel(sim_info=None) -> bool:

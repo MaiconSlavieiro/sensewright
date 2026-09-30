@@ -3,8 +3,8 @@
 > Last updated: **2026-09-29 (afternoon)**. In-game build: **`2026-09-29.23`**;
 > **in-game layer migrated to the stack base (S4CL + Lot 51 Core)** on branch
 > **`migrate-s4cl-lot51`** (repo moved to `C:\workspace\sensewright`). Cheats are
-> **`sw.*`**, artifact `Sensewright.ts4script`, install folder `Mods\Sensewright\`
-> (no `.package`, no XmlInjector — see `CHANGELOG.md`).
+> **`sw.*`**, artifacts `Sensewright.ts4script` + `Sensewright.package` (tuning),
+> install folder `Mods\Sensewright\` (no XmlInjector — see `CHANGELOG.md`).
 >
 > **⚠️ The stack migration is code-complete and offline-green but NOT yet validated
 > in-game.** The exact S4CL/Lot 51 import paths must be confirmed live; start with
@@ -24,7 +24,7 @@
 | In-game mod | `mod/sensewright_mod/` (Python 3.7; **stdlib + S4CL + Lot 51 Core**) |
 | Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
 | Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.22"` |
-| Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` (no `.package`; XmlInjector retired) |
+| Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` + `Sensewright.package` (tuning; XmlInjector retired) |
 | Stack libs | `...\Mods\` root: `sims4communitylib*.ts4script` + `lot51_core*.ts4script` (required) |
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
@@ -53,7 +53,9 @@ python -m pytest mod\tests -q
 > mods in `research/ui-refs/` (also gitignored). The stack migration (S4CL + Lot 51
 > Core) is documented in **`docs/stack_migration.md`** — including the
 > live-validation checklist for the library import paths and the pie-menu display
-> names. XmlInjector and the tuning `.package` are **retired**.
+> names. XmlInjector is **retired**; the interaction tuning `.package`
+> (`mod/tuning/**`, `mod/build_package.py`) is **kept** because S4CL custom
+> interactions require a tuning resource.
 
 ---
 
@@ -107,18 +109,23 @@ native API map learned in P0 still applies to that fallback:
   S4CL dialogs (+ console fallback); opened via `sw.panel` and the pie menu. Live
   validation of the S4CL dialog navigation is pending.
 
-### 2c. Pie menu (interaction menu) — S4CL registration (stack base)
+### 2c. Pie menu (interaction menu) — S4CL registry + tuning package
 
 - **`mod/sensewright_mod/pie_menu.py`** — 4 `CommonImmediateSuperInteraction`
-  classes (`Sensewright{Panel,Chat,Confirm,Hud}Interaction`) registered in Python
-  via `pie_menu.install()` (called from `__init__`). **No tuning XML, no DBPF
-  `.package`, no XmlInjector.**
-- Display names come from the data-driven locales (`cmd.pie.*`) and resolve at
-  interaction time, so `sw.lang` switches language at runtime (**needs live check**).
+  classes (`Sensewright{Panel,Chat,Confirm,Hud}Interaction`). Their tuning lives
+  in `mod/tuning/interactions/*.xml` (built into `dist/Sensewright.package` by
+  `mod/build_package.py`); `pie_menu.install()` (called from `__init__`) registers
+  two S4CL `CommonScriptObjectInteractionHandler`s: all four on Sims, the panel on
+  `Func_Computer` objects. **No XmlInjector** (S4CL's `CommonInteractionRegistry`
+  replaces it); the tuning `.package` is **kept** — S4CL needs a tuning per custom
+  interaction.
+- Display names come from the packaged STBL (`cmd.pie.*` keys in
+  `mod/tuning/stbl.json`, en + pt-BR); `get_name` is overridden at runtime so
+  `sw.lang` can still switch language (**needs live check**).
 - Dispatch runs the same actions as before (`panel` → `panel_ui.open_panel`,
   `chat` → text input → `main.run_chat`, `confirm` → Ok/Cancel, `hud` → toggle).
-- The previous XML/XmlInjector pipeline (`mod/tuning/**`, `build_package.py`) and
-  the P0 dialog spike (`ui_probe.py`, `sw.uitest`) were **removed**.
+- The XmlInjector snippet pipeline and the P0 dialog spike (`ui_probe.py`,
+  `sw.uitest`) were **removed**.
 
 ---
 
@@ -218,10 +225,12 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 ## 5. Pending live validation (priority order)
 
 0. **Stack migration (S4CL + Lot 51)** — see `docs/stack_migration.md`: confirm the
-   library import paths resolve, `lot51_status()` reports `available/tick=true`, the
-   pulse runs off `CoreEvent.GAME_TICK`, S4CL notifications render, the pie menu
-   shows the 4 items **without XmlInjector**, display names switch with `sw.lang`,
-   and `sw.panel` opens.
+   library import paths resolve (they were verified against the cloned sources),
+   `lot51_status()` reports `available/tick=true`, the pulse runs off
+   `CoreEvent.GAME_TICK`, S4CL notifications render, the pie menu shows the 4 items
+   (tuning `.package` + S4CL `CommonInteractionRegistry`, **no XmlInjector**),
+   display names follow the packaged STBL / switch with `sw.lang`, and `sw.panel`
+   opens.
 1. **`.22` changes** above: play a pie-menu/click interaction and confirm the log
    shows the player-priority lock arming on both sides (mod rails +
    `POST /v1/config/player-activity`), and that the agent's own pushes do **not**
@@ -244,9 +253,10 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 ## 6. Known issues / mitigations
 
 - **Stack base (S4CL + Lot 51 Core) must be installed at the Mods root.**
-  Sensewright no longer ships a `.package` or needs XmlInjector: the pie menu is
-  registered in Python (`pie_menu.install`) and library access is isolated in
-  `integrations.py`. The exact S4CL/Lot 51 import paths need live validation
+  Sensewright needs XmlInjector no more: the pie menu tuning (`Sensewright.package`)
+  is wired to targets by S4CL's `CommonInteractionRegistry` (`pie_menu.install`)
+  and library access is isolated in `integrations.py`. The exact S4CL/Lot 51
+  import paths were source-verified but still need live validation
   (`docs/stack_migration.md`).
 - **Locales are data-driven.** Do not hardcode `("en","pt-BR")`/`_LANG_NAMES` or
   inline translated content. Mod UI: `locales/manifest.json` + `i18n.py`. Sidecar
@@ -296,16 +306,20 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 
 **Current TODO on the board — resume the stack migration.** The in-game layer is
 already based on **S4CL + Lot 51 Core** (branch `migrate-s4cl-lot51`), offline-green
-(360 mod tests, `py -3.7 mod/build.py`). Next session, in order:
+(366 mod tests, `py -3.7 mod/build.py` builds the `.ts4script` + `.package`). Next
+session, in order:
 
 1. **Validate the stack live** (`docs/stack_migration.md` checklist): install S4CL +
    Lot 51 Core at the Mods root, then confirm the import paths resolve
    (`integrations`), `lot51_status()` reports `available/tick=true`, the pulse runs
    on `CoreEvent.GAME_TICK`, S4CL notifications render, the pie menu shows the 4
-   items **without XmlInjector**, display names follow `sw.lang`, and `sw.panel`
-   opens.
-2. **Fix the import paths** the live run proves wrong (all in `integrations.py`) and
-   update the API table in `docs/stack_migration.md`.
+   items (tuning `.package` + `CommonInteractionRegistry`, no XmlInjector), display
+   names follow the packaged STBL / `sw.lang`, and `sw.panel` opens.
+2. **API surface** — done offline: paths were verified against the cloned S4CL /
+   Lot 51 sources (`research/ui-refs/`) and `integrations.py` + `pie_menu.py` were
+   corrected (registry path, dialog/notification signatures, choose-response
+   dialog). Fix anything the live run still proves wrong and update the API table in
+   `docs/stack_migration.md`.
 3. **Fase E (deferred)**: migrate `sim_context.py`/census trait/buff/career reads to
    S4CL utilities (`CommonTraitUtils`/`CommonBuffUtils`), keeping the
    primitive-coercion contract and exact tuning-id matching (SKILL §7).

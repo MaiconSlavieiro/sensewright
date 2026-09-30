@@ -135,12 +135,18 @@ if ($sims4ModsPath -match "OneDrive") {
 Write-Host ""
 Write-Host "--- Mod Build ---" -ForegroundColor Cyan
 $modDist = Join-Path $repoRoot "dist\Sensewright.ts4script"
+$packageDist = Join-Path $repoRoot "dist\Sensewright.package"
 if (Test-Path $modDist) {
     $size = (Get-Item $modDist).Length
     Write-Host "[OK] Mod package exists: $modDist" -ForegroundColor Green
     Write-Host "  Size: $([math]::Round($size / 1KB, 1)) KB" -ForegroundColor Gray
 } else {
     Write-Host "[INFO] Mod package not built yet. Run 'make build-mod'." -ForegroundColor Gray
+}
+if (Test-Path $packageDist) {
+    Write-Host "[OK] Tuning package exists: $packageDist" -ForegroundColor Green
+} else {
+    Write-Host "[INFO] Tuning package not built yet. Run 'make build-mod'." -ForegroundColor Gray
 }
 
 # 7. Stack libraries (S4CL + Lot 51 Core) at the Mods root

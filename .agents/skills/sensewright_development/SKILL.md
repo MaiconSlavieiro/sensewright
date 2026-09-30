@@ -107,12 +107,14 @@ sensewright_mod/
 ├── player_activity.py   # wraps Sim.push_super_affordance → player-priority lock
 ├── probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
 ├── dialogs.py           # native text-input and confirmation dialogs
-├── pie_menu.py          # S4CL interactions (registered in Python; no XmlInjector)
+├── pie_menu.py          # S4CL interactions (tuning .package + registry; no XmlInjector)
 ├── panel_ui.py          # R7 config panel over GET /v1/god/controls (S4CL dialogs)
 └── integrations.py      # the stack seam: Lot 51 Core + S4CL lookups (guarded)
 
 mod/
-└── build.py             # Python 3.7 bytecode → dist/Sensewright.ts4script
+├── build.py             # Python 3.7 bytecode → dist/Sensewright.ts4script
+├── build_package.py     # DBPF writer → dist/Sensewright.package (tuning + STBL)
+└── tuning/              # interaction tuning XML + stbl.json (no XmlInjector)
 ```
 
 ### Sidecar (`sensewright_sidecar/`)
@@ -298,7 +300,7 @@ sensewright_sidecar/
   `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
 - **Mod tests:** `mod/tests/` — run with `python -m pytest mod\tests -q`
   (uses the system Python, not 3.7, since tests don't need the game runtime)
-- **Current counts:** sidecar **461**, mod **363** (update when adding tests).
+- **Current counts:** sidecar **461**, mod **366** (update when adding tests).
 - **Every new feature should include tests.** Prefer unit tests; integration tests
   for wire/endpoint behavior.
 - **CHANGELOG** (`CHANGELOG.md`) must be updated for every meaningful change.
@@ -313,9 +315,10 @@ sensewright_sidecar/
   decorators rather than overriding original methods. Prevents conflicts with
   other mods.
 - **Stack base (S4CL + Lot 51):** do all library access through
-  `integrations.py`. Pie-menu interactions are registered in Python via S4CL
-  (`pie_menu.install`); the event bus / cadence is Lot 51's. **XmlInjector, the
-  tuning `.package` and `build_package.py` were retired.**
+  `integrations.py`. Pie-menu interactions use a tuning `.package`
+  (`mod/tuning/**` + `build_package.py`) wired to targets by S4CL's
+  `CommonInteractionRegistry` (`pie_menu.install`); the event bus / cadence is Lot
+  51's. **XmlInjector is retired; the tuning `.package` is required.**
 - **UI and Dialogs:** prefer the stack (S4CL notifications/dialogs) and fall back
   to TS4's native dialogs. We do not use Flash/GFX. See `chat_ui.py`,
   `dialogs.py` and `panel_ui.py`.
@@ -415,12 +418,17 @@ These bugs were found during in-game validation and are critical to avoid:
 14. **Alarm callbacks must accept `*args`.** The game passes the `AlarmHandle` to the
     callback; a zero-arg callback raises `TypeError` on fire (fixed in build `.13`).
 
-15. **Pie-menu interactions use S4CL registration (XmlInjector retired).** A bare
-    `interaction` tuning is never offered; the 4 Sensewright items are S4CL
-    `CommonImmediateSuperInteraction` classes registered in Python
-    (`pie_menu.install`). **Live-validation risk:** the S4CL registry path/name and
-    per-locale dynamic display names (`sw.lang`) must be confirmed in-game — see
-    `docs/stack_migration.md`.
+15. **Pie-menu interactions use S4CL registration + a tuning package
+    (XmlInjector retired).** A bare interaction tuning is never offered, and S4CL
+    does **not** register custom interaction *classes* — `CommonInteractionRegistry`
+    only adds interaction *tuning ids* to script objects. A custom interaction
+    therefore needs a tuning resource (`mod/tuning/interactions/*.xml`, built into
+    `dist/Sensewright.package` by `mod/build_package.py`) whose `m`/`c` point at the
+    S4CL interaction classes; `pie_menu.install` then registers
+    `CommonScriptObjectInteractionHandler`s (`CommonInteractionType.ON_SCRIPT_OBJECT_LOAD`)
+    for Sims and for `Func_Computer` objects. **Live-validation risk:** the S4CL
+    registry path/name and the packaged-STBL display names (`sw.lang`) must be
+    confirmed in-game — see `docs/stack_migration.md`.
 
 16. **Never hardcode locales.** Do not write `("en","pt-BR")`, `_LANG_NAMES`,
     `if lang == "pt-BR"`, or inline Portuguese/English content strings in code.
@@ -437,16 +445,20 @@ These bugs were found during in-game validation and are critical to avoid:
 
 ## 13. Build and Deploy
 
-There is **one artifact** to rebuild on a mod change (the tuning `.package` and
-`build_package.py` were retired with the S4CL migration):
+There are **two artifacts** to rebuild on a mod change (S4CL needs a tuning
+`.package` for the custom interactions; XmlInjector is retired):
 
 ```powershell
-py -3.7 mod\build.py            # -> dist\Sensewright.ts4script  (script mod)
-powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies it + sidecar
+py -3.7 mod\build.py            # -> dist\Sensewright.ts4script + dist\Sensewright.package
+powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies both + sidecar
 ```
 
-- **Script mod:** `mod/build.py` compiles with Python 3.7. The bytecode magic must
-  be `42 0d 0d 0a` (3.7). Use `--allow-any-python` only for dev builds.
+- **Script mod:** `mod/build.py` compiles with Python 3.7 and then calls
+  `build_package.py`. The bytecode magic must be `42 0d 0d 0a` (3.7). Use
+  `--allow-any-python` only for dev builds.
+- **Tuning package:** `mod/build_package.py` writes `dist/Sensewright.package`
+  (pure-Python DBPF) from `mod/tuning/interactions/*.xml` + `mod/tuning/stbl.json`.
+  No XmlInjector snippet is shipped.
 - **Stack libraries:** the player installs **S4CL** and **Lot 51 Core** at the Mods
   root (top level or one folder deep). Sensewright no longer ships a `.package` or
   requires XmlInjector.
@@ -561,7 +573,7 @@ Checklists for the most common changes. Keep the two packages in lock-step.
 
 - [ ] Sidecar tests green: `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
       (currently **461**).
-- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **360**).
+- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **366**).
 - [ ] Lint clean (sidecar: ruff). Mod compiles with `py -3.7 mod\build.py`.
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` (Added/Changed/Fixed).
 - [ ] If tests were added, update the counts in §10 of this skill.

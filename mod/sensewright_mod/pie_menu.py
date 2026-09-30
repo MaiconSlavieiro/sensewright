@@ -1,17 +1,32 @@
 """
 Pie-menu interactions for Sensewright, built on S4CL (the new stack base).
 
-Each interaction is an S4CL ``CommonImmediateSuperInteraction`` registered in
-Python - no tuning XML, no DBPF package and no XmlInjector dependency. When S4CL
-is unavailable the classes degrade to the native ``ImmediateSuperInteraction``
-(or a plain object) so this module still imports on a plain CPython for tests.
+Each interaction is an S4CL ``CommonImmediateSuperInteraction``. The interaction
+is declared by a tuning resource shipped in ``Sensewright.package`` (see
+``mod/tuning/interactions/*.xml``), whose ``m``/``c`` attributes point at the
+classes below. S4CL's ``CommonInteractionRegistry`` then adds those tuning ids to
+the matching script objects at load - no XmlInjector and no runtime injection.
 
-Display names come from the data-driven locale system (``i18n.t``) and are
-resolved at interaction time, so ``sw.lang`` still switches language at runtime.
+When S4CL is unavailable (offline tests) the classes degrade to the native
+``ImmediateSuperInteraction`` (or a plain object) so this module still imports on
+a plain CPython, and ``install()`` is a no-op. Display names come from the
+packaged STBL (en + pt-BR); ``sw.lang`` can still override them at runtime via
+``get_name``.
 """
 
 from . import i18n, integrations
 from .debug_log import log_exception, debug_log
+
+
+# Tuning instance ids: the ``s`` attribute of ``mod/tuning/interactions/*.xml``.
+# Keep in sync with the XML and ``mod/tuning/stbl.json`` display-name ids.
+TUNING_PANEL = 16907656493241729025
+TUNING_CHAT = 16907656493241729026
+TUNING_CONFIRM = 16907656493241729027
+TUNING_HUD = 16907656493241729028
+
+# Vanilla tag used to add the panel entry to computers (matches the old snippet).
+_COMPUTER_TAG = "FUNC_COMPUTER"
 
 
 def _native_interaction_base():
@@ -33,28 +48,34 @@ def _localize(text):
     return integrations.native_localized_string(text)
 
 
+def _name_override():
+    """A ``flexmethod`` ``get_name`` that resolves the runtime locale.
+
+    Returns ``None`` when the game's ``flexmethod`` is unavailable (offline), so
+    the packaged STBL display name is used instead.
+    """
+    try:
+        from sims4.utils import flexmethod  # type: ignore
+    except Exception:
+        return None
+
+    def get_name(cls, inst, target=None, context=None, **interaction_parameters):
+        try:
+            key = getattr(cls, "DISPLAY_KEY", "")
+            text = i18n.t(key) if key else getattr(cls, "__name__", "Sensewright")
+        except Exception as exc:
+            log_exception("pie_menu.get_name", exc)
+            text = getattr(cls, "__name__", "Sensewright")
+        return _localize(text)
+
+    return flexmethod(get_name)
+
+
 class _SensewrightInteraction(_INTERACTION_BASE):
     """Base pie-menu interaction: runs ``ACTION`` when chosen."""
 
     ACTION = ""
     DISPLAY_KEY = ""
-
-    @classmethod
-    def _display_name(cls):
-        """Localized display name resolved at interaction time (sw.lang aware)."""
-        key = getattr(cls, "DISPLAY_KEY", "")
-        try:
-            text = i18n.t(key) if key else getattr(cls, "__name__", "Sensewright")
-        except Exception:
-            text = getattr(cls, "__name__", "Sensewright")
-        return _localize(text)
-
-    # S4CL reads ``display_name``; provide it as a class attribute when possible.
-    try:
-        if _S4CL_BASE is not None:
-            display_name = _display_name.__func__(None)  # noqa: B010 (best-effort)
-    except Exception:
-        pass
 
     def _run_interaction_gen(self, timeline):
         try:
@@ -66,6 +87,13 @@ class _SensewrightInteraction(_INTERACTION_BASE):
         except Exception as exc:
             log_exception("pie_menu.run.dispatch", exc)
         return True
+
+
+# Runtime language switching: only when S4CL/game present (flexmethod available).
+if _S4CL_BASE is not None:
+    _get_name = _name_override()
+    if _get_name is not None:
+        _SensewrightInteraction.get_name = _get_name
 
 
 class SensewrightPanelInteraction(_SensewrightInteraction):
@@ -106,10 +134,52 @@ _INTERACTIONS = (
 _REGISTERED = {"done": False}
 
 
+def _build_handlers():
+    """Build the S4CL interaction handlers, or return an empty tuple.
+
+    * all four interactions are added to **Sims**;
+    * the panel interaction is added to **computers** (tag ``Func_Computer``).
+    """
+    handler_base = integrations.s4cl_interaction_handler_base()
+    if handler_base is None:
+        return ()
+
+    all_ids = (TUNING_PANEL, TUNING_CHAT, TUNING_CONFIRM, TUNING_HUD)
+
+    class _SimInteractionHandler(handler_base):
+        @property
+        def interactions_to_add(self):
+            return all_ids
+
+        def should_add(self, script_object, *args, **kwargs):
+            try:
+                type_utils = integrations.s4cl_type_utils()
+                return bool(type_utils
+                            and type_utils.is_sim_instance(script_object))
+            except Exception:
+                return False
+
+    class _ComputerInteractionHandler(handler_base):
+        @property
+        def interactions_to_add(self):
+            return (TUNING_PANEL,)
+
+        def should_add(self, script_object, *args, **kwargs):
+            try:
+                tag_utils = integrations.s4cl_object_tag_utils()
+                tag = integrations.s4cl_game_tag(_COMPUTER_TAG)
+                return bool(tag_utils and tag is not None
+                            and tag_utils.has_game_tag(script_object, tag))
+            except Exception:
+                return False
+
+    return (_SimInteractionHandler(), _ComputerInteractionHandler())
+
+
 def install() -> bool:
     """Register the interactions with S4CL so they appear in the pie menu.
 
-    Best-effort and idempotent. Returns True when at least one interaction was
+    Best-effort and idempotent. Returns True when at least one handler was
     registered. Requires S4CL; without it the classes exist but are not offered.
     """
     if _REGISTERED["done"]:
@@ -117,16 +187,25 @@ def install() -> bool:
     if _S4CL_BASE is None:
         debug_log("pie_menu.install: S4CL unavailable; interactions not registered")
         return False
+    try:
+        interaction_type = integrations.s4cl_interaction_type("ON_SCRIPT_OBJECT_LOAD")
+    except Exception as exc:
+        log_exception("pie_menu.install.type", exc)
+        return False
+    if interaction_type is None:
+        debug_log("pie_menu.install: CommonInteractionType unavailable")
+        return False
+
     registered = 0
-    for interaction_cls in _INTERACTIONS:
+    for handler in _build_handlers():
         try:
-            if integrations.s4cl_register_interaction(interaction_cls):
+            if integrations.s4cl_register_interaction_handler(handler, interaction_type):
                 registered += 1
         except Exception as exc:
             log_exception("pie_menu.install", exc)
     _REGISTERED["done"] = registered > 0
-    debug_log("pie_menu.install: registered {}/{} interactions".format(
-        registered, len(_INTERACTIONS)))
+    debug_log("pie_menu.install: registered {}/2 interaction handlers".format(
+        registered))
     return registered > 0
 
 

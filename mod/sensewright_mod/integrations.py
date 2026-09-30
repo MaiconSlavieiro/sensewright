@@ -223,20 +223,22 @@ def s4cl_notification(title: str, text: str) -> Optional[Any]:
 
 
 def s4cl_show_notification(notification: Any, sim_info: Any = None) -> bool:
-    """Show a built S4CL notification to ``sim_info`` (or the active client)."""
+    """Show a built S4CL notification.
+
+    S4CL notifications are global (``show(icon=None, secondary_icon=None)``);
+    they do not target a Sim, so ``sim_info`` is accepted only for call-site
+    symmetry with the native fallback and ignored.
+    """
     if notification is None:
         return False
-    for method_name in ("show", "show_dialog"):
-        method = getattr(notification, method_name, None)
-        if not callable(method):
-            continue
-        for args in ((sim_info,), (), (None,)):
-            try:
-                method(*args)
-                return True
-            except Exception:
-                continue
-    return False
+    show = getattr(notification, "show", None)
+    if not callable(show):
+        return False
+    try:
+        show()
+        return True
+    except Exception:
+        return False
 
 
 # --- S4CL: dialogs -----------------------------------------------------------
@@ -259,43 +261,74 @@ def s4cl_ok_cancel(title: str, text: str) -> Optional[Any]:
 def s4cl_show_ok_cancel(dialog: Any, sim_info: Any = None,
                         on_confirm: Callable = None,
                         on_cancel: Callable = None) -> bool:
-    """Show a built S4CL ok/cancel dialog. Best-effort, never raises."""
+    """Show a built S4CL ok/cancel dialog. Best-effort, never raises.
+
+    S4CL's signature is
+    ``show(on_ok_selected=..., on_cancel_selected=...)`` where each callback
+    receives the ``UiDialogOkCancel`` dialog. ``sim_info`` is accepted for
+    call-site symmetry and ignored.
+    """
     if dialog is None:
         return False
     show = getattr(dialog, "show", None)
     if not callable(show):
         return False
-    callbacks = {"on_confirm": on_confirm, "on_cancel": on_cancel}
-    # Try progressively leaner signatures.
-    attempts = (
-        lambda: show(sim_info, **callbacks),
-        lambda: show(sim_info, on_confirm=on_confirm),
-        lambda: show(sim_info),
-        lambda: show(**callbacks),
-        lambda: show(),
-    )
-    for attempt in attempts:
-        try:
-            attempt()
-            return True
-        except Exception:
-            continue
-    return False
+
+    def _ok(_dialog=None):
+        if callable(on_confirm):
+            on_confirm()
+
+    def _cancel(_dialog=None):
+        if callable(on_cancel):
+            on_cancel()
+
+    try:
+        show(on_ok_selected=_ok, on_cancel_selected=_cancel)
+        return True
+    except Exception:
+        return False
 
 
 def s4cl_choose_option(title: str, text: str, options: List[Any]) -> Optional[Any]:
-    """Build an S4CL option dialog (or ``None``) for a list of (value, label)."""
-    module = _first(
-        "sims4communitylib.dialogs.option_dialogs.common_choose_option_dialog",
-        "sims4communitylib.dialogs.option_dialogs",
-    )
-    dialog_cls = _attr(module, "CommonChooseOptionDialog")
-    if dialog_cls is None:
+    """Build an S4CL choose-response dialog for a list of ``(value, label)``.
+
+    Returns the ``CommonChooseResponseDialog`` (shown with
+    :func:`s4cl_show_choose_option`) or ``None`` when S4CL is unavailable.
+    """
+    dialog_module = _first("sims4communitylib.dialogs.common_choose_response_dialog")
+    dialog_cls = _attr(dialog_module, "CommonChooseResponseDialog")
+    response_module = _first("sims4communitylib.dialogs.common_ui_dialog_response")
+    response_cls = _attr(response_module, "CommonUiDialogResponse")
+    if dialog_cls is None or response_cls is None:
         return None
     try:
-        return dialog_cls(title, text, tuple(options))
+        responses = []
+        for index, option in enumerate(options or ()):
+            value, label = option
+            responses.append(response_cls(index, value, text=label))
+        return dialog_cls(None, title, text, tuple(responses))
     except Exception:
         return None
+
+
+def s4cl_show_choose_option(dialog: Any, sim_info: Any = None,
+                            on_select: Callable = None) -> bool:
+    """Show a built S4CL choose-response dialog. Best-effort, never raises."""
+    if dialog is None:
+        return False
+    show = getattr(dialog, "show", None)
+    if not callable(show):
+        return False
+
+    def _chosen(choice, _outcome=None):
+        if callable(on_select):
+            on_select(choice)
+
+    try:
+        show(sim_info=sim_info, on_chosen=_chosen)
+        return True
+    except Exception:
+        return False
 
 
 # --- S4CL: interactions ------------------------------------------------------
@@ -311,37 +344,67 @@ def s4cl_interaction_base() -> Optional[Any]:
                  "CommonInteraction")
 
 
-def s4cl_register_interaction(interaction_cls: Any) -> bool:
-    """Register an S4CL interaction class so it appears in the pie menu.
-
-    S4CL injects registered interactions itself (no XmlInjector, no .package).
-    The registry class name/location has changed across S4CL versions, so every
-    known path is tried defensively.
-    """
-    if interaction_cls is None:
-        return False
-    registry = _first(
-        "sims4communitylib.classes.interactions.common_interaction_registry",
-        "sims4communitylib.classes.interactions",
+def _interaction_registration_module() -> Optional[Any]:
+    """The S4CL module that owns the interaction registry classes."""
+    return _first(
+        "sims4communitylib.services.interactions.interaction_registration_service",
+        "sims4communitylib.services.interactions",
     )
-    if registry is None:
+
+
+def s4cl_interaction_registry() -> Optional[Any]:
+    """Return ``CommonInteractionRegistry`` (or ``None``)."""
+    module = _interaction_registration_module()
+    return _attr(module, "CommonInteractionRegistry", "InteractionRegistry")
+
+
+def s4cl_interaction_handler_base() -> Optional[Any]:
+    """Return ``CommonScriptObjectInteractionHandler`` (or ``None``)."""
+    module = _interaction_registration_module()
+    return _attr(module, "CommonScriptObjectInteractionHandler")
+
+
+def s4cl_interaction_type(name: str) -> Optional[Any]:
+    """Return a ``CommonInteractionType`` member by name (or ``None``)."""
+    module = _interaction_registration_module()
+    interaction_type = _attr(module, "CommonInteractionType")
+    return _attr(interaction_type, name) if interaction_type is not None else None
+
+
+def s4cl_register_interaction_handler(handler: Any,
+                                      interaction_type: Any) -> bool:
+    """Register a ``CommonScriptObjectInteractionHandler`` instance.
+
+    S4CL injects the handler's ``interactions_to_add`` tuning IDs into the
+    matching script objects at load (no XmlInjector). Best-effort.
+    """
+    registry_cls = s4cl_interaction_registry()
+    if registry_cls is None or handler is None or interaction_type is None:
         return False
-    for cls_name in ("CommonInteractionRegistry", "InteractionRegistry",
-                     "CommonInteractionUtils"):
-        registry_cls = getattr(registry, cls_name, None)
-        if registry_cls is None:
-            continue
-        for method_name in ("register_interaction", "register_interaction_source",
-                            "register"):
-            method = getattr(registry_cls, method_name, None)
-            if not callable(method):
-                continue
-            try:
-                method(interaction_cls)
-                return True
-            except Exception:
-                continue
-    return False
+    try:
+        registry_cls().register_handler(handler, interaction_type)
+        return True
+    except Exception:
+        return False
+
+
+def s4cl_type_utils() -> Optional[Any]:
+    """Return ``CommonTypeUtils`` (used to detect Sim script objects)."""
+    module = _first("sims4communitylib.utils.common_type_utils")
+    return _attr(module, "CommonTypeUtils")
+
+
+def s4cl_object_tag_utils() -> Optional[Any]:
+    """Return ``CommonObjectTagUtils`` (object tag checks)."""
+    module = _first("sims4communitylib.utils.objects.common_object_tag_utils")
+    return _attr(module, "CommonObjectTagUtils")
+
+
+def s4cl_game_tag(name: str) -> Optional[Any]:
+    """Return a ``CommonGameTag`` member by name (or ``None``)."""
+    module = _first("sims4communitylib.enums.tags_enum")
+    tag_enum = _attr(module, "CommonGameTag")
+    return _attr(tag_enum, name) if tag_enum is not None else None
 
 
 # --- S4CL: sim utilities (used by the collectors) ---------------------------
