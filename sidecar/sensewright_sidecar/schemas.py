@@ -11,12 +11,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from . import content_i18n
+
 AutonomyLevel = Literal["off", "observe", "suggest", "semi", "full"]
 ResetScope = Literal["session", "sim", "save", "all"]
 
-# Supported UI/content languages. English is the default and the fallback.
-DEFAULT_LANG = "en"
-SUPPORTED_LANGS = ("en", "pt-BR")
+# Supported UI/content languages, driven by the content-locale manifest.
+DEFAULT_LANG = content_i18n.default_lang()
+SUPPORTED_LANGS = tuple(content_i18n.available_locales())
 
 # Mood tags for the neighborhood zeitgeist (God agent, Phase 5a).
 MOOD_TAGS = (
@@ -31,16 +33,8 @@ MOOD_TAGS = (
 
 
 def normalize_lang(value: str | None) -> str:
-    """Return a supported BCP-47 tag, falling back to English."""
-    if not value:
-        return DEFAULT_LANG
-    raw = value.strip()
-    lowered = raw.lower()
-    if lowered == "en" or lowered.startswith("en-"):
-        return "en"
-    if lowered in ("pt-br", "pt_br", "ptbr", "pt"):
-        return "pt-BR"
-    return DEFAULT_LANG
+    """Return a supported BCP-47 tag, falling back to the default locale."""
+    return content_i18n.normalize_lang(value)
 
 
 class SimRef(BaseModel):
@@ -241,6 +235,8 @@ class CensusSim(BaseModel):
     career: str = ""
     skills: dict[str, Any] = Field(default_factory=dict)
     relationships: list[dict[str, Any]] = Field(default_factory=list)
+    # Native family relations: [{"relation", "target_id", "name"}].
+    kinship: list[dict[str, Any]] = Field(default_factory=list)
     is_player: bool = False
 
 

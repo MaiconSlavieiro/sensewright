@@ -13,6 +13,7 @@ import logging
 import time
 from typing import Any
 
+from .. import content_i18n
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -31,15 +32,6 @@ PROFILE_SHAPE: dict[str, Any] = {
     "source": "template",
     "generated_at": 0.0,
 }
-
-_LANG_NAMES: dict[str, str] = {
-    "en": "English",
-    "pt-BR": "Brazilian Portuguese",
-}
-
-
-def _lang_name(lang: str) -> str:
-    return _LANG_NAMES.get(normalize_lang(lang), "English")
 
 
 def _string_list(value: Any) -> list[str]:
@@ -86,11 +78,12 @@ def normalize_profile(raw: dict) -> dict:
 
 
 def fallback_profile(seed: str, lang: str, native: dict | None = None) -> dict:
-    """Deterministic template profile in ``en`` or ``pt-BR``.
+    """Deterministic template profile in the requested language.
 
     ``native`` may contain ``full_name``/``name``, ``traits`` (list), ``age``,
-    ``career``, ``skills``. Use native traits/name when present; incorporate
-    the seed text. Produce different text for ``en`` vs ``pt-BR``.
+    ``career``, ``skills``. Use native traits/name when present; incorporate the
+    seed text. Text for every language comes from ``locales_content`` (no inline
+    language strings).
     """
     data = native if isinstance(native, dict) else {}
     target_lang = normalize_lang(lang)
@@ -102,48 +95,32 @@ def fallback_profile(seed: str, lang: str, native: dict | None = None) -> dict:
     skills = _string_list(data.get("skills"))
     seed_text = str(seed or "").strip()
 
-    if target_lang == "pt-BR":
-        parts = [f"{name} é um Sim"]
-        if age:
-            parts.append(f"({age})")
-        parts.append("vivendo no bairro.")
-        if seed_text:
-            parts.append(f"Semente: {seed_text}.")
-        if traits:
-            parts.append("Traços: " + ", ".join(traits) + ".")
-        else:
-            parts.append("Sem traços definidos.")
-        if career:
-            parts.append(f"Carreira: {career}.")
-        if skills:
-            parts.append("Habilidades: " + ", ".join(skills) + ".")
-        backstory = " ".join(parts)
-        personality = "Personalidade moldada pelo cotidiano e pelos traços nativos."
-        speech_style = "Fala de forma natural, misturando gírias locais e formalidade ocasional."
-        goals = ["Construir uma vida estável", "Aprofundar laços com vizinhos"]
-        secrets = ["Guarda um segredo do passado"]
-        quirks = ["Organiza objetos por cor", "Fala sozinho enquanto cozinha"]
+    parts = [content_i18n.t(target_lang, "profile.head", name=name)]
+    if age:
+        parts.append(f"({age})")
+    parts.append(content_i18n.t(target_lang, "profile.living"))
+    if seed_text:
+        parts.append(content_i18n.t(target_lang, "profile.seed", seed=seed_text))
+    if traits:
+        parts.append(content_i18n.t(target_lang, "profile.traits", traits=", ".join(traits)))
     else:
-        parts = [f"{name} is a Sim"]
-        if age:
-            parts.append(f"({age})")
-        parts.append("living in the neighborhood.")
-        if seed_text:
-            parts.append(f"Seed: {seed_text}.")
-        if traits:
-            parts.append("Traits: " + ", ".join(traits) + ".")
-        else:
-            parts.append("No traits defined.")
-        if career:
-            parts.append(f"Career: {career}.")
-        if skills:
-            parts.append("Skills: " + ", ".join(skills) + ".")
-        backstory = " ".join(parts)
-        personality = "Personality shaped by daily routine and native traits."
-        speech_style = "Speaks naturally, mixing local slang with occasional formality."
-        goals = ["Build a stable life", "Deepen bonds with neighbors"]
-        secrets = ["Keeps a secret from the past"]
-        quirks = ["Organizes objects by color", "Talks to themselves while cooking"]
+        parts.append(content_i18n.t(target_lang, "profile.no_traits"))
+    if career:
+        parts.append(content_i18n.t(target_lang, "profile.career", career=career))
+    if skills:
+        parts.append(content_i18n.t(target_lang, "profile.skills", skills=", ".join(skills)))
+    backstory = " ".join(parts)
+    personality = content_i18n.t(target_lang, "profile.personality")
+    speech_style = content_i18n.t(target_lang, "profile.speech_style")
+    goals = [
+        content_i18n.t(target_lang, "profile.goal.1"),
+        content_i18n.t(target_lang, "profile.goal.2"),
+    ]
+    secrets = [content_i18n.t(target_lang, "profile.secret.1")]
+    quirks = [
+        content_i18n.t(target_lang, "profile.quirk.1"),
+        content_i18n.t(target_lang, "profile.quirk.2"),
+    ]
 
     return {
         "name": name,
@@ -193,7 +170,7 @@ def _build_profile_messages(
         f"Hints: {str(hints or '').strip() or 'none'}\n\n"
         "Instructions:\n"
         f"- Write a profile for {name}.\n"
-        f"- Write only in {_lang_name(target_lang)}.\n"
+        f"- Write only in {content_i18n.language_name(target_lang)}.\n"
         "- Never contradict the native traits, age, career or skills.\n"
         '- Return ONLY a JSON object with keys: "name" (string), '
         '"backstory" (2-4 sentences), "personality" (string), '

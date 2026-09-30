@@ -297,6 +297,44 @@ def get_god_controls() -> Dict[str, Any]:
     return get_json("/v1/god/controls")
 
 
+def set_god_controls(preset: Optional[str] = None, enabled: Optional[bool] = None,
+                     powers: Optional[Dict[str, bool]] = None,
+                     values: Optional[Dict[str, Any]] = None,
+                     persist: bool = False) -> Dict[str, Any]:
+    """POST /v1/config/god to change the God preset, toggle or dials.
+
+    ``values`` holds ControlSpec keys (e.g. ``autonomy_degree``,
+    ``intervention_frequency``, ``agent_seats``); the sidecar validates them,
+    applies them to the live settings and re-applies them to the orchestrator.
+    """
+    payload: Dict[str, Any] = {"persist": bool(persist)}
+    if preset is not None:
+        payload["preset"] = preset
+    if enabled is not None:
+        payload["enabled"] = bool(enabled)
+    if powers:
+        payload["powers"] = dict(powers)
+    if values:
+        payload["settings"] = dict(values)
+    return post_json("/v1/config/god", payload)
+
+
+def god_tick(sim: Dict[str, Any], time_of_day: str = "unknown",
+             lot_type: str = "residential", lang: str = "en") -> Dict[str, Any]:
+    """POST /v1/god/tick — run one God-orchestration tick for a save.
+
+    Returns the issued directives (each carrying an optional ``tool_call`` the
+    mod executes and a ``narration`` it surfaces).
+    """
+    payload = {
+        "sim": sim,
+        "time_of_day": time_of_day,
+        "lot_type": lot_type,
+        "lang": lang,
+    }
+    return post_json("/v1/god/tick", payload)
+
+
 def send_census(sim: Dict[str, Any], sims: List[Dict[str, Any]],
                 households: List[Dict[str, Any]], scope: str = "active_zone",
                 lang: str = "en") -> Dict[str, Any]:

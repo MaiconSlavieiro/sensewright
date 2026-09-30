@@ -238,9 +238,9 @@ async def test_render_dialogue_enforces_pt_br_prompt():
 
     system = registry.messages[0][0]["content"]
     user = registry.messages[0][1]["content"]
-    assert "Brazilian Portuguese" in system
+    assert "Português (Brasil)" in system
     assert "do NOT use English" in system
-    assert "Brazilian Portuguese" in user
+    assert "Português (Brasil)" in user
 
 
 async def test_render_dialogue_english_does_not_forbid_english():

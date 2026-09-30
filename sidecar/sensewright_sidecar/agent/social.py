@@ -16,38 +16,20 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from .. import content_i18n
 from .context_forge import PairContext
 from .intents import DEFAULT_EXPIRES_AT
 
 logger = logging.getLogger(__name__)
 
-# Deterministic fallback lines, per language (en is the source of truth). The
-# LLM path writes in ``lang``; the template keeps native mode in-character too.
-_TEMPLATE_LINES = {
-    "en": (
-        "Hey {b}! It's good to see you.",
-        "Hey {a}! I've been meaning to catch up.",
-    ),
-    "pt-BR": (
-        "Oi {b}! Que bom te ver.",
-        "Oi {a}! Eu estava querendo te encontrar.",
-    ),
-}
-
-
+# Deterministic fallback lines live in the ``social.line.<n>`` content keys (en
+# is the source of truth). The LLM path writes in ``lang``; the template keeps
+# native mode in-character too.
 def _template_lines(lang: str) -> tuple[str, str]:
-    return _TEMPLATE_LINES.get(lang) or _TEMPLATE_LINES["en"]
-
-
-# Human-readable language names, used to enforce the output language.
-_LANG_NAMES = {
-    "en": "English",
-    "pt-BR": "Brazilian Portuguese",
-}
-
-
-def _lang_name(lang: str) -> str:
-    return _LANG_NAMES.get(lang) or _LANG_NAMES["en"]
+    return (
+        content_i18n.t(lang, "social.line.1"),
+        content_i18n.t(lang, "social.line.2"),
+    )
 
 
 def sim_brief(entry: dict[str, Any] | None, other_name: str = "") -> str:
@@ -238,13 +220,13 @@ async def render_dialogue(
             if rel_level is not None:
                 rel_desc += f" (level {rel_level})"
 
-    lang_name = _lang_name(lang)
+    lang_name = content_i18n.language_name(lang)
     system = (
         "You write short, natural, in-character dialogue between two Sims in "
         f"The Sims 4. Write ALL spoken text in {lang_name} ({lang}). "
         "Reply with STRICT JSON only, no markdown fences, no meta commentary."
     )
-    if lang != "en":
+    if content_i18n.normalize_lang(lang) != content_i18n.default_lang():
         system += (
             f" The dialogue must be entirely in {lang_name}; do NOT use English."
         )

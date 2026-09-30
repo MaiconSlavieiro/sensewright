@@ -1,0 +1,7 @@
+{
+  "default": "en",
+  "locales": [
+    {"code": "en", "name": "English", "match": ["en", "english"]},
+      {"code": "pt-BR", "name": "Português (Brasil)", "match": ["pt", "pt-br", "ptbr", "portug", "brazil", "brazilian"]}
+  ]
+}

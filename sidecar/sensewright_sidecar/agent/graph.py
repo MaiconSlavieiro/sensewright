@@ -1101,6 +1101,22 @@ async def _mark_household_backgrounds_stale(player_id: str, save_id: str) -> Non
     _enqueue_background_refresh(player_id, save_id, household_ids, source="zeitgeist")
 
 
+def _profile_sim_data(profile: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a stored Sim profile into the grounder's flat Sim-data shape.
+
+    The census entry is already flat, but the stored profile keeps the native
+    facts under ``native`` with the name at the top level. Backgrounds and
+    profiles must see the same keys (``full_name``/``traits``/``kinship``/...)
+    whether they are grounded by a live census or by the stored profile.
+    """
+    data = dict(profile.get("native") or {}) if isinstance(profile, dict) else {}
+    if not data.get("full_name") and isinstance(profile, dict) and profile.get("name"):
+        data["full_name"] = profile.get("name")
+    if data.get("household_id") is None and isinstance(profile, dict):
+        data["household_id"] = profile.get("household_id")
+    return data
+
+
 async def generate_background(req) -> dict[str, Any]:
     """Generate (or return a cached) background for a Sim or household."""
     from ..god import backgrounder as bg
@@ -1197,7 +1213,11 @@ async def generate_background(req) -> dict[str, Any]:
             "provider": cached.get("provider"),
         }
 
-    sim_data = req.census if isinstance(req.census, dict) and req.census else profile
+    sim_data = (
+        req.census
+        if isinstance(req.census, dict) and req.census
+        else _profile_sim_data(profile)
+    )
     result = await bg.generate_sim_background(
         sim_data, zeitgeist, req.player_hints, req.lang, _effective_registry(), mood_influence
     )
@@ -1219,6 +1239,54 @@ async def generate_background(req) -> dict[str, Any]:
     }
 
 
+def _merge_census(
+    existing: dict[str, Any] | None,
+    scope: str,
+    lang: str,
+    sims: list[dict],
+    households: list[dict],
+) -> dict[str, Any]:
+    """Merge a census snapshot into the cached one, never shrinking it.
+
+    A full-save ("neighborhood") scan must survive the smaller active-zone
+    censuses the mod re-sends on every zone load and household change, so
+    records are merged by id and the widest scope is kept. Household member
+    lists are unioned (an active-zone census only sees the instanced members)
+    and newer native data wins for each Sim.
+    """
+    base = existing if isinstance(existing, dict) else {}
+
+    merged_scope = "full_save" if "full_save" in (base.get("scope"), scope) else scope
+
+    by_sim: dict[str, dict] = {}
+    for entry in (base.get("sims") or []) + (sims or []):
+        if isinstance(entry, dict) and entry.get("sim_id") is not None:
+            by_sim[str(entry.get("sim_id"))] = entry
+
+    by_household: dict[str, dict] = {}
+    for entry in (base.get("households") or []) + (households or []):
+        if not isinstance(entry, dict) or entry.get("household_id") is None:
+            continue
+        key = str(entry.get("household_id"))
+        prev = by_household.get(key) or {}
+        merged = dict(prev)
+        merged.update(entry)
+        merged["members"] = list(
+            dict.fromkeys(
+                list(prev.get("members") or [])
+                + list(entry.get("members") or [])
+            )
+        )
+        by_household[key] = merged
+
+    return {
+        "scope": merged_scope,
+        "lang": lang or base.get("lang") or _current_lang,
+        "sims": list(by_sim.values()),
+        "households": list(by_household.values()),
+    }
+
+
 async def ingest_census(req) -> dict[str, Any]:
     """Store a census snapshot; it grounds zeitgeist suggestions and backgrounds."""
     from ..memory.base import HouseholdKey, MemKey
@@ -1228,12 +1296,10 @@ async def ingest_census(req) -> dict[str, Any]:
     sims = [s.model_dump() for s in req.sims]
     households = [h.model_dump() for h in req.households]
 
-    _census_by_save[_census_key(player_id, save_id)] = {
-        "scope": req.scope,
-        "lang": req.lang,
-        "sims": sims,
-        "households": households,
-    }
+    census_key = _census_key(player_id, save_id)
+    _census_by_save[census_key] = _merge_census(
+        _census_by_save.get(census_key), req.scope, req.lang, sims, households
+    )
 
     if not _memory:
         return {"ok": False, "sims": 0, "households": 0}
@@ -1266,12 +1332,14 @@ async def ingest_census(req) -> dict[str, Any]:
         profile["name"] = sim_data.get("full_name") or profile.get("name", "")
         profile["household_id"] = sim_data.get("household_id")
         profile["native"] = {
+            "full_name": sim_data.get("full_name", ""),
             "traits": sim_data.get("traits", []),
             "age": sim_data.get("age", ""),
             "gender": sim_data.get("gender", ""),
             "career": sim_data.get("career", ""),
             "skills": sim_data.get("skills", {}),
             "relationships": sim_data.get("relationships", []),
+            "kinship": sim_data.get("kinship", []),
         }
         try:
             await _memory.upsert_profile(key, profile)

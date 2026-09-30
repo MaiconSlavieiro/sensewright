@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .. import content_i18n
 from ..schemas import MOOD_TAGS
 
 ControlKind = Literal["slider", "toggle", "select", "tags"]
@@ -49,9 +50,21 @@ _LAYER_KEYS = {
 _EVOLUTION_SPEEDS = ("slow", "normal", "fast")
 
 # P1 (docs/ui_panel.md §1.4): promoted mod/global settings + their option sets.
-_UI_LANGUAGES = ("auto", "en", "pt-BR")
 _DECAY_PRESETS = ("fast", "normal", "slow")
 _TRAIT_SWAP_MODES = ("off", "propose", "auto")
+
+
+def _ui_language_options() -> list[ControlOption]:
+    """Return the data-driven ``ui.language`` options (``auto`` + every locale)."""
+    codes = ("auto", *content_i18n.available_locales())
+    return [
+        ControlOption(
+            value=code,
+            label_key=f"god.lang.{code}",
+            label=content_i18n.language_name(code),
+        )
+        for code in codes
+    ]
 
 # Settings-path groups consumed by the patch builders below. Specs whose
 # ``target`` is not in one of these groups are applied directly to the live
@@ -61,10 +74,15 @@ _AGENT_PATCH_TARGETS = frozenset({"agents", "agents.initiative", "agents.layers"
 
 
 class ControlOption(BaseModel):
-    """A select/tags option, localized through ``label_key``."""
+    """A select/tags option, localized through ``label_key``.
+
+    ``label`` optionally carries a ready-to-render human name (used for the
+    ``ui.language`` options so the mod needs no per-language keys).
+    """
 
     value: str
     label_key: str
+    label: str | None = None
 
 
 class ControlSpec(BaseModel):
@@ -313,8 +331,17 @@ CONTROL_SPECS: list[ControlSpec] = [
         path="social",
     ),
     # ── P1 (docs/ui_panel.md §1.4): promoted mod/global settings ──
-    _promoted("ui.language", "select", "auto", target="ui", path="language",
-              options=_UI_LANGUAGES, option_prefix="god.lang"),
+    ControlSpec(
+        key="ui.language",
+        kind="select",
+        label_key="god.control.ui.language.label",
+        description_key="god.control.ui.language.desc",
+        default="auto",
+        options=_ui_language_options(),
+        advanced=True,
+        target="ui",
+        path="language",
+    ),
     _promoted("llm.temperature", "slider", 0.8, target="llm", path="temperature",
               minimum=0.0, maximum=2.0, step=0.05),
     _promoted("llm.max_tokens", "slider", 700, target="llm", path="max_tokens",
@@ -456,6 +483,11 @@ def values_from_god_config(god_config: Any) -> dict[str, Any]:
         values["evolution_speed"] = settings["evolution_speed"]
     if isinstance(settings.get("mood_tags"), list):
         values["mood_tags"] = settings["mood_tags"]
+    # The active preset has no ControlSpec (it is a separate God field) but the
+    # mod panel/commands want to display it, so surface it in the value map.
+    preset = getattr(god_config, "preset", None)
+    if preset:
+        values["preset"] = preset
     powers = getattr(god_config, "powers", {}) or {}
     for power in POWER_KEYS:
         values[f"{_POWER_PREFIX}{power}"] = bool(powers.get(power, values[f"{_POWER_PREFIX}{power}"]))

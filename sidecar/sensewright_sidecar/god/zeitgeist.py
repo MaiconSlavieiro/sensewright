@@ -11,6 +11,7 @@ import logging
 import math
 from typing import Any
 
+from .. import content_i18n
 from ..schemas import MOOD_TAGS, normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -27,16 +28,6 @@ _TAG_PHRASES: dict[str, str] = {
     "romance": "romantic entanglements",
     "filme_adolescente": "teen-movie coming-of-age energy",
 }
-
-_LANG_NAMES: dict[str, str] = {
-    "en": "English",
-    "pt-BR": "Brazilian Portuguese",
-}
-
-
-def _lang_name(lang: str) -> str:
-    """Return a human-readable name for a BCP-47 tag."""
-    return _LANG_NAMES.get(normalize_lang(lang), "English")
 
 
 def clamp01(value: Any, default: float = DEFAULT_MOOD_INFLUENCE) -> float:
@@ -182,7 +173,7 @@ def _build_suggest_messages(
         "Instructions:\n"
         "- Rewrite the zeitgeist into 2-4 evocative sentences that fit the mood "
         "tags and the census.\n"
-        f"- Write only in {_lang_name(lang)}.\n"
+        f"- Write only in {content_i18n.language_name(lang)}.\n"
         "- Do not contradict the census facts (names, households, traits).\n"
         "- Output only the rewritten text, with no headings, quotes or JSON."
     )

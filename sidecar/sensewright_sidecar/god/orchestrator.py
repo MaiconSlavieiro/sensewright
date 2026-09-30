@@ -35,6 +35,10 @@ BASE_INTERVAL_SECONDS = 600.0
 # Intervention types that get a boost as chaos rises.
 CHAOTIC_TYPES = frozenset({"extreme_event", "spawn_npc"})
 
+# Upper bound on the in-memory directive list so the orchestration loop can run
+# forever without leaking memory. Pending directives are never pruned.
+MAX_DIRECTIVE_HISTORY = 100
+
 # Directive type -> power toggle key.
 _POWER_FOR_TYPE = {
     "spawn_npc": "spawn_npc",
@@ -145,6 +149,10 @@ class GodOrchestrator:
             "powers": dict(self.powers),
             "min_interval_s": round(self._min_interval(), 1),
             "pending_directives": len(self.get_pending_directives()),
+            "issued_directives": sum(
+                1 for directive in self._directives if directive.status == "issued"
+            ),
+            "history_size": len(self._directives),
             "last_intervention_at": self._last_intervention_at,
         }
 
@@ -167,7 +175,9 @@ class GodOrchestrator:
             if narration:
                 directive.narration = narration
 
+        directive.status = "issued"
         self._directives.append(directive)
+        self._prune_directives()
         return [directive]
 
     def played_ids(self, world_state: WorldState) -> set[str]:
@@ -376,6 +386,32 @@ class GodOrchestrator:
     def add_directive(self, directive: Directive) -> None:
         """Add a directive to the queue."""
         self._directives.append(directive)
+
+    def _prune_directives(self) -> None:
+        """Trim the directive list to ``MAX_DIRECTIVE_HISTORY`` entries.
+
+        Pending directives are always kept; the oldest non-pending entries are
+        dropped first so the in-memory list cannot grow without bound.
+        """
+        overflow = len(self._directives) - MAX_DIRECTIVE_HISTORY
+        if overflow <= 0:
+            return
+        kept: list[Directive] = []
+        for directive in self._directives:
+            if overflow > 0 and directive.status != "pending":
+                overflow -= 1
+                continue
+            kept.append(directive)
+        self._directives = kept
+
+    def drain_directives(self, success: bool = True) -> list[Directive]:
+        """Return and clear every pending directive, marking them done/failed."""
+        pending = self.get_pending_directives()
+        status = "done" if success else "failed"
+        for directive in pending:
+            directive.status = status
+        self._prune_directives()
+        return pending
 
     def get_pending_directives(self) -> list[Directive]:
         """Get all pending directives."""

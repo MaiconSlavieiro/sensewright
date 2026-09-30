@@ -55,6 +55,7 @@ from .http_client import (
     set_autonomy,
     set_lang,
     get_god_controls,
+    set_god_controls,
     set_zeitgeist,
     suggest_zeitgeist,
     request_profile,
@@ -72,11 +73,13 @@ from .tool_executor import execute_batch
 
 # Autonomy levels
 AUTONOMY_LEVELS = ("off", "observe", "suggest", "semi", "full")
-VALID_LANGUAGES = ("auto", "en", "pt-BR")
+# Data-driven: derived from the locale manifest, so a new language is accepted
+# as soon as its ``locales/<code>.json`` + manifest entry exist (no code edit).
+VALID_LANGUAGES = tuple(["auto"] + list(i18n.available_locales()))
 
 # Bumped on each in-game behaviour change so the loaded build can be confirmed
 # from `sensewright_output.log` (the game only loads script mods at startup).
-_BUILD = "2026-09-29.22"
+_BUILD = "2026-09-29.23"
 
 
 def _join_args(first, rest) -> str:
@@ -539,7 +542,7 @@ def cmd_autonomy(level: str = "", _connection=None) -> None:
 
 @sims4.commands.Command("sw.lang", command_type=sims4.commands.CommandType.Live)
 def cmd_lang(lang: str = "", _connection=None) -> None:
-    """Set UI language: auto|en|pt-BR (persists to config)."""
+    """Set UI language: auto|<locale> (persists to config)."""
     _note_player_active()
     if lang not in VALID_LANGUAGES:
         _output(_connection, i18n.t("cmd.lang.invalid", lang=lang or "empty"))
@@ -617,26 +620,143 @@ def cmd_uitest(kind: str = "", _connection=None) -> None:
             _output(_connection, ui_probe.format_result(result))
 
 
+def _god_controls_snapshot():
+    """Return ``(controls, values)`` from ``GET /v1/god/controls`` (or empty)."""
+    data = get_god_controls()
+    controls = []
+    values = {}
+    if isinstance(data, dict):
+        controls = data.get("controls") or []
+        values = data.get("values") or {}
+    return controls, values
+
+
+def _show_god_summary(_connection) -> None:
+    """Print the current God preset, the controls and the command help."""
+    controls, values = _god_controls_snapshot()
+    summary = god_ui.format_controls(controls, values)
+    if not summary:
+        summary = i18n.t("god.panel.unavailable")
+    _output(_connection, i18n.t("god.panel.title"))
+    preset = values.get("preset") if isinstance(values, dict) else None
+    if preset:
+        _output(_connection, i18n.t("cmd.god.preset_current", preset=preset))
+    _output(_connection, i18n.t("god.panel.body", controls=summary))
+    _output(_connection, i18n.t("cmd.god.help", presets=", ".join(god_ui.GOD_PRESETS)))
+
+
+def _run_neighborhood_scan(_connection) -> None:
+    """Force a full-save neighborhood census (maps + backgrounds every Sim)."""
+    from . import state_collector
+
+    response = state_collector.scan_neighborhood(force=True)
+    if not isinstance(response, dict):
+        _output(_connection, i18n.t("cmd.god.unavailable"))
+        return
+    _output(_connection, i18n.t(
+        "cmd.god.scan",
+        sims=response.get("sims", 0),
+        households=response.get("households", 0),
+        queued=response.get("queued", 0),
+    ))
+
+
+def _run_god_tick_now(_connection) -> None:
+    """Force one God-orchestration tick now and report the issued directives."""
+    from . import state_collector
+
+    response = state_collector.maybe_god_tick(force=True)
+    if not isinstance(response, dict) or response.get("ok") is False:
+        _output(_connection, i18n.t("cmd.god.unavailable"))
+        return
+    directives = response.get("directives") or []
+    if directives:
+        _output(_connection, i18n.t(
+            "cmd.god.tick",
+            count=len(directives),
+            preset=response.get("preset", "") or "",
+        ))
+    else:
+        _output(_connection, i18n.t("cmd.god.tick_empty"))
+
+
 @sims4.commands.Command("sw.god", command_type=sims4.commands.CommandType.Live)
-def cmd_god(_connection=None) -> None:
-    """Show a localized summary of the God controls."""
+def cmd_god(first=None, *rest, _connection=None) -> None:
+    """God panel/summary and control.
+
+    Usage: ``sw.god`` (summary) · ``sw.god on|off`` · ``sw.god tick`` ·
+    ``sw.god preset <name>`` · ``sw.god <preset>`` · ``sw.god set <key> <value>``.
+    """
     _note_player_active()
+    tokens = []
+    for part in (first,) + rest:
+        if part is None:
+            continue
+        text = str(part).strip()
+        if text:
+            tokens.append(text)
+    action = tokens[0].lower() if tokens else ""
+
     try:
-        data = get_god_controls()
-        controls = []
-        values = {}
-        if isinstance(data, dict):
-            controls = data.get("controls") or []
-            values = data.get("values") or {}
-        summary = god_ui.format_controls(controls, values)
-        if not summary:
-            summary = i18n.t("god.panel.unavailable")
-        _output(_connection, i18n.t("god.panel.title"))
-        _output(_connection, i18n.t("god.panel.body", controls=summary))
+        if not action or action == "panel":
+            _show_god_summary(_connection)
+            return
+
+        if action in ("on", "off"):
+            set_god_controls(enabled=(action == "on"))
+            _output(_connection, i18n.t("cmd.god.on" if action == "on" else "cmd.god.off"))
+            return
+
+        if action == "tick":
+            _run_god_tick_now(_connection)
+            return
+
+        if action == "scan":
+            _run_neighborhood_scan(_connection)
+            return
+
+        if action in god_ui.GOD_PRESETS:
+            set_god_controls(preset=action, enabled=True)
+            _output(_connection, i18n.t("cmd.god.preset", preset=action))
+            return
+
+        if action == "preset":
+            name = tokens[1].lower() if len(tokens) > 1 else ""
+            if name not in god_ui.GOD_PRESETS:
+                _output(_connection, i18n.t(
+                    "cmd.god.bad_preset",
+                    preset=name,
+                    presets=", ".join(god_ui.GOD_PRESETS),
+                ))
+                return
+            set_god_controls(preset=name, enabled=True)
+            _output(_connection, i18n.t("cmd.god.preset", preset=name))
+            return
+
+        if action == "set":
+            if len(tokens) < 3:
+                _output(_connection, i18n.t(
+                    "cmd.god.help", presets=", ".join(god_ui.GOD_PRESETS)))
+                return
+            key = tokens[1]
+            value = " ".join(tokens[2:])
+            response = set_god_controls(values={key: value})
+            if isinstance(response, dict) and response.get("ok") is False:
+                _output(_connection, i18n.t(
+                    "cmd.god.bad_control",
+                    name=key,
+                    detail=response.get("detail") or "",
+                ))
+                return
+            _output(_connection, i18n.t("cmd.god.set_done", name=key, value=value))
+            return
+
+        _output(_connection, i18n.t(
+            "cmd.god.help", presets=", ".join(god_ui.GOD_PRESETS)))
     except (SidecarUnreachable, SidecarError):
-        _output(_connection, i18n.t("god.panel.unavailable"))
+        _output(_connection, i18n.t("cmd.god.unavailable"))
     except Exception:
-        _output(_connection, i18n.t("god.panel.unavailable"))
+        _output(_connection, i18n.t("error.internal"))
 
 
 @sims4.commands.Command("sw.zeitgeist", command_type=sims4.commands.CommandType.Live)

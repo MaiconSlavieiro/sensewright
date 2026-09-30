@@ -198,6 +198,74 @@ def test_get_careers_is_primitive_only():
             assert isinstance(value, (str, int, float, bool))
 
 
+class _RelMember(object):
+    def __init__(self, name):
+        self.name = name
+
+
+_MOTHER = _RelMember("MOTHER")
+_FATHER = _RelMember("FATHER")
+
+
+class _FakeIndex(object):
+    def __iter__(self):
+        return iter((_MOTHER, _FATHER))
+
+
+class _FakeManager(object):
+    def get(self, sim_id):
+        if sim_id == 20:
+            return type("Info", (), {"full_name": "Mortimer Goth"})()
+        return None
+
+
+def test_get_kinship_labels_from_enum(monkeypatch):
+    monkeypatch.setattr(sim_context, "_genealogy_index_enum", lambda: _FakeIndex())
+    monkeypatch.setattr(sim_context, "_get_sim_info_manager", lambda: _FakeManager())
+
+    class FakeInfo(object):
+        id = 10
+
+        def get_relations(self, member):
+            return {20} if member is _MOTHER else set()
+
+    assert sim_context._get_kinship(FakeInfo()) == [
+        {"relation": "mother", "target_id": 20, "name": "Mortimer Goth"}
+    ]
+
+
+def test_get_kinship_prefers_genealogy_tracker(monkeypatch):
+    monkeypatch.setattr(sim_context, "_genealogy_index_enum", lambda: _FakeIndex())
+    monkeypatch.setattr(sim_context, "_get_sim_info_manager", lambda: None)
+
+    class Genealogy(object):
+        def get_relations(self, member):
+            return {20} if member is _FATHER else set()
+
+    class FakeInfo(object):
+        id = 10
+        genealogy = Genealogy()
+
+    assert sim_context._get_kinship(FakeInfo()) == [
+        {"relation": "father", "target_id": 20, "name": ""}
+    ]
+
+
+def test_get_kinship_falls_back_to_family_ids(monkeypatch):
+    monkeypatch.setattr(sim_context, "_genealogy_index_enum", lambda: None)
+    monkeypatch.setattr(sim_context, "_get_sim_info_manager", lambda: None)
+
+    class FakeInfo(object):
+        id = 10
+
+        def get_family_sim_ids_gen(self, include_self=False):
+            return iter([11, 10])
+
+    assert sim_context._get_kinship(FakeInfo()) == [
+        {"relation": "family", "target_id": 11, "name": ""}
+    ]
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

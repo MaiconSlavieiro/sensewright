@@ -425,6 +425,91 @@ def _get_relationships(sim_info) -> List[Dict[str, Any]]:
     return relationships
 
 
+def _genealogy_index_enum():
+    """Import ``FamilyRelationshipIndex`` (None when unavailable).
+
+    The enum lives in ``sims.genealogy_tracker``. Its member names are the
+    relation labels (mother, father, ...), so the census never hardcodes them.
+    """
+    try:
+        module = __import__("sims.genealogy_tracker", fromlist=["FamilyRelationshipIndex"])
+        return _safe_getattr(module, "FamilyRelationshipIndex", None)
+    except Exception:
+        return None
+
+
+def _sim_name_by_id(manager, sim_id) -> str:
+    """Resolve a Sim id to its full name (primitive); '' when unknown."""
+    try:
+        sim_info = manager.get(sim_id) if manager is not None else None
+    except Exception:
+        sim_info = None
+    if sim_info is None:
+        return ""
+    name = _safe_getattr(sim_info, "full_name", None)
+    return _as_str(name) if name is not None else _as_str(sim_info)
+
+
+def _get_kinship(sim_info) -> List[Dict[str, Any]]:
+    """Get native family relations (parents, children, siblings, partner).
+
+    Uses the SimInfo genealogy tracker (``SimInfo.genealogy`` /
+    ``SimInfo.get_relations``, confirmed in the shipped ``sims.sim_info``):
+    each ``FamilyRelationshipIndex`` member is queried for related Sim ids and
+    the label is the enum member name. Falls back to the unlabeled
+    ``get_family_sim_ids_gen`` when the enum is unavailable. Best-effort: returns
+    ``[]`` outside the game, never raises and never leaks game objects.
+    """
+    result: List[Dict[str, Any]] = []
+    try:
+        sim_info_id = _safe_getattr(sim_info, "id", None)
+        manager = _get_sim_info_manager()
+        genealogy = _safe_getattr(sim_info, "genealogy", None)
+        relation_enum = _genealogy_index_enum()
+        seen = set()
+
+        def _add(label, target_id):
+            try:
+                target_id = int(target_id)
+            except (TypeError, ValueError):
+                return
+            if sim_info_id is not None and target_id == int(sim_info_id):
+                return
+            key = (label, target_id)
+            if key in seen:
+                return
+            seen.add(key)
+            result.append({
+                "relation": label,
+                "target_id": target_id,
+                "name": _sim_name_by_id(manager, target_id),
+            })
+
+        if relation_enum is not None:
+            for member in relation_enum:
+                label = _as_str(_safe_getattr(member, "name", None)).strip().lower()
+                if not label:
+                    continue
+                ids = None
+                for source in (genealogy, sim_info):
+                    getter = _safe_getattr(source, "get_relations", None)
+                    if callable(getter):
+                        ids = _safe_call(getter, member)
+                        if ids:
+                            break
+                for target_id in ids or []:
+                    _add(label, target_id)
+
+        if not result:
+            gen = _safe_getattr(sim_info, "get_family_sim_ids_gen", None)
+            if callable(gen):
+                for target_id in _safe_call(gen, include_self=False) or []:
+                    _add("family", target_id)
+    except Exception as exc:
+        log_exception("sim_context._get_kinship", exc)
+    return result
+
+
 def _get_sim_instance(sim_info):
     """Call ``sim_info.get_sim_instance()`` (may be None for off-zone Sims)."""
     getter = _safe_getattr(sim_info, "get_sim_instance", None)
@@ -511,6 +596,7 @@ def collect(sim_info=None) -> Dict[str, Any]:
     context["skills"] = _get_skills(sim_info)
     context["careers"] = _get_careers(sim_info)
     context["relationships"] = _get_relationships(sim_info)
+    context["kinship"] = _get_kinship(sim_info)
     context["queue_size"] = _get_queue_size(sim_info)
     context["location"] = _get_location(sim_info)
     context["clock"] = _get_time_string()

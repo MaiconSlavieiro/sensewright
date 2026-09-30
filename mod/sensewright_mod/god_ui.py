@@ -30,6 +30,15 @@ MOOD_TAGS = (
     "filme_adolescente",
 )
 
+# God intervention presets mirrored from the sidecar deck (interventions.PRESETS).
+GOD_PRESETS = (
+    "novela",
+    "sitcom",
+    "drama",
+    "caos",
+    "terror",
+)
+
 # Module-level guard so onboarding is offered at most once per session.
 _onboarding_shown = False
 
@@ -139,6 +148,12 @@ def _control_options(spec: Dict[str, Any]) -> str:
     names = []
     for option in options:
         if isinstance(option, dict):
+            # A literal label (e.g. a language name from the sidecar manifest)
+            # wins over a label_key, so new languages need no per-language keys.
+            label = option.get("label")
+            if isinstance(label, str) and label:
+                names.append(label)
+                continue
             label_key = option.get("label_key")
             if label_key:
                 names.append(i18n.t(label_key))

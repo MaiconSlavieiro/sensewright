@@ -184,5 +184,45 @@ def test_t_non_string_value_is_stringified():
             i18n._locale_cache["en"] = saved
 
 
+def test_available_locales_and_names_from_manifest():
+    codes = i18n.available_locales()
+    assert "en" in codes
+    assert i18n.language_name("en") == "English"
+    assert i18n.language_name("unknown") == "unknown"
+
+
+def test_normalize_locale_is_data_driven(monkeypatch):
+    manifest = {
+        "default": "en",
+        "locales": [
+            {"code": "en", "name": "English", "match": ["en", "english"]},
+            {"code": "fr", "name": "Français", "match": ["fr", "french"]},
+        ],
+    }
+    monkeypatch.setattr(i18n, "_manifest_cache", manifest)
+
+    assert i18n.available_locales() == ["en", "fr"]
+    assert i18n._normalize_locale("french") == "fr"
+    assert i18n._normalize_locale("fr-FR") == "fr"
+    assert i18n._normalize_locale("en-US") == "en"
+    assert i18n._normalize_locale("de") == "en"  # unknown -> default
+
+
+def test_short_match_token_requires_boundary(monkeypatch):
+    manifest = {
+        "default": "pt-BR",
+        "locales": [
+            {"code": "en", "name": "English", "match": ["en", "english"]},
+            {"code": "pt-BR", "name": "Português (Brasil)", "match": ["pt", "portug", "brazil"]},
+        ],
+    }
+    monkeypatch.setattr(i18n, "_manifest_cache", manifest)
+
+    # "french" contains "en" as a raw substring but must NOT resolve to English.
+    assert i18n._normalize_locale("french") == "pt-BR"
+    assert i18n._normalize_locale("pt_BR") == "pt-BR"
+    assert i18n._normalize_locale("Locale.PORTUGUESE_BRAZIL") == "pt-BR"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

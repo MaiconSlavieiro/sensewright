@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any
 
+from .. import content_i18n
 from ..schemas import normalize_lang
 from .zeitgeist import clamp01, normalize_zeitgeist, zeitgeist_to_prompt_block
 
@@ -31,15 +32,6 @@ BACKGROUND_SHAPE: dict[str, Any] = {
     "generated_at": 0.0,
     "stale": False,
 }
-
-_LANG_NAMES: dict[str, str] = {
-    "en": "English",
-    "pt-BR": "Brazilian Portuguese",
-}
-
-
-def _lang_name(lang: str) -> str:
-    return _LANG_NAMES.get(normalize_lang(lang), "English")
 
 
 def _lang_from_data(data: dict) -> str:
@@ -104,6 +96,26 @@ def _format_relationships(relationships: Any) -> list[str]:
     return result
 
 
+def _format_kinship(kinship: Any) -> list[str]:
+    """Render native family relations as ``"<relation>: <name>"`` lines."""
+    if not isinstance(kinship, (list, tuple)):
+        return []
+    result: list[str] = []
+    for rel in list(kinship)[:12]:
+        if not isinstance(rel, dict):
+            continue
+        label = str(rel.get("relation") or "").strip()
+        name = str(rel.get("name") or "").strip()
+        target = rel.get("target_id")
+        if label and name:
+            result.append(f"{label}: {name}")
+        elif label and target not in (None, ""):
+            result.append(f"{label}: {target}")
+        elif label:
+            result.append(label)
+    return result
+
+
 def _summarize(text: str, limit: int = 160) -> str:
     """Return the first sentence of ``text``, capped at ``limit`` characters."""
     cleaned = " ".join((text or "").split())
@@ -141,21 +153,13 @@ def _background(
 
 def _influence_label(lang: str, mood_influence: float) -> str:
     value = clamp01(mood_influence)
-    if normalize_lang(lang) == "pt-BR":
-        if value <= 0.15:
-            return "neutra e realista"
-        if value <= 0.4:
-            return "levemente colorida"
-        if value <= 0.7:
-            return "claramente colorida"
-        return "fortemente guiada pelo humor"
     if value <= 0.15:
-        return "neutral and realistic"
+        return content_i18n.t(lang, "background.influence.neutral")
     if value <= 0.4:
-        return "lightly tinted"
+        return content_i18n.t(lang, "background.influence.light")
     if value <= 0.7:
-        return "clearly colored"
-    return "strongly mood-driven"
+        return content_i18n.t(lang, "background.influence.clear")
+    return content_i18n.t(lang, "background.influence.strong")
 
 
 def _mood_instruction(mood_influence: float) -> str:
@@ -181,19 +185,10 @@ def _mood_instruction(mood_influence: float) -> str:
 def _mood_clause(lang: str, mood_tags: list[str], mood_influence: float) -> str:
     label = _influence_label(lang, mood_influence)
     tags = ", ".join(mood_tags)
-    if normalize_lang(lang) == "pt-BR":
-        if tags:
-            return (
-                f"O clima do bairro ({tags}) aparece de forma {label} "
-                f"(influência de humor {clamp01(mood_influence):.2f})."
-            )
-        return f"O clima do bairro é {label} (influência de humor {clamp01(mood_influence):.2f})."
+    value = clamp01(mood_influence)
     if tags:
-        return (
-            f"The neighborhood mood ({tags}) comes through as {label} "
-            f"(mood influence {clamp01(mood_influence):.2f})."
-        )
-    return f"The neighborhood mood is {label} (mood influence {clamp01(mood_influence):.2f})."
+        return content_i18n.t(lang, "background.mood.with_tags", tags=tags, label=label, value=value)
+    return content_i18n.t(lang, "background.mood.no_tags", label=label, value=value)
 
 
 def _sim_facts(sim_data: dict) -> str:
@@ -206,6 +201,7 @@ def _sim_facts(sim_data: dict) -> str:
         f"Native traits: {', '.join(_string_list(data.get('traits'))) or 'none'}",
         f"Skills: {', '.join(_format_skills(data.get('skills'))) or 'none'}",
         f"Relationships: {', '.join(_format_relationships(data.get('relationships'))) or 'none'}",
+        f"Family (kinship): {', '.join(_format_kinship(data.get('kinship'))) or 'none'}",
     ]
     return "\n".join(lines)
 
@@ -213,7 +209,7 @@ def _sim_facts(sim_data: dict) -> str:
 def fallback_sim_background(
     sim_data: dict, mood_tags: list[str], mood_influence: float = 0.5
 ) -> dict:
-    """Deterministic Sim background in ``en`` or ``pt-BR`` (chosen by ``sim_data``)."""
+    """Deterministic Sim background in the requested language (via ``sim_data``)."""
     data = _as_dict(sim_data)
     lang = _lang_from_data(data)
     tags = normalize_zeitgeist({"mood_tags": mood_tags})["mood_tags"]
@@ -225,46 +221,33 @@ def fallback_sim_background(
     traits = _string_list(data.get("traits"))[:6]
     skills = _format_skills(data.get("skills"))[:6]
     relationships = _format_relationships(data.get("relationships"))[:8]
+    kinship = _format_kinship(data.get("kinship"))[:8]
     hints = str(data.get("player_hints") or "").strip()
 
-    if lang == "pt-BR":
-        head = f"{name} é um Sim"
-        if age:
-            head += f" {age}"
-        head += " que vive no bairro."
-        parts = [head]
-        if traits:
-            parts.append("Traços nativos: " + ", ".join(traits) + ".")
-        else:
-            parts.append("Ainda não há traços registrados.")
-        if career:
-            parts.append(f"Carreira atual: {career}.")
-        if skills:
-            parts.append("Habilidades: " + ", ".join(skills) + ".")
-        if relationships:
-            parts.append("Relações: " + "; ".join(relationships) + ".")
-        parts.append(_mood_clause(lang, tags, influence))
-        if hints:
-            parts.append(f"Direção do jogador: {hints}.")
+    if age:
+        head = content_i18n.t(lang, "background.sim.head_age", name=name, age=age)
     else:
-        head = f"{name} is a Sim"
-        if age:
-            head += f" ({age})"
-        head += " living in the neighborhood."
-        parts = [head]
-        if traits:
-            parts.append("Native traits: " + ", ".join(traits) + ".")
-        else:
-            parts.append("No traits recorded yet.")
-        if career:
-            parts.append(f"Current career: {career}.")
-        if skills:
-            parts.append("Skills: " + ", ".join(skills) + ".")
-        if relationships:
-            parts.append("Relationships: " + "; ".join(relationships) + ".")
-        parts.append(_mood_clause(lang, tags, influence))
-        if hints:
-            parts.append(f"Player direction: {hints}.")
+        head = content_i18n.t(lang, "background.sim.head", name=name)
+    parts = [head]
+    if traits:
+        parts.append(content_i18n.t(lang, "background.sim.traits", traits=", ".join(traits)))
+    else:
+        parts.append(content_i18n.t(lang, "background.sim.no_traits"))
+    if career:
+        parts.append(content_i18n.t(lang, "background.sim.career", career=career))
+    if skills:
+        parts.append(content_i18n.t(lang, "background.sim.skills", skills=", ".join(skills)))
+    if relationships:
+        parts.append(
+            content_i18n.t(
+                lang, "background.sim.relationships", relationships="; ".join(relationships)
+            )
+        )
+    if kinship:
+        parts.append(content_i18n.t(lang, "background.sim.family", family="; ".join(kinship)))
+    parts.append(_mood_clause(lang, tags, influence))
+    if hints:
+        parts.append(content_i18n.t(lang, "background.sim.hints", hints=hints))
 
     text = " ".join(parts)
     return _background(text, _summarize(text), traits, "template", tags, influence)
@@ -292,7 +275,7 @@ def _household_members(household_data: dict) -> list[str]:
 def fallback_household_background(
     household_data: dict, mood_tags: list[str], mood_influence: float = 0.5
 ) -> dict:
-    """Deterministic household background in ``en`` or ``pt-BR`` (chosen by data)."""
+    """Deterministic household background in the requested language (via data)."""
     data = _as_dict(household_data)
     lang = _lang_from_data(data)
     tags = normalize_zeitgeist({"mood_tags": mood_tags})["mood_tags"]
@@ -305,26 +288,22 @@ def fallback_household_background(
     hints = str(data.get("player_hints") or "").strip()
 
     member_count = len(members)
-    if lang == "pt-BR":
-        parts = [
-            f"A família {name} tem {member_count} membro(s)"
-            + (": " + ", ".join(members) + "." if members else ".")
-        ]
-        if funds not in (None, ""):
-            parts.append(f"Fundos: {funds} simoleões.")
-        parts.append(_mood_clause(lang, tags, influence))
-        if hints:
-            parts.append(f"Direção do jogador: {hints}.")
+    if members:
+        head = content_i18n.t(
+            lang,
+            "background.household.head_members",
+            name=name,
+            count=member_count,
+            members=", ".join(members),
+        )
     else:
-        parts = [
-            f"The {name} household has {member_count} member(s)"
-            + (": " + ", ".join(members) + "." if members else ".")
-        ]
-        if funds not in (None, ""):
-            parts.append(f"Funds: {funds} simoleons.")
-        parts.append(_mood_clause(lang, tags, influence))
-        if hints:
-            parts.append(f"Player direction: {hints}.")
+        head = content_i18n.t(lang, "background.household.head", name=name, count=member_count)
+    parts = [head]
+    if funds not in (None, ""):
+        parts.append(content_i18n.t(lang, "background.household.funds", funds=funds))
+    parts.append(_mood_clause(lang, tags, influence))
+    if hints:
+        parts.append(content_i18n.t(lang, "background.household.hints", hints=hints))
 
     text = " ".join(parts)
     return _background(text, _summarize(text), [], "template", tags, influence)
@@ -390,7 +369,7 @@ def _build_sim_messages(
         f"Player hints: {str(player_hints or '').strip() or 'none'}\n\n"
         "Instructions:\n"
         f"- Write a 2-4 sentence background for {name}.\n"
-        f"- Write only in {_lang_name(lang)}.\n"
+        f"- Write only in {content_i18n.language_name(lang)}.\n"
         "- Never contradict the native traits, age, career, skills or relationships.\n"
         '- Return ONLY a JSON object with keys "text" (string), "summary" '
         '(one sentence) and "traits" (array of native trait strings).'
@@ -428,7 +407,7 @@ def _build_household_messages(
         f"Player hints: {str(player_hints or '').strip() or 'none'}\n\n"
         "Instructions:\n"
         f"- Write a 2-4 sentence background for {name}.\n"
-        f"- Write only in {_lang_name(lang)}.\n"
+        f"- Write only in {content_i18n.language_name(lang)}.\n"
         "- Never contradict the native names, membership or kinship.\n"
         '- Return ONLY a JSON object with keys "text" (string), "summary" '
         '(one sentence) and "traits" (array of strings).'

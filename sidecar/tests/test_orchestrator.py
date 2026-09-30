@@ -6,8 +6,8 @@ import random
 
 from sensewright_sidecar.config import GodConfig
 from sensewright_sidecar.god.interventions import Intervention
-from sensewright_sidecar.god.orchestrator import GodOrchestrator
-from sensewright_sidecar.god.world_model import SimProfile, WorldState
+from sensewright_sidecar.god.orchestrator import MAX_DIRECTIVE_HISTORY, GodOrchestrator
+from sensewright_sidecar.god.world_model import Directive, SimProfile, WorldState
 
 
 class FakeClock:
@@ -218,3 +218,49 @@ def test_status_reports_dials():
     assert status["enabled"] is True
     assert status["preset"] == "novela"
     assert "powers" in status
+
+
+async def test_issued_directive_is_not_pending():
+    orch = _orchestrator()
+    directives = await orch.maybe_intervene(_world())
+    assert len(directives) == 1
+    assert directives[0].status == "issued"
+    assert orch.get_pending_directives() == []
+
+
+async def test_status_reports_issued_and_history_size():
+    orch = _orchestrator()
+    await orch.maybe_intervene(_world())
+    status = orch.status()
+    assert status["issued_directives"] >= 1
+    assert status["history_size"] == len(orch._directives)
+
+
+async def test_directive_history_is_bounded():
+    clock = FakeClock()
+    orch = GodOrchestrator(
+        GodConfig(
+            enabled=True,
+            preset="novela",
+            intervention_frequency=1.0,
+            intensity=0.6,
+            base_interval_seconds=1.0,
+        ),
+        rng=random.Random(1),
+        clock=clock,
+    )
+    for _ in range(MAX_DIRECTIVE_HISTORY + 25):
+        await orch.maybe_intervene(_world())
+        clock.advance(60)
+    assert len(orch._directives) <= MAX_DIRECTIVE_HISTORY
+
+
+async def test_drain_directives_marks_pending_done():
+    orch = _orchestrator()
+    pending = Directive(id="manual-1", type="extreme_event")
+    orch.add_directive(pending)
+
+    drained = orch.drain_directives()
+    assert drained == [pending]
+    assert pending.status == "done"
+    assert orch.drain_directives() == []

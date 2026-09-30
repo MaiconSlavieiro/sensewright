@@ -97,10 +97,29 @@ The whole §15.7 module map imports successfully except
 - Implemented in `mod/sensewright_mod/chat_ui.py` (`show_notification`) and used by
   the debug HUD (`hud.py`).
 
+## Genealogy / kinship (native family tree)
+
+Confirmed in the shipped `sims.sim_info` (`SimInfo`):
+
+- **`SimInfo.genealogy`** → `self._genealogy_tracker` (`GenealogyTracker`).
+- **`SimInfo.get_relations(relationship_type)`** → `Set[int]` of related Sim ids;
+  `relationship_type` is a **`FamilyRelationshipIndex`** member
+  (`sims.genealogy_tracker`; `MOTHER`, `FATHER`, … — the member **name** is the
+  relation label).
+- **`SimInfo.get_family_sim_ids_gen(include_self=False)`** → all family ids
+  (unlabeled fallback).
+- Also on `SimInfo`: `get_relation(type)`, `add_parent`, `set_parent_relation`,
+  `get_family_relationship_bit`, and `generation`.
+- Implemented in `mod/sensewright_mod/sim_context.py::_get_kinship` (guarded:
+  enum import + both tracker/SimInfo sources, unlabeled fallback; the labels are
+  taken from the enum so a patch that adds/renames members is handled).
+
 ## Status
 
 - **Code-confirmed:** `SimInfo.Buffs._active_buffs` (implemented), module map
-  (probe), zone heartbeat (implemented), notification API (implemented).
+  (probe), zone heartbeat (implemented), notification API (implemented),
+  genealogy relations (implemented; enum labels need a live check).
 - **Still to runtime-validate:** whether the zone heartbeat cadence is smooth in
-  long sessions, that notifications/HUD actually render in the live client, and
-  the interaction-queue APIs (`push_super_affordance`, `move_to`, `say_to`).
+  long sessions, that notifications/HUD actually render in the live client, the
+  interaction-queue APIs (`push_super_affordance`, `move_to`, `say_to`), and the
+  exact `FamilyRelationshipIndex` member names on the live patch.

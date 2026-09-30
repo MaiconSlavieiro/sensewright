@@ -15,6 +15,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
+from .. import content_i18n
 from ..tools.registry import get_allowed_tools
 from ..tools.schemas import TOOL_SCHEMAS
 from .intents import intent_from_directive
@@ -77,29 +78,25 @@ _LEADING_PREFIXES = (
 )
 
 # Fragments that betray a reasoning-trace dump or task narration instead of
-# role-playing. Such thoughts are discarded (see ``_clean_thought``).
-_META_MARKERS = (
-    "the user",
-    "as an ai",
-    "language model",
-    "the scenario",
-    "the instructions",
-    "the prompt",
-    "i need to respond",
-    "respond as sim",
-    "i am sim ",
-    "i am sim,",
-    "i am sim.",
-    "optionally take",
-    "thinking process",
-    "analyze user input",
-    "chain of thought",
-    "o usuario",
-    "o usuário",
-    "o cenário",
-    "as instruções",
-    "processo de pensamento",
-)
+# role-playing. Such thoughts are discarded (see ``_clean_thought``). The tokens
+# live in the ``sys.meta_markers`` content-locale key of every locale and are
+# unioned here, so adding a language also extends the meta filter.
+_META_MARKERS_CACHE: tuple[str, ...] | None = None
+
+
+def _meta_markers() -> tuple[str, ...]:
+    global _META_MARKERS_CACHE
+    if _META_MARKERS_CACHE is None:
+        markers: list[str] = []
+        for code in content_i18n.available_locales():
+            value = content_i18n.t(code, "sys.meta_markers")
+            if value == "sys.meta_markers":
+                continue
+            for line in value.split("\n"):
+                if line:
+                    markers.append(line.lower())
+        _META_MARKERS_CACHE = tuple(markers)
+    return _META_MARKERS_CACHE
 
 
 def impulse_tools(autonomy: str) -> list[str]:
@@ -162,8 +159,8 @@ def rule_based_impulse(
             {"directives": [], "thought": "", "provider": None, "used_llm": False}, job
         )
     if job.kind == "reaction" and job.event:
-        return _with_intents(_reaction_impulse(job, profile), job)
-    thought = _idle_thought(job, profile)
+        return _with_intents(_reaction_impulse(job, profile, lang), job)
+    thought = _idle_thought(job, profile, lang)
     return _with_intents(
         {"directives": [], "thought": thought, "provider": None, "used_llm": False}, job
     )
@@ -280,7 +277,7 @@ def _clean_thought(text: Any) -> str:
             break
     if not any(ch.isalnum() for ch in cleaned):
         return ""
-    if any(marker in lowered for marker in _META_MARKERS):
+    if any(marker in lowered for marker in _meta_markers()):
         return ""
     return cleaned
 
@@ -304,7 +301,9 @@ def _directive_from_call(job: Any, call: Any) -> dict[str, Any]:
     }
 
 
-def _reaction_impulse(job: Any, profile: dict[str, Any] | None) -> dict[str, Any]:
+def _reaction_impulse(
+    job: Any, profile: dict[str, Any] | None, lang: str = "en"
+) -> dict[str, Any]:
     event = dict(job.event or {})
     event_type = str(event.get("type", "")).lower()
     target = event.get("target_sim_id") or event.get("target")
@@ -313,21 +312,30 @@ def _reaction_impulse(job: Any, profile: dict[str, Any] | None) -> dict[str, Any
     if target is not None and event_type in {"social", "chat", "interaction", "gossip"}:
         tool = "say_to"
         args: dict[str, Any] = {
-            "message": f"{name} reacts to what just happened.",
+            "message": content_i18n.t(lang, "initiative.reaction.social_message", name=name),
             "target_sim_id": _as_int(target),
         }
-        thought = "I have something to say about this."
+        thought = content_i18n.t(lang, "initiative.reaction.social_thought")
     elif event_type in {"fire", "death", "disaster", "fight", "accident", "divorce"}:
         tool = "set_mood"
-        args = {"mood": "tense", "reason": f"{name} reacts to a {event_type}."}
-        thought = f"That {event_type} shakes me."
+        args = {
+            "mood": "tense",
+            "reason": content_i18n.t(
+                lang, "initiative.reaction.disaster_reason", name=name, event_type=event_type
+            ),
+        }
+        thought = content_i18n.t(
+            lang, "initiative.reaction.disaster_thought", event_type=event_type
+        )
     else:
         tool = "spontaneous_line"
         args = {
-            "text": f"{name} can't stop thinking about what just happened.",
+            "text": content_i18n.t(
+                lang, "initiative.reaction.spontaneous_text", name=name
+            ),
             "audience": "self",
         }
-        thought = "Something just happened; I have to react."
+        thought = content_i18n.t(lang, "initiative.reaction.spontaneous_thought")
 
     directive = {
         "id": uuid4().hex,
@@ -342,9 +350,9 @@ def _reaction_impulse(job: Any, profile: dict[str, Any] | None) -> dict[str, Any
     return {"directives": [directive], "thought": thought, "provider": None, "used_llm": False}
 
 
-def _idle_thought(job: Any, profile: dict[str, Any] | None) -> str:
+def _idle_thought(job: Any, profile: dict[str, Any] | None, lang: str = "en") -> str:
     name = str((profile or {}).get("name") or f"Sim {job.sim_id}")
-    return f"{name} takes in the moment."
+    return content_i18n.t(lang, "initiative.idle_thought", name=name)
 
 
 def _describe_profile(profile: dict[str, Any] | None) -> str:

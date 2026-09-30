@@ -21,6 +21,7 @@ import math
 import time
 from typing import Any
 
+from .. import content_i18n
 from ..config import PersonalityConfig
 from ..schemas import normalize_lang
 
@@ -95,26 +96,6 @@ _MAX_DRIFT = 0.1
 _LIFE_STORY_MAX_LINES = 20
 _LIFE_STORY_MAX_CHARS = 2000
 _FORMAT_LIFE_STORY_LINES = 5
-
-# ─── Localized deterministic templates ────────────────────────────────
-_DEFAULT_SUBJECT = {"en": "someone close", "pt-BR": "alguém próximo"}
-_TRAUMA_BELIEF = {
-    "en": "brace yourself whenever {trigger} comes up",
-    "pt-BR": "se encolhe sempre que {trigger} surge",
-}
-_BAGGAGE_BELIEF = {
-    "en": "carry lingering feelings about {trigger}",
-    "pt-BR": "carrega sentimentos persistentes sobre {trigger}",
-}
-_LIFE_LINE = {
-    "en": "You lived through something involving {trigger}.",
-    "pt-BR": "Você viveu algo envolvendo {trigger}.",
-}
-_LIFE_LINE_MANY = {
-    "en": "You lived through {triggers}.",
-    "pt-BR": "Você viveu {triggers}.",
-}
-_LANG_NAMES = {"en": "English", "pt-BR": "Brazilian Portuguese"}
 
 
 # ─── Small coercion helpers ───────────────────────────────────────────
@@ -551,11 +532,12 @@ def _merge_drift(personality: dict, drift: dict) -> dict:
 def _fallback_life_line(triggers: list[str], lang: str) -> str:
     subjects = _unique_strings(triggers)
     if not subjects:
-        return _LIFE_LINE[lang].format(trigger=_DEFAULT_SUBJECT[lang])
+        default_subject = content_i18n.t(lang, "personality.default_subject")
+        return content_i18n.t(lang, "personality.life_line", trigger=default_subject)
     if len(subjects) == 1:
-        return _LIFE_LINE[lang].format(trigger=subjects[0])
+        return content_i18n.t(lang, "personality.life_line", trigger=subjects[0])
     joined = ", ".join(subjects[:3])
-    return _LIFE_LINE_MANY[lang].format(triggers=joined)
+    return content_i18n.t(lang, "personality.life_line_many", triggers=joined)
 
 
 def _fallback_payload(profile: dict, events: list[dict], now: float, lang: str) -> dict:
@@ -573,7 +555,7 @@ def _fallback_payload(profile: dict, events: list[dict], now: float, lang: str) 
         trigger = _event_trigger(event)
         if trigger:
             triggers.append(trigger)
-        subject = trigger or _DEFAULT_SUBJECT[target]
+        subject = trigger or content_i18n.t(target, "personality.default_subject")
         intensity = _intensity_from_salience(salience(event))
         event_ids = _event_ids([event])
 
@@ -584,7 +566,9 @@ def _fallback_payload(profile: dict, events: list[dict], now: float, lang: str) 
             traumas.append(
                 {
                     "trigger": subject,
-                    "belief": _TRAUMA_BELIEF[target].format(trigger=subject),
+                    "belief": content_i18n.t(
+                        target, "personality.trauma_belief", trigger=subject
+                    ),
                     "intensity": intensity,
                     "first_seen": now,
                     "last_reinforced": now,
@@ -595,7 +579,9 @@ def _fallback_payload(profile: dict, events: list[dict], now: float, lang: str) 
         elif positives:
             baggage.append(
                 {
-                    "belief": _BAGGAGE_BELIEF[target].format(trigger=subject),
+                    "belief": content_i18n.t(
+                        target, "personality.baggage_belief", trigger=subject
+                    ),
                     "source": subject,
                     "intensity": intensity,
                     "last_reinforced": now,
@@ -689,10 +675,6 @@ def absorb(
 
 
 # ─── LLM absorption ───────────────────────────────────────────────────
-def _lang_name(lang: str) -> str:
-    return _LANG_NAMES.get(normalize_lang(lang), "English")
-
-
 def _events_summary(events: list[dict]) -> str:
     lines: list[str] = []
     for event in events:
@@ -727,7 +709,7 @@ def _build_absorption_messages(profile: dict, events: list[dict], lang: str) -> 
         f"Existing psyche: {json.dumps(existing, ensure_ascii=False)}\n"
         f"Salient events:\n{summary}\n\n"
         "Instructions:\n"
-        f"- Write only in {_lang_name(lang)}.\n"
+        f"- Write only in {content_i18n.language_name(lang)}.\n"
         "- Write ONE short first-person life-story line in past tense.\n"
         "- Derive at most 2 traumas and 2 baggage beliefs from the events.\n"
         "- A trauma belief is a verb phrase, e.g. \"brace yourself whenever evil sims show up\".\n"
@@ -818,12 +800,13 @@ async def absorb_events(
 
 
 # ─── Prompt shaping ───────────────────────────────────────────────────
-def format_life(profile: dict) -> str:
+def format_life(profile: dict, lang: str | None = None) -> str:
     """Render psyche + recent life_story as shaping lines for the prompt.
 
     Pure and safe with missing keys; returns "" when there is nothing to say.
     """
     try:
+        target = normalize_lang(lang)
         data = profile if isinstance(profile, dict) else {}
         normalized = normalize_psyche(data)
         psyche = normalized.get("psyche") or {}
@@ -833,9 +816,15 @@ def format_life(profile: dict) -> str:
             trigger = str(block.get("trigger") or "").strip() or "someone"
             belief = str(block.get("belief") or "").strip()
             if belief:
-                lines.append(f"Because of what happened with {trigger}, you now {belief}.")
+                lines.append(
+                    content_i18n.t(
+                        target, "personality.format.trauma", trigger=trigger, belief=belief
+                    )
+                )
             else:
-                lines.append(f"Because of what happened with {trigger}, you are guarded.")
+                lines.append(
+                    content_i18n.t(target, "personality.format.trauma_guarded", trigger=trigger)
+                )
 
         for block in psyche.get("baggage") or []:
             belief = str(block.get("belief") or "").strip()
@@ -843,23 +832,30 @@ def format_life(profile: dict) -> str:
                 continue
             source = str(block.get("source") or "").strip()
             if source:
-                lines.append(f"You carry unresolved feelings about {source}: {belief}.")
+                lines.append(
+                    content_i18n.t(
+                        target,
+                        "personality.format.baggage_source",
+                        source=source,
+                        belief=belief,
+                    )
+                )
             else:
-                lines.append(f"You carry unresolved feelings: {belief}.")
+                lines.append(content_i18n.t(target, "personality.format.baggage", belief=belief))
 
         for item in psyche.get("aversions") or []:
             text = str(item).strip()
             if text:
-                lines.append(f"You avoid {text}.")
+                lines.append(content_i18n.t(target, "personality.format.aversion", text=text))
         for item in psyche.get("attachments") or []:
             text = str(item).strip()
             if text:
-                lines.append(f"You are attached to {text}.")
+                lines.append(content_i18n.t(target, "personality.format.attachment", text=text))
 
         life = str(normalized.get("life_story") or "")
         story_lines = [line.strip() for line in life.splitlines() if line.strip()]
         for line in story_lines[-_FORMAT_LIFE_STORY_LINES:]:
-            lines.append(f"Your life story: {line}")
+            lines.append(content_i18n.t(target, "personality.format.life_story", line=line))
 
         return "\n".join(lines)
     except Exception:

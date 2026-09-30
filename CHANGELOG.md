@@ -12,6 +12,121 @@ All notable changes to **Sensewright** are documented in this file.
 
 ## [Unreleased] â€” Phases 2, 2b, 3, 4, 5a, 5b, 5c + v0.2 Â§14: Directives, Census, Agents, Evolution, God foundation, backgrounds, orchestration & autonomous Sim agents
 
+### Fixed - Stored profile still grounds backgrounds after a census reset
+The native kinship feature (below) is only useful if the stored profile carries
+it and the background grounders can read it.
+- **`sidecar/sensewright_sidecar/agent/graph.py`**: `ingest_census` now persists
+  `kinship` (and `full_name`) in the profile's `native` dict, so a later
+  `generate_profile`/`generate_background` that falls back to the stored profile
+  keeps the real family tree.
+- **`graph._profile_sim_data`** (new) flattens a stored profile (`native` facts
+  + top-level `name`/`household_id`) into the flat census shape, and
+  `generate_background` uses it for the no-census fallback. Previously the
+  fallback passed the nested profile directly, so the deterministic template and
+  the LLM prompt silently lost the native traits/skills/kinship whenever the
+  live census entry was unavailable (new session, evicted/save-loaded Sim,
+  relationship-linked NPC).
+- Tests: sidecar **461 → 463** (`test_profile_sim_data_flattens_native`,
+  `test_background_falls_back_to_stored_native`).
+
+### Changed - Sidecar content localization is data-driven (sidecar only)
+All deterministic (no-LLM) content strings moved out of Python into flat JSON
+locale tables, so adding a language is a data change (drop a JSON file + add a
+manifest entry), not a code change.
+- **`sidecar/sensewright_sidecar/content_i18n.py`** (new) +
+  **`locales_content/`** (`manifest.json`, `en.json`, `pt-BR.json`): lazy-loaded
+  tables keyed by dotted names (`sys.*`, `background.*`, `profile.*`,
+  `personality.*`, `social.line.*`, `consolidation.*`, `reflection.*`,
+  `initiative.*`). Public API: `default_lang`, `locale_entries`,
+  `available_locales`, `language_name`, `normalize_lang`, `t`. `t()` never
+  raises; unknown tags fall back to the manifest default.
+- **`locales.py`** is now a thin wrapper over the `sys.*` content keys.
+  **`schemas.py`** derives `DEFAULT_LANG` / `SUPPORTED_LANGS` / `normalize_lang`
+  from the manifest. **`config.py`** uses `content_i18n.default_lang()`.
+- Refactored to render from locale keys (no inline pt-BR tables, no per-lang
+  `_LANG_NAMES`): `god/backgrounder.py`, `god/zeitgeist.py`,
+  `agent/{profiler,personality,initiative,evolution,social}.py` and
+  `memory/consolidation.py`. English LLM prompts stay in code.
+- **`god/controls.py`**: `ControlOption` gained an optional ready-to-render
+  `label`, populated for the data-driven `ui.language` options (`auto` + every
+  manifest locale) via `content_i18n.language_name`.
+- Tests: sidecar **461** (new `tests/test_content_i18n.py`: manifest discovery,
+  `normalize_lang` incl. enum-repr strings, `language_name`, unknown → default,
+  locale parity; plus a data-driven `ui.language` options test). Existing
+  prompt-language assertions updated to the manifest name "Português (Brasil)".
+- The sidecar's multilingual lexical data (stopwords / emotion words / name
+  exclusions used by consolidation) moved to `locales_content/lexicon.json`, so
+  no language word list is hardcoded in code.
+
+### Changed - Mod localization is data-driven (add a language without touching code)
+- **`mod/sensewright_mod/locales/manifest.json`** (new): `{default, locales:[{code,
+  name, match}]}` describes the supported set. Adding a language = drop
+  `locales/<code>.json` + append a manifest entry.
+- **`mod/sensewright_mod/i18n.py`**: discovery (`available_locales`,
+  `locale_entries`, `language_name`), boundary-aware `_normalize_locale` driven
+  by the manifest `match` tokens (so `french` no longer false-matches `en`, while
+  enum reprs like `Locale.PORTUGUESE_BRAZIL` still resolve), default from the
+  manifest, and no fixed `("en","pt-BR")` references. Works from the filesystem
+  and from inside the `.ts4script` zip (manifest is bundled).
+- **`mod/build_package.py`** + **`mod/tuning/stbl.json`** (new): the pie-menu
+  string tables are now data-driven (one entry per language); adding a language
+  is a JSON entry, no code change.
+- **`main.py`**: `VALID_LANGUAGES` is derived from `i18n.available_locales()`
+  (`sw.lang` accepts any injected locale). **`config.py`** validates
+  `[ui].language` against the manifest. **`god_ui._control_options`** prefers a
+  literal option `label`, so the sidecar's language names render with no
+  per-language keys.
+- Tests: mod **363** (`test_locales_parity.py` now iterates the manifest;
+  `test_i18n.py` gained discovery + boundary-matching tests).
+
+### Added - God orchestration loop in-game (build `2026-09-29.23`)
+Closes the Phase 5c gap: the God orchestrator existed sidecar-side but nothing
+on the mod ever ran a tick or executed the returned directives.
+- **`mod/sensewright_mod/http_client.py`**: `god_tick(sim, time_of_day,
+  lot_type, lang)` (`POST /v1/god/tick`) and `set_god_controls(preset, enabled,
+  powers, values, persist)` (`POST /v1/config/god`).
+- **`mod/sensewright_mod/state_collector.py`**: the God tick loop.
+  `maybe_god_tick(force=False)` polls the sidecar on a slow wall-clock cadence
+  (`GOD_TICK_INTERVAL_SECONDS = 60`) from the existing `pulse_and_pull`
+  heartbeat and executes the response. `execute_god_directives(directives)` runs
+  each directive through the standard `tool_executor.execute` (add_trait,
+  add_buff, queue_interaction, say_to) and surfaces its `narration` as a
+  narrator notification; world events with no `tool_call` stay
+  notification-only. Every decision is logged with `[validate] god: ...`.
+- **`mod/sensewright_mod/main.py`**: `sw.god` is now a real control surface -
+  `sw.god` (summary, now showing the current preset), `sw.god on|off`,
+  `sw.god tick` (forced tick), `sw.god preset <name>` / `sw.god <preset>`, and
+  `sw.god set <key> <value>` (ControlSpec-validated). Build `2026-09-29.23`.
+- **`mod/sensewright_mod/god_ui.py`**: `GOD_PRESETS` mirrored from the sidecar
+  intervention deck.
+- **`sidecar/sensewright_sidecar/god/orchestrator.py`**: directive lifecycle -
+  returned directives are marked `issued`, the in-memory history is capped
+  (`MAX_DIRECTIVE_HISTORY`), `drain_directives()` added, and `status()` reports
+  `issued_directives`/`history_size`.
+- **`sidecar/sensewright_sidecar/god/controls.py`**: `values_from_settings` now
+  surfaces the active God `preset` in the value map so the mod can display it.
+- **Neighborhood mapping**: `state_collector.scan_neighborhood(force=False)` sends
+  a **full-save census** once per session (and on demand via `sw.god scan`), so
+  the God models **every** Sim/household in the save - not just the active zone -
+  and the background pipeline queues a background per household, per Sim and for
+  relationship-linked NPCs. `main._run_neighborhood_scan` reports the counts.
+- **`sidecar/sensewright_sidecar/agent/graph.py`**: `_merge_census` merges census
+  snapshots by id (never shrinking a `full_save` map with a later `active_zone`
+  re-send; household member lists are unioned, newer native data wins), so the
+  neighborhood stays mapped across zone loads and household changes.
+- **Native family ties (kinship)**: `sim_context._get_kinship` reads the game's
+  genealogy tracker (`SimInfo.genealogy` / `SimInfo.get_relations` with the
+  `FamilyRelationshipIndex` enum, confirmed in the shipped `sims.sim_info`),
+  falling back to `get_family_sim_ids_gen`; the census now carries a `kinship`
+  list (`{relation, target_id, name}`) and the background prompt/fallback render
+  it as a "Family" line, so written backstories never contradict the real family
+  tree. (`CensusSim.kinship` added to the wire contract.)
+- i18n: `cmd.god.*` control keys + `notify.god.directive` (en + pt-BR).
+- Tests: sidecar **445**, mod **360** (new `mod/tests/test_god_orchestration.py`:
+  HTTP payloads, tick execution/narration/throttle/failure, `sw.god` subcommands,
+  neighborhood scan; sidecar orchestrator lifecycle + census-merge tests; kinship
+  is covered in `test_sim_context.py`, `test_census.py` and `test_backgrounder.py`).
+
 ### Added â€” player-activity detection + precise cancel (build `2026-09-29.22`)
 Adopted, with attribution, from the MIT-licensed `dnavaria/sims4ai` reference
 (see `THIRD_PARTY_NOTICES.md`):

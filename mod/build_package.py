@@ -10,6 +10,7 @@ Apache-2.0 TS4ControlAnySim interaction tuning.
 Usage:  python mod/build_package.py
 """
 
+import json
 import struct
 import xml.etree.ElementTree as ET
 import zlib
@@ -24,28 +25,38 @@ INTERACTION_TUNING_TYPE = 0xE882D22F
 SNIPPET_TYPE = 0x7DF2169C
 STRING_TABLE_TYPE = 0x220557DA
 STBL_GROUP = 0x00000000
-# STBL instance's top byte encodes the language: 0x00 = ENG_US, 0x11 = POR_BR.
-STBL_ENG_US = 0x00A1400000000001
-STBL_POR_BR = 0x11A1400000000001
 
 # Index-entry flags (7th field). Tuning resources are zlib-compressed, matching
 # S4S-compiled packages; string tables are stored uncompressed.
 FLAG_COMPRESSED = 0x00015A42
 FLAG_UNCOMPRESSED = 0x00010000
 
-# display-name key (from the interaction XML) -> localized string per language.
-STRINGS_EN = {
-    0xA1400001: "Open Panel",
-    0xA1400002: "Chat\u2026",
-    0xA1400003: "Confirm\u2026",
-    0xA1400004: "HUD on/off",
-}
-STRINGS_PT = {
-    0xA1400001: "Abrir Painel",
-    0xA1400002: "Conversar\u2026",
-    0xA1400003: "Confirmar\u2026",
-    0xA1400004: "HUD on/off",
-}
+# Data-driven pie-menu string tables: one JSON entry per language. The STBL
+# instance's top byte encodes the EA language (0x00 ENG_US, 0x11 POR_BR, ...).
+# Add a language by appending an entry there - no code change.
+STBL_SPEC_PATH = ROOT / "tuning" / "stbl.json"
+
+
+def _as_int(value):
+    """Parse an int from ``0x...`` hex or decimal (str or int)."""
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    return int(text, 16) if text.lower().startswith("0x") else int(text)
+
+
+def load_stbl_languages():
+    """Return the ``[{instance, strings}]`` list from ``tuning/stbl.json``."""
+    with open(str(STBL_SPEC_PATH), "r", encoding="utf-8") as handle:
+        spec = json.load(handle)
+    languages = []
+    for entry in spec.get("languages", []):
+        strings = {
+            _as_int(key): str(text)
+            for key, text in (entry.get("strings") or {}).items()
+        }
+        languages.append({"instance": _as_int(entry["instance"]), "strings": strings})
+    return languages
 
 
 def build_stbl(entries):
@@ -99,11 +110,11 @@ def snippet_resources():
 
 
 def stbl_resources():
-    """Localized string tables: one per supported language (en + pt-BR)."""
+    """Localized string tables: one per language declared in ``tuning/stbl.json``."""
     resources = []
-    for instance, strings in ((STBL_ENG_US, STRINGS_EN), (STBL_POR_BR, STRINGS_PT)):
-        body = build_stbl(strings)
-        resources.append((body, STRING_TABLE_TYPE, STBL_GROUP, instance,
+    for language in load_stbl_languages():
+        body = build_stbl(language["strings"])
+        resources.append((body, STRING_TABLE_TYPE, STBL_GROUP, language["instance"],
                           len(body), FLAG_UNCOMPRESSED))
     return resources
 

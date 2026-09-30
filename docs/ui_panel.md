@@ -64,7 +64,7 @@ so `/v1/config/god` validates and applies them, and the panel renders them.
 
 | Setting | Kind | Range / step | Default |
 |---|---|---|---|
-| `ui.language` | select | auto / en / pt-BR | auto |
+| `ui.language` | select | auto / <every manifest locale> | auto |
 | `llm.temperature` | slider | 0..2 / 0.05 | 0.8 |
 | `llm.max_tokens` | slider | 128..4096 / 64 | 700 |
 | `llm.budget_per_sim_per_day` | slider | 0..2000 / 50 | 500 |
@@ -124,7 +124,13 @@ so `/v1/config/god` validates and applies them, and the panel renders them.
   dialogs (see §3.1), each row dispatches `sw.set <key> <value>` or a roster
   endpoint. Layered fallback: picker → paginated responses → console.
 - new cheats `sw.panel` (Live) + `sw.set <key> <value>` (validated; persists).
-- `http_client.set_god_controls(values, persist=True)` → `POST /v1/config/god`.
+  **Today:** `sw.god set <key> <value>` already applies a ControlSpec value; the
+  dedicated `sw.set`/`sw.panel` surface is the remaining P2 work.
+- `http_client.set_god_controls(values, persist=True)` → `POST /v1/config/god`
+  (**done**).
+- `ui.language` options are **data-driven**: the sidecar renders `auto` + every
+  locale from `locales_content/manifest.json` and ships each option's human
+  `label`, so the panel/localization needs no per-language keys.
 
 **Entry points**
 - **Now:** a button on the boot notification ("Open Panel") using
@@ -218,7 +224,7 @@ credit the originals in `docs/`/`CHANGELOG.md`.
    console fallback) + `sw.set`; `http_client.set_god_controls`; boot-notification
    button; `cmd.help.body`.
 3. **P2b — Pie-menu entry (optional).** `mod/ui_package/` (category + interaction
-   `do_command sw.panel` + STBL en/pt-BR) and `build_package.py` (pure-Python DBPF
+   `do_command sw.panel` + data-driven STBL `tuning/stbl.json`) and `build_package.py` (pure-Python DBPF
    writer, reference `ShadySimDeals/build_mod.py`).
 4. **P3 — Live validation + docs.** Round-trip on the client, restart-persistence
    check, `[validate]` logs, CHANGELOG/STATUS/PLANO, test counts.

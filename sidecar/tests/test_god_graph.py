@@ -105,6 +105,111 @@ async def test_ingest_census_and_controls(god_settings):
     assert "autonomy_degree" in controls["values"]
 
 
+def test_merge_census_keeps_widest_scope_and_unions_members():
+    existing = {
+        "scope": "full_save",
+        "lang": "en",
+        "sims": [{"sim_id": 10, "full_name": "Ana"}, {"sim_id": 11, "full_name": "Beto"}],
+        "households": [{"household_id": 5, "name": "Silva", "members": [10, 11]}],
+    }
+    merged = graph._merge_census(
+        existing,
+        "active_zone",
+        "pt-BR",
+        [{"sim_id": 10, "full_name": "Ana Viva"}],
+        [{"household_id": 5, "name": "Silva", "members": [10]}],
+    )
+
+    assert merged["scope"] == "full_save"
+    assert {s["sim_id"] for s in merged["sims"]} == {10, 11}
+    # Newer native data wins for the Sim that was re-sent.
+    assert next(s for s in merged["sims"] if s["sim_id"] == 10)["full_name"] == "Ana Viva"
+    # Member lists are unioned: an active-zone re-send must not shrink them.
+    assert set(merged["households"][0]["members"]) == {10, 11}
+
+
+async def test_census_full_save_survives_active_zone_resend(god_settings):
+    merge_sim = SimRef(player_id="local", save_id="merge-save", sim_id=10, household_id=5)
+
+    await graph.ingest_census(CensusRequest(
+        sim=merge_sim, scope="active_zone",
+        sims=[CensusSim(sim_id=10, full_name="Ana", household_id=5, is_player=True)],
+        households=[CensusHousehold(household_id=5, name="Silva", members=[10])],
+    ))
+    await graph.ingest_census(CensusRequest(
+        sim=merge_sim, scope="full_save",
+        sims=[
+            CensusSim(sim_id=10, full_name="Ana", household_id=5, is_player=True),
+            CensusSim(sim_id=11, full_name="Beto", household_id=6),
+        ],
+        households=[
+            CensusHousehold(household_id=5, name="Silva", members=[10, 11]),
+            CensusHousehold(household_id=6, name="Souza", members=[11]),
+        ],
+    ))
+    # A later active-zone census (zone load / household change) must not shrink it.
+    await graph.ingest_census(CensusRequest(
+        sim=merge_sim, scope="active_zone",
+        sims=[CensusSim(sim_id=10, full_name="Ana", household_id=5, is_player=True)],
+        households=[CensusHousehold(household_id=5, name="Silva", members=[10])],
+    ))
+
+    entry = graph._census_by_save[graph._census_key("local", "merge-save")]
+    assert entry["scope"] == "full_save"
+    assert {s["sim_id"] for s in entry["sims"]} == {10, 11}
+    assert {h["household_id"] for h in entry["households"]} == {5, 6}
+    h5 = next(h for h in entry["households"] if h["household_id"] == 5)
+    assert set(h5["members"]) == {10, 11}
+
+
+def test_profile_sim_data_flattens_native():
+    profile = {
+        "name": "Ana",
+        "household_id": 5,
+        "native": {
+            "traits": ["ambitious"],
+            "age": "adult",
+            "kinship": [{"relation": "mother", "target_id": 9, "name": "Candy"}],
+        },
+    }
+    data = graph._profile_sim_data(profile)
+    assert data["full_name"] == "Ana"
+    assert data["household_id"] == 5
+    assert data["traits"] == ["ambitious"]
+    assert data["kinship"][0]["name"] == "Candy"
+
+
+async def test_background_falls_back_to_stored_native(god_settings):
+    await graph.ingest_census(CensusRequest(
+        sim=SIM,
+        scope="active_zone",
+        sims=[
+            CensusSim(
+                sim_id=10,
+                full_name="Ana",
+                household_id=5,
+                traits=["ambitious"],
+                age="adult",
+                kinship=[{"relation": "mother", "target_id": 9, "name": "Candy"}],
+            )
+        ],
+        households=[CensusHousehold(household_id=5, name="Silva", members=[10])],
+    ))
+    # The census is unavailable (new session / save evicted), so the stored
+    # profile must still ground the background with the native facts + kinship.
+    graph._census_by_save.pop(graph._census_key("local", "save1"), None)
+
+    result = await graph.generate_background(
+        BackgroundRequest(sim=SIM, scope="sim", lang="en")
+    )
+
+    assert result["ok"] is True
+    text = result["background"]["text"]
+    assert "Ana" in text
+    assert "ambitious" in text
+    assert "Candy" in text
+
+
 async def test_generate_sim_background_cached(god_settings):
     req = BackgroundRequest(
         sim=SIM,

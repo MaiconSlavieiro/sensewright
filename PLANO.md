@@ -228,6 +228,7 @@ sensewright_mod/
 ├── debug_log.py         # gated best-effort logging to sensewright_output.log
 ├── i18n.py              # locale loader + t(key, **args) + game-language detection
 ├── locales/
+│   ├── manifest.json    # data-driven registry: {default, locales:[{code,name,match}]}
 │   ├── en.json          # default locale (source of truth)
 │   └── pt-BR.json       # Brazilian Portuguese translation
 ├── main.py              # @sims4.commands.Command bindings
@@ -256,7 +257,9 @@ sensewright_sidecar/
 ├── schemas.py           # Pydantic v2 wire models (shared contract with the mod)
 ├── auth.py              # shared-token auth (X-Sensewright-Token), runtime.json
 ├── lifecycle.py         # game-process watchdog: exit with The Sims 4
-├── locales.py           # system-message localization for UI/returned keys
+├── locales.py           # thin wrapper over content_i18n for system messages
+├── content_i18n.py      # data-driven content localization
+├── locales_content/     # manifest.json + <code>.json content tables + lexicon.json
 ├── routers/
 │   ├── admin.py         # /v1/config/*, /v1/reset, /v1/events
 │   ├── autonomy.py      # /v1/autonomy/tick, /v1/autonomy/directives
@@ -318,9 +321,12 @@ sensewright_sidecar/
 
 ## 4. Localization (i18n)
 
-> **Decisions:** the mod ships with **two locales**: `en` (default) and `pt-BR`.
-> Every player-facing string used inside the game is localized; no user-visible text
-> is hardcoded. Code, docs and code comments are always English.
+> **Decisions:** the mod ships with **two locales** (`en` default and `pt-BR`), but the
+> supported set is **data-driven**: a `locales/manifest.json` describes the languages
+> (`{code, name, match}`), so adding one is dropping a JSON + a manifest entry, never a
+> code change. Every player-facing string used inside the game is localized; no
+> user-visible text is hardcoded, and no code references a specific locale. Code, docs
+> and code comments are always English.
 
 ### 4.1 Principles
 
@@ -337,9 +343,9 @@ sensewright_sidecar/
 
 For in-game "chrome" text:
 
-1. Explicit override in `config.toml` → `[ui] language = "en" | "pt-BR" | "auto"`.
-2. If `auto`: detect the current game language and map it to a supported locale.
-3. Unsupported / detection failure → `en`.
+1. Explicit override in `config.toml` → `[ui] language = "<locale>" | "auto"`.
+2. If `auto`: detect the current game language and map it to a manifest locale.
+3. Unsupported / detection failure → the manifest default locale.
 
 For LLM content (dialogue, reflections, generated profiles):
 
@@ -351,7 +357,10 @@ For LLM content (dialogue, reflections, generated profiles):
 ### 4.3 Locale file format
 
 Locale files are JSON, bundled inside the `.ts4script` under `sensewright_mod/locales/`.
-The format is flat with IDE-friendly dotted keys:
+The supported set is declared by `locales/manifest.json`
+(`{default, locales:[{code, name, match}]}`): adding a language = drop
+`<code>.json` + a manifest entry (no code change). The format is flat with
+IDE-friendly dotted keys:
 
 ```json
 {
@@ -375,8 +384,14 @@ Rules:
 
 ### 4.4 Language selection UI
 
-- **Config file:** `[ui] language = "auto" | "en" | "pt-BR"` (default `auto`).
-- **In-game cheat:** `sw.lang en` / `sw.lang pt-BR` / `sw.lang auto` (persists to config).
+- **Config file:** `[ui] language = "auto" | <locale code>` (default `auto`).
+- **In-game cheat:** `sw.lang auto` / `sw.lang <code>` (persists to config).
+- **Data-driven set:** the supported languages come from
+  `sensewright_mod/locales/manifest.json` (mod UI) and
+  `sidecar/sensewright_sidecar/locales_content/manifest.json` (sidecar content).
+  Adding a language = drop `locales/<code>.json` (+ the sidecar content file) and
+  append `{code, name, match}` to the manifests - **no code edit**. Language
+  detection matches the game locale against the manifest `match` tokens.
 - **God panel (Phase 5):** a language dropdown alongside the other settings.
 - Changing language takes effect immediately (locales are reloaded) and is also sent to
   the sidecar (`/v1/config/lang` or per-request `lang`) so LLM content matches.
@@ -685,7 +700,7 @@ Each phase is independently testable; the mod remains usable between phases.
 - `build.py` (Py 3.7) → `.ts4script` (bundles `locales/`).
 - Mod ↔ sidecar handshake; ping + auto-spawn of the exe.
 - Degraded mode already functional.
-- i18n scaffold: `i18n.py` + `locales/en.json` + `locales/pt-BR.json`; language resolution (config → game → en).
+- i18n scaffold: `i18n.py` + `locales/manifest.json` + `locales/en.json` + `locales/pt-BR.json`; language resolution (config → game → manifest default).
 
 **Phase 2 — State & Directives** *(done)*
 - `sim_context.py` + `events.py` (events + alarms).
@@ -727,8 +742,9 @@ Each phase is independently testable; the mod remains usable between phases.
   dials.)*
 - In-game panel with framework-driven **native-dialog controls** (picker/list rows,
   paginated responses, numeric input, multi-select — **no drag sliders**) + language
-  selector; see `docs/ui_panel.md`; DeepSeek tier. *(Pending: the mod
-  panel + the periodic pull loop that executes the returned directives.)*
+  selector; see `docs/ui_panel.md`; DeepSeek tier. *(Done: the mod-side pull loop
+  (`state_collector.maybe_god_tick`), directive execution and `sw.god on|off|tick|
+  scan|preset|set`. Pending: the full native `panel_ui.py` surface.)*
 
 **Phase 6 — Publishing**
 - Package the exe + 1 folder; README with the OneDrive warning; 0-key mode.
@@ -1370,10 +1386,14 @@ Canonical argument keys are defined in `sidecar/sensewright_sidecar/tools/schema
 
 ### C. Locale files and language resolution
 
-- Shipped locales: `en` (default, source of truth) and `pt-BR`.
+- Shipped locales: `en` (default, source of truth) and `pt-BR`; the set is
+  **data-driven** via `locales/manifest.json` (mod) and
+  `sidecar/sensewright_sidecar/locales_content/manifest.json` (sidecar content).
 - Files live at `sensewright_mod/locales/<locale>.json` and are bundled in the `.ts4script`.
-- Resolution: `config [ui].language` → game language (if `auto`) → `en`.
-- Missing keys fall back to `en`; a CI/test validates key parity between locales.
+  Adding a language = drop `<code>.json` + a manifest entry (no code change).
+- Resolution: `config [ui].language` → game language (if `auto`) → manifest default.
+- Missing keys fall back to the manifest default; a CI/test validates key parity
+  across **all** manifest locales.
 - The sidecar receives `lang` on every request and produces LLM content in it; system/UI
   responses return `message_key` + `message_args` for mod-side localization.
 

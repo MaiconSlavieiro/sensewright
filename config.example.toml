@@ -3,8 +3,10 @@
 # you want. With NO KEYS AT ALL the mod already runs in "native mode".
 
 [ui]
-# Player-facing language for in-game text. One of: auto | en | pt-BR.
-# "auto" follows the game language and falls back to English.
+# Player-facing language for in-game text: "auto" or any locale code present in
+# the locale manifest (shipped: en, pt-BR). "auto" follows the game language and
+# falls back to the default. The set of languages is data-driven: adding one is a
+# JSON file + a manifest entry, never a code change (see the mod's locales/).
 language = "auto"
 
 [network]

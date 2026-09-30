@@ -342,7 +342,10 @@ def get_auth_header() -> dict:
 def read_ui_language() -> str:
     """
     Read the UI language from sensewright.toml next to the mod.
-    Returns "auto", "en", or "pt-BR". Defaults to "auto".
+
+    Returns "auto" or any locale code present in the locale manifest. The valid
+    set is data-driven, so a newly injected language is accepted without a code
+    change. Defaults to "auto".
     """
     root = mod_root()
     if not root:
@@ -369,8 +372,14 @@ def read_ui_language() -> str:
                 parts = line.split("=", 1)
                 if len(parts) == 2:
                     value = parts[1].strip().strip('"\'')
-                    if value in ("auto", "en", "pt-BR"):
+                    if value == "auto":
                         return value
+                    try:
+                        from . import i18n
+                        if value in i18n.available_locales():
+                            return value
+                    except Exception as exc:
+                        _log("config.read_ui_language.resolve", exc)
     except Exception as exc:
         _log("config.read_ui_language", exc)
 

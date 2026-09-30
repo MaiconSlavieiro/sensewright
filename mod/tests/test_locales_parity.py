@@ -1,10 +1,13 @@
 """
-Tests for locale parity between en.json and pt-BR.json.
-Run with system Python (3.10+).
+Tests for locale parity across every locale declared in ``locales/manifest.json``.
+
+Data-driven: adding a language to the manifest automatically brings it under
+test here (no per-language hardcoding). Run with system Python (3.10+).
 """
 
-import sys
 import os
+import re
+import sys
 import json
 
 # Add mod directory to path
@@ -14,62 +17,55 @@ sys.path.insert(0, mod_dir)
 import pytest
 
 
-def load_locale(locale: str) -> dict:
-    """Load a locale file directly."""
-    locale_path = os.path.join(mod_dir, "sensewright_mod", "locales", "{}.json".format(locale))
-    with open(locale_path, "r", encoding="utf-8") as f:
+LOCALES_DIR = os.path.join(mod_dir, "sensewright_mod", "locales")
+
+
+def load_manifest() -> dict:
+    with open(os.path.join(LOCALES_DIR, "manifest.json"), "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def test_both_locales_exist():
-    """Test that both locale files exist."""
-    en_path = os.path.join(mod_dir, "sensewright_mod", "locales", "en.json")
-    ptbr_path = os.path.join(mod_dir, "sensewright_mod", "locales", "pt-BR.json")
-
-    assert os.path.exists(en_path), "en.json not found"
-    assert os.path.exists(ptbr_path), "pt-BR.json not found"
+def load_locale(locale: str) -> dict:
+    path = os.path.join(LOCALES_DIR, "{}.json".format(locale))
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def test_meta_structure():
-    """Test that both locales have correct _meta structure."""
-    en_data = load_locale("en")
-    ptbr_data = load_locale("pt-BR")
-
-    # Both must have _meta
-    assert "_meta" in en_data
-    assert "_meta" in ptbr_data
-
-    # EN meta
-    assert en_data["_meta"]["locale"] == "en"
-    assert en_data["_meta"]["name"] == "English"
-    assert "version" in en_data["_meta"]
-
-    # PT-BR meta
-    assert ptbr_data["_meta"]["locale"] == "pt-BR"
-    assert ptbr_data["_meta"]["name"] == "Português (Brasil)"
-    assert "version" in ptbr_data["_meta"]
+def manifest_codes() -> list:
+    return [e["code"] for e in load_manifest().get("locales", []) if e.get("code")]
 
 
-def test_key_parity():
-    """Test that both locales have identical key sets (excluding _meta)."""
-    en_data = load_locale("en")
-    ptbr_data = load_locale("pt-BR")
+def test_manifest_and_locale_files_exist():
+    manifest = load_manifest()
+    codes = manifest_codes()
+    assert codes, "manifest has no locales"
+    assert manifest.get("default") in codes, "manifest default not declared"
+    for code in codes:
+        path = os.path.join(LOCALES_DIR, "{}.json".format(code))
+        assert os.path.exists(path), "{}.json not found".format(code)
 
-    en_keys = set(k for k in en_data.keys() if k != "_meta")
-    ptbr_keys = set(k for k in ptbr_data.keys() if k != "_meta")
 
-    # Both should have the same keys
-    missing_in_ptbr = en_keys - ptbr_keys
-    missing_in_en = ptbr_keys - en_keys
+def test_meta_matches_manifest():
+    for entry in load_manifest().get("locales", []):
+        data = load_locale(entry["code"])
+        assert data["_meta"]["locale"] == entry["code"]
+        assert data["_meta"]["name"] == entry["name"]
+        assert "version" in data["_meta"]
 
-    assert not missing_in_ptbr, "Keys missing in pt-BR: {}".format(sorted(missing_in_ptbr))
-    assert not missing_in_en, "Keys missing in en: {}".format(sorted(missing_in_en))
+
+def test_key_parity_against_default():
+    default = load_manifest()["default"]
+    base = set(load_locale(default).keys()) - {"_meta"}
+    for code in manifest_codes():
+        keys = set(load_locale(code).keys()) - {"_meta"}
+        missing = base - keys
+        extra = keys - base
+        assert not missing, "{} missing keys: {}".format(code, sorted(missing))
+        assert not extra, "{} extra keys: {}".format(code, sorted(extra))
 
 
 def test_required_keys_present():
-    """Test that all canonical keys are present in both locales."""
-    # Canonical keys from the spec
-    required_keys = {
+    required = {
         "cmd.help.title",
         "cmd.help.body",
         "cmd.status.title",
@@ -91,58 +87,36 @@ def test_required_keys_present():
         "error.bad_request",
         "error.internal",
     }
-
-    en_data = load_locale("en")
-    ptbr_data = load_locale("pt-BR")
-
-    en_keys = set(k for k in en_data.keys() if k != "_meta")
-    ptbr_keys = set(k for k in ptbr_data.keys() if k != "_meta")
-
-    missing_in_en = required_keys - en_keys
-    missing_in_ptbr = required_keys - ptbr_keys
-
-    assert not missing_in_en, "Required keys missing in en: {}".format(sorted(missing_in_en))
-    assert not missing_in_ptbr, "Required keys missing in pt-BR: {}".format(sorted(missing_in_ptbr))
+    default = load_manifest()["default"]
+    missing = required - set(load_locale(default).keys())
+    assert not missing, "Required keys missing in {}: {}".format(default, sorted(missing))
 
 
 def test_no_empty_values():
-    """Test that no locale has empty string values for required keys."""
-    en_data = load_locale("en")
-    ptbr_data = load_locale("pt-BR")
-
-    for key, value in en_data.items():
-        if key == "_meta":
-            continue
-        assert value != "", "Empty value in en for key: {}".format(key)
-
-    for key, value in ptbr_data.items():
-        if key == "_meta":
-            continue
-        assert value != "", "Empty value in pt-BR for key: {}".format(key)
+    for code in manifest_codes():
+        for key, value in load_locale(code).items():
+            if key == "_meta":
+                continue
+            assert value != "", "Empty value in {} for key: {}".format(code, key)
 
 
 def test_placeholders_consistency():
-    """Test that placeholders in EN and PT-BR match for each key."""
-    en_data = load_locale("en")
-    ptbr_data = load_locale("pt-BR")
-
-    import re
-    placeholder_pattern = re.compile(r"\{(\w+)\}")
-
-    for key in en_data:
-        if key == "_meta":
+    default = load_manifest()["default"]
+    base = load_locale(default)
+    pattern = re.compile(r"\{(\w+)\}")
+    for code in manifest_codes():
+        if code == default:
             continue
-
-        en_value = en_data[key]
-        ptbr_value = ptbr_data.get(key, "")
-
-        en_placeholders = set(placeholder_pattern.findall(en_value))
-        ptbr_placeholders = set(placeholder_pattern.findall(ptbr_value))
-
-        # Both should have the same placeholders
-        assert en_placeholders == ptbr_placeholders, \
-            "Placeholder mismatch for {}: en={}, pt-BR={}".format(
-                key, en_placeholders, ptbr_placeholders
+        data = load_locale(code)
+        for key, value in base.items():
+            if key == "_meta":
+                continue
+            en_ph = set(pattern.findall(value))
+            other_ph = set(pattern.findall(data.get(key, "")))
+            assert en_ph == other_ph, (
+                "Placeholder mismatch for {} ({} vs {}): {} != {}".format(
+                    key, default, code, en_ph, other_ph
+                )
             )
 
 

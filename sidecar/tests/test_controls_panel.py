@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from sensewright_sidecar import panel_store
+from sensewright_sidecar import content_i18n, panel_store
 from sensewright_sidecar.config import Settings, load_settings
 from sensewright_sidecar.god.controls import (
     CONTROL_SPEC_BY_KEY,
@@ -71,6 +71,17 @@ def test_select_specs_validate_options():
     assert get_control("agents.evolution.trait_swap").validate("auto") == "auto"
     with pytest.raises(ValueError):
         get_control("agents.evolution.trait_swap").validate("bogus")
+
+
+def test_ui_language_options_are_data_driven():
+    spec = get_control("ui.language")
+    assert [opt.value for opt in spec.options] == ["auto", *content_i18n.available_locales()]
+    labels = {opt.value: opt.label for opt in spec.options}
+    assert labels["en"] == "English"
+    assert labels["pt-BR"] == "Português (Brasil)"
+    # Non-language selects keep the label_key shape only (no inline label).
+    other = get_control("memory.decay_preset")
+    assert all(opt.label is None for opt in other.options)
 
 
 def test_slider_specs_clamp_and_step():

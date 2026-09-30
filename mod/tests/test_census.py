@@ -53,6 +53,9 @@ def _install_census_fakes(monkeypatch, sims, active=None):
     monkeypatch.setattr(sim_context, "_get_relationships",
                         lambda sim_info: [{"target_id": 999, "target_name": "X",
                                            "depth": 42.5, "track": ""}])
+    monkeypatch.setattr(sim_context, "_get_kinship",
+                        lambda sim_info: [{"relation": "mother", "target_id": 77,
+                                           "name": "Mae"}])
 
 
 def test_build_census_shapes(monkeypatch):
@@ -67,7 +70,7 @@ def test_build_census_shapes(monkeypatch):
     sim = sims[0]
     assert set(sim.keys()) == {
         "sim_id", "full_name", "household_id", "traits", "age", "gender",
-        "career", "skills", "relationships", "is_player",
+        "career", "skills", "relationships", "kinship", "is_player",
     }
     assert sim["sim_id"] == 1
     assert sim["full_name"] == "Alice"
@@ -78,6 +81,7 @@ def test_build_census_shapes(monkeypatch):
     assert sim["career"] == "Doctor"
     assert sim["skills"] == {"cooking": 3}
     assert sim["relationships"] == [{"target_id": 999, "depth": 42.5}]
+    assert sim["kinship"] == [{"relation": "mother", "target_id": 77, "name": "Mae"}]
     assert sim["is_player"] is True
     assert sims[1]["is_player"] is False
 
@@ -204,7 +208,7 @@ def test_send_census_swallows_errors(monkeypatch):
 
 
 def test_zone_load_triggers_god_and_census(monkeypatch):
-    calls = {"god": 0, "census": 0}
+    calls = {"god": 0, "census": 0, "scan": 0}
     monkeypatch.setattr(http_client, "send_events", lambda *a, **k: {})
     monkeypatch.setattr(sim_context, "_get_active_sim_info", lambda: object())
     monkeypatch.setattr(state_collector, "send_autonomy_tick", lambda *a, **k: None)
@@ -216,12 +220,32 @@ def test_zone_load_triggers_god_and_census(monkeypatch):
         state_collector, "send_census",
         lambda *a, **k: calls.__setitem__("census", calls["census"] + 1),
     )
+    monkeypatch.setattr(
+        state_collector, "scan_neighborhood",
+        lambda *a, **k: calls.__setitem__("scan", calls["scan"] + 1),
+    )
 
     collector = state_collector.StateCollector()
     collector._on_zone_load(zone_id=5)
 
     assert calls["god"] == 1
     assert calls["census"] == 1
+    assert calls["scan"] == 1
+
+
+def test_scan_neighborhood_sends_full_save_once(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        state_collector, "send_census",
+        lambda *a, **k: captured.append(k.get("scope")) or {"ok": True, "sims": 3},
+    )
+    monkeypatch.setattr(state_collector, "_NEIGHBORHOOD_SCAN", {"done": False})
+
+    state_collector.scan_neighborhood()
+    state_collector.scan_neighborhood()  # throttled: already scanned this session
+    state_collector.scan_neighborhood(force=True)
+
+    assert captured == ["full_save", "full_save"]
 
 
 def test_household_change_triggers_background(monkeypatch):

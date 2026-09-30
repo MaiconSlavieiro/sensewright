@@ -23,6 +23,12 @@ DEFAULT_INTERVAL_MINUTES = 30.0
 AUTONOMY_INTERVAL_MINUTES = 10.0
 DIRECTIVE_PULL_INTERVAL_MINUTES = 10.0
 
+# God orchestration tick cadence (PLANO §8.3, Phase 5c). The mod polls the
+# sidecar for one directive batch on a slow wall-clock cadence and executes it;
+# the orchestrator enforces its own (>= 30 s) minimum interval, so this is only
+# a poll rate and never the real limiter.
+GOD_TICK_INTERVAL_SECONDS = 60.0
+
 # Safety net: also fire a pulse/pull off gameplay events (throttled by wall
 # clock). The game-clock alarms pause with the game; events only fire during
 # active play, so this guarantees the agency loop runs while the player plays.
@@ -327,6 +333,33 @@ def _relationships_of(sim_info) -> List[Dict[str, Any]]:
         except (TypeError, ValueError):
             depth = 0.0
         result.append({"target_id": target_id, "depth": depth})
+    return result
+
+
+def _kinship_of(sim_info) -> List[Dict[str, Any]]:
+    """Native family relations: [{"relation", "target_id", "name"}].
+
+    Compact/primitive-only so no game object leaks into the census payload.
+    """
+    result: List[Dict[str, Any]] = []
+    try:
+        kinship = sim_context._get_kinship(sim_info)
+    except Exception:
+        kinship = []
+    for relation in kinship or []:
+        if not isinstance(relation, dict):
+            continue
+        try:
+            target_id = int(relation.get("target_id"))
+        except (TypeError, ValueError):
+            continue
+        label = relation.get("relation")
+        name = relation.get("name")
+        result.append({
+            "relation": label if isinstance(label, str) else str(label or ""),
+            "target_id": target_id,
+            "name": name if isinstance(name, str) else str(name or ""),
+        })
     return result
 
 
@@ -734,6 +767,10 @@ def pulse_and_pull() -> None:
     except Exception as exc:
         log_exception("state_collector.pulse_and_pull(pull)", exc)
     try:
+        maybe_god_tick()
+    except Exception as exc:
+        log_exception("state_collector.pulse_and_pull(god)", exc)
+    try:
         hud.note_heartbeat(
             tick_result=tick_result,
             pull_result=pull_result,
@@ -878,6 +915,122 @@ def _pull_intents(save_id: str):
         return None
 
 
+# --- God orchestration (Phase 5c) ---
+
+# Last God tick bookkeeping (wall-clock throttled; never sent anywhere).
+_GOD_TICK = {"last": 0.0, "count": 0}
+
+
+def _show_narration(text: str) -> None:
+    """Surface a God narration as a notification (the narrator's voice)."""
+    if not text:
+        return
+    try:
+        message = i18n.t("notify.god.directive", text=text)
+    except Exception:
+        message = text
+    try:
+        if chat_ui.show_simple_notification(message):
+            return
+    except Exception as exc:
+        log_exception("state_collector._show_narration", exc)
+    debug_log("[Sensewright] {}".format(message))
+
+
+def execute_god_directives(directives: Any) -> List[Any]:
+    """Execute the directives from one God tick. Never raises.
+
+    Each directive may carry a ``tool_call`` (a real game tool the standard
+    executor runs and whose result it posts back) plus a ``narration`` surfaced
+    as a narrator notification. World/knowledge events with no ``tool_call``
+    stay notification-only. Returns the per-directive execution results.
+    """
+    if not isinstance(directives, list):
+        return []
+
+    results: List[Any] = []
+    for directive in directives:
+        if not isinstance(directive, dict):
+            continue
+
+        narration = directive.get("narration")
+        if narration:
+            _show_narration(narration)
+
+        tool_call = directive.get("tool_call")
+        result: Any = None
+        if isinstance(tool_call, dict) and tool_call.get("name"):
+            try:
+                result = tool_executor.execute(tool_call)
+            except Exception as exc:
+                log_exception("state_collector.execute_god_directives", exc)
+                result = {"ok": False, "error": "execution_failed"}
+
+        validation_log(
+            "god: directive id={} type={} sim={} tool={} -> ok={}".format(
+                directive.get("id", ""),
+                directive.get("type", ""),
+                directive.get("target_sim"),
+                tool_call.get("name") if isinstance(tool_call, dict) else "",
+                result.get("ok") if isinstance(result, dict) else None,
+            )
+        )
+        results.append(result)
+    return results
+
+
+def maybe_god_tick(force: bool = False):
+    """Run one God-orchestration tick on a slow cadence. Never raises.
+
+    Posts ``/v1/god/tick`` and executes the returned directives. Throttled by
+    ``GOD_TICK_INTERVAL_SECONDS`` unless ``force``. Returns the response dict,
+    or ``None`` when throttled or when the sidecar is unreachable.
+    """
+    now = time.monotonic()
+    if not force and (now - _GOD_TICK["last"]) < GOD_TICK_INTERVAL_SECONDS:
+        return None
+    _GOD_TICK["last"] = now
+
+    try:
+        sim = _active_sim_ref()
+    except Exception:
+        sim = None
+    if not isinstance(sim, dict):
+        sim = {"player_id": "local", "save_id": "unknown", "sim_id": 0}
+
+    try:
+        time_of_day = _zone_time_of_day()
+    except Exception:
+        time_of_day = "unknown"
+    try:
+        lot_type = _lot_type()
+    except Exception:
+        lot_type = "residential"
+
+    try:
+        response = http_client.god_tick(
+            sim,
+            time_of_day or "unknown",
+            lot_type or "residential",
+            _current_lang(),
+        )
+    except (http_client.SidecarUnreachable, http_client.SidecarError):
+        return None
+    except Exception as exc:
+        log_exception("state_collector.maybe_god_tick", exc)
+        return None
+
+    directives = response.get("directives") if isinstance(response, dict) else None
+    if directives:
+        preset = response.get("preset", "") if isinstance(response, dict) else ""
+        validation_log(
+            "god-tick: {} directive(s) preset={}".format(len(directives), preset)
+        )
+        execute_god_directives(directives)
+    _GOD_TICK["count"] = len(directives) if isinstance(directives, list) else 0
+    return response
+
+
 def build_census(scope: str = "active_zone"):
     """
     Build the census for the given scope.
@@ -887,7 +1040,7 @@ def build_census(scope: str = "active_zone"):
     zone scope keeps the payload and the seat pool small (the God still covers
     unplayed Sims). Returns ``(sims, households)`` following the wire shapes:
     sim = {sim_id, full_name, household_id, traits, age, gender, career,
-           skills, relationships, is_player}
+           skills, relationships, kinship, is_player}
     household = {household_id, name, members, funds}
     Never raises; returns ``([], [])`` outside the game.
     """
@@ -924,6 +1077,7 @@ def build_census(scope: str = "active_zone"):
             "career": _career_name_of(sim_info),
             "skills": _skills_of(sim_info),
             "relationships": _relationships_of(sim_info),
+            "kinship": _kinship_of(sim_info),
             "is_player": _is_player_of(sim_info, player_household_id),
         })
 
@@ -978,6 +1132,30 @@ def send_census(sim: Optional[Dict[str, Any]] = None,
     except Exception as exc:
         log_exception("state_collector.send_census", exc)
         return None
+
+
+# The neighborhood (full-save) scan is heavier than the active-zone pulse, so it
+# runs once per session automatically (or on demand via ``sw.god scan``).
+_NEIGHBORHOOD_SCAN = {"done": False}
+
+
+def scan_neighborhood(force: bool = False):
+    """Census the whole save so the God maps and backgrounds every Sim.
+
+    Sends a ``full_save`` census: the sidecar then models every Sim/household and
+    queues a background per household, per Sim and for relationship-linked NPCs.
+    Runs once per session unless ``force`` (``sw.god scan``). Never raises;
+    returns the census response or ``None``.
+    """
+    if _NEIGHBORHOOD_SCAN["done"] and not force:
+        return None
+    validation_log("neighborhood-scan: full-save census")
+    response = send_census(scope="full_save")
+    # Only mark the session as scanned on success, so an unreachable sidecar at
+    # zone load is retried on the next zone load / household change.
+    if isinstance(response, dict):
+        _NEIGHBORHOOD_SCAN["done"] = True
+    return response
 
 
 class StateCollector:
@@ -1287,6 +1465,10 @@ class StateCollector:
             send_census()
         except Exception as exc:
             log_exception("StateCollector._on_zone_load(census)", exc)
+        try:
+            scan_neighborhood()
+        except Exception as exc:
+            log_exception("StateCollector._on_zone_load(neighborhood)", exc)
 
         # Re-arm the game-clock alarms for the new zone/active Sim (the alarm
         # owner may have changed) and send one immediate pulse so the agency

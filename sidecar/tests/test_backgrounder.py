@@ -112,7 +112,7 @@ async def test_generate_sim_background_injects_mood_influence():
     assert "Mood influence 0.00/1.00" in low_prompt
     assert "Mood influence 1.00/1.00" in high_prompt
     assert "Write only in English" in low_prompt
-    assert "Write only in Brazilian Portuguese" in high_prompt
+    assert "Write only in Português (Brasil)" in high_prompt
     assert "Native traits: romantic, ambitious" in low_prompt
 
 
@@ -173,3 +173,29 @@ def test_is_stale_logic():
     missing_influence = dict(background)
     del missing_influence["mood_influence"]
     assert is_stale(missing_influence, 0.5, ["drama"]) is True
+
+
+def test_fallback_sim_background_includes_kinship():
+    sim = {
+        **SIM,
+        "lang": "en",
+        "kinship": [{"relation": "mother", "target_id": 9, "name": "Candy Goth"}],
+    }
+    en = fallback_sim_background(sim, ["drama"], 0.5)
+    assert "Family: mother: Candy Goth" in en["text"]
+
+    pt = fallback_sim_background({**sim, "lang": "pt-BR"}, ["drama"], 0.5)
+    assert "Família: mother: Candy Goth" in pt["text"]
+
+
+async def test_llm_prompt_includes_native_kinship():
+    registry = FakeRegistry(_llm_json())
+    sim = {
+        **SIM,
+        "kinship": [{"relation": "father", "target_id": 9, "name": "Mortimer Goth"}],
+    }
+
+    await generate_sim_background(sim, ZEITGEIST, "", "en", registry, 0.5)
+
+    prompt = registry.calls[0]["messages"][1]["content"]
+    assert "Family (kinship): father: Mortimer Goth" in prompt

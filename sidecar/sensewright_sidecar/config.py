@@ -18,6 +18,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from . import content_i18n
+
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -290,7 +292,7 @@ class Settings(BaseModel):
 
     home: Path = Field(default_factory=resolve_home)
     config_path: Path | None = None
-    lang: str = "en"
+    lang: str = content_i18n.default_lang()
 
     @property
     def data_dir(self) -> Path:
@@ -339,7 +341,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None) -> Settings
     except Exception:
         pass
 
-    if not settings.lang or settings.lang == "en":
+    if not settings.lang or settings.lang == content_i18n.default_lang():
         # ``lang`` is the *resolved* language; the raw preference lives in ui.language.
         env_lang = os.environ.get("SENSEWRIGHT_LANG")
         if env_lang:

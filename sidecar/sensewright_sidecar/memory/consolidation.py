@@ -15,6 +15,7 @@ import re
 from collections import Counter
 from typing import Any
 
+from .. import content_i18n
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -25,90 +26,28 @@ _MAX_TOKENS = 500
 _TOP_TOPICS = 5
 _TOP_RELATIONSHIPS = 5
 
-_LANG_NAMES: dict[str, str] = {
-    "en": "English",
-    "pt-BR": "Brazilian Portuguese",
-}
+def _stopwords() -> frozenset:
+    """Stopword set from the lexical data (data-driven, no language strings here)."""
+    words = content_i18n.lexicon().get("stopwords")
+    return frozenset(str(word) for word in words) if isinstance(words, list) else frozenset()
 
-_EMPTY_SUMMARY: dict[str, str] = {
-    "en": "No dialogue to consolidate.",
-    "pt-BR": "Nenhum diálogo para consolidar.",
-}
 
-_STOPWORDS = frozenset(
-    {
-        # English
-        "about", "after", "again", "against", "being", "could", "did", "does", "doing",
-        "down", "each", "from", "going", "have", "having", "here", "into", "just", "know",
-        "like", "maybe", "more", "most", "much", "must", "need", "only", "other", "over",
-        "really", "should", "some", "such", "than", "that", "their", "them", "then",
-        "there", "these", "they", "thing", "think", "this", "those", "very", "want",
-        "well", "were", "what", "when", "where", "which", "while", "will", "with",
-        "would", "yeah", "your", "you", "the", "and", "but", "for", "not", "are", "was",
-        "can", "get", "got", "her", "his", "she", "him", "its", "our", "out",
-        "who", "why", "how", "all", "any", "too", "also", "okay", "hello",
-        # Português
-        "você", "voce", "para", "pra", "muito", "bem", "também", "tambem", "só", "so",
-        "já", "ja", "aqui", "ali", "isso", "isto", "aquilo", "tudo", "nada", "algo",
-        "porque", "então", "entao", "como", "quando", "onde", "quem", "qual", "mas",
-        "uma", "uns", "umas", "dos", "das", "nos", "nas", "pelo", "pela", "nós",
-        "eles", "elas", "meu", "minha", "seu", "sua", "nosso", "nossa", "está", "esta",
-        "estou", "tem", "tenho", "ter", "vai", "vou", "não", "nao", "sim", "obrigado",
-        "obrigada",
-    }
-)
+def _emotion_words() -> dict[str, str]:
+    """Emotion keyword -> canonical label map from the lexical data."""
+    words = content_i18n.lexicon().get("emotion_words")
+    if isinstance(words, dict):
+        return {str(key): str(value) for key, value in words.items()}
+    return {}
 
-_EMOTION_WORDS: dict[str, str] = {
-    "happy": "joy",
-    "happiness": "joy",
-    "feliz": "joy",
-    "alegre": "joy",
-    "joy": "joy",
-    "love": "affection",
-    "loved": "affection",
-    "amor": "affection",
-    "angry": "anger",
-    "anger": "anger",
-    "mad": "anger",
-    "raiva": "anger",
-    "sad": "sadness",
-    "sadness": "sadness",
-    "triste": "sadness",
-    "afraid": "fear",
-    "scared": "fear",
-    "fear": "fear",
-    "medo": "fear",
-    "excited": "excitement",
-    "animado": "excitement",
-    "anxious": "anxiety",
-    "ansioso": "anxiety",
-    "worried": "anxiety",
-    "tired": "exhaustion",
-    "cansado": "exhaustion",
-    "lonely": "loneliness",
-    "sozinho": "loneliness",
-    "proud": "pride",
-    "orgulhoso": "pride",
-    "embarrassed": "embarrassment",
-    "envergonhado": "embarrassment",
-    "grateful": "gratitude",
-    "grato": "gratitude",
-}
+
+def _name_exclude() -> frozenset:
+    """Proper-noun false positives to skip, from the lexical data."""
+    names = content_i18n.lexicon().get("name_exclude")
+    return frozenset(str(name) for name in names) if isinstance(names, list) else frozenset()
+
 
 _WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ']+")
 _PROPER_NOUN_RE = re.compile(r"\b([A-Z][a-zà-öø-ÿ]{2,})\b")
-
-_NAME_EXCLUDE = frozenset(
-    {
-        "The", "And", "But", "You", "She", "He", "They", "We", "It", "That", "This",
-        "What", "When", "Where", "Why", "How", "Yes", "Not", "Oh", "Well", "Okay",
-        "Hello", "Hey", "Thanks", "Thank", "Please", "Sim", "Sims",
-        # Português
-        "Olá", "Ola", "Oi", "Você", "Voce", "Ele", "Ela", "Nós", "Nos", "Eles", "Elas",
-        "Não", "Nao", "Mas", "Que", "Como", "Quando", "Onde", "Porque", "Então",
-        "Entao",
-    }
-)
 
 
 def deterministic_consolidation(
@@ -121,7 +60,7 @@ def deterministic_consolidation(
 
     summary = _truncate(transcript, _MAX_SUMMARY_CHARS)
     if not summary:
-        summary = _EMPTY_SUMMARY.get(target, _EMPTY_SUMMARY["en"])
+        summary = content_i18n.t(target, "consolidation.empty_summary")
 
     return {
         "summary": summary,
@@ -193,21 +132,22 @@ def _topics(transcript: str) -> list[str]:
 
 
 def _significant_words(text: str) -> list[str]:
+    stopwords = _stopwords()
     return [
         word
         for word in _WORD_RE.findall(text.lower())
-        if len(word) >= 4 and word not in _STOPWORDS
+        if len(word) >= 4 and word not in stopwords
     ]
 
 
 def _emotions(transcript: str, lang: str) -> list[str]:
+    emotion_words = _emotion_words()
     found: list[str] = []
     for word in _WORD_RE.findall(transcript.lower()):
-        label = _EMOTION_WORDS.get(word)
+        label = emotion_words.get(word)
         if label and label not in found:
             found.append(label)
-    prefix = "senti" if lang == "pt-BR" else "felt"
-    return [f"{prefix} {label}" for label in found]
+    return [content_i18n.t(lang, "consolidation.felt", label=label) for label in found]
 
 
 def _facts(profile: dict[str, Any], lang: str) -> list[str]:
@@ -215,15 +155,15 @@ def _facts(profile: dict[str, Any], lang: str) -> list[str]:
     name = str(data.get("name") or data.get("full_name") or "").strip()
     if not name:
         return []
-    if lang == "pt-BR":
-        return [f"{name} participou desta conversa."]
-    return [f"{name} took part in this conversation."]
+    return [content_i18n.t(lang, "consolidation.fact", name=name)]
 
 
 def _relationships(transcript: str) -> list[str]:
+    name_exclude = _name_exclude()
+    stopwords = _stopwords()
     names: list[str] = []
     for match in _PROPER_NOUN_RE.findall(transcript):
-        if match in _NAME_EXCLUDE or match.lower() in _STOPWORDS:
+        if match in name_exclude or match.lower() in stopwords:
             continue
         if match not in names:
             names.append(match)
@@ -284,7 +224,7 @@ def _build_messages(
     )
     user = (
         f"Sim: {name}\n"
-        f"Write in {_LANG_NAMES.get(lang, 'English')}.\n"
+        f"Write in {content_i18n.language_name(lang)}.\n"
         f"Dialogue transcript:\n{transcript}"
     )
     return [

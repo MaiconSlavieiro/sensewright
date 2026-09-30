@@ -13,6 +13,7 @@ import math
 import time
 from typing import Any
 
+from .. import content_i18n
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -26,15 +27,6 @@ REFLECTION_SHAPE: dict[str, Any] = {
     "source": "template",
     "generated_at": 0.0,
 }
-
-_LANG_NAMES: dict[str, str] = {
-    "en": "English",
-    "pt-BR": "Brazilian Portuguese",
-}
-
-
-def _lang_name(lang: str) -> str:
-    return _LANG_NAMES.get(normalize_lang(lang), "English")
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -65,6 +57,7 @@ def _summarize_events(events: list[dict], lang: str) -> tuple[str, list[str]]:
     """Extract dominant themes and build a short summary from events."""
     if not events:
         return "", []
+    target = normalize_lang(lang)
 
     themes: dict[str, int] = {}
     for ev in events:
@@ -81,16 +74,12 @@ def _summarize_events(events: list[dict], lang: str) -> tuple[str, list[str]]:
     sorted_themes = sorted(themes.items(), key=lambda x: x[1], reverse=True)
     top_themes = [t for t, _ in sorted_themes[:3]]
 
-    if normalize_lang(lang) == "pt-BR":
-        if top_themes:
-            summary = "Temas recentes: " + ", ".join(top_themes) + "."
-        else:
-            summary = "Nenhum tema dominante detectado."
+    if top_themes:
+        summary = content_i18n.t(
+            target, "reflection.themes", themes=", ".join(top_themes)
+        )
     else:
-        if top_themes:
-            summary = "Recent themes: " + ", ".join(top_themes) + "."
-        else:
-            summary = "No dominant themes detected."
+        summary = content_i18n.t(target, "reflection.no_themes")
 
     return summary, top_themes
 
@@ -119,7 +108,7 @@ def normalize_reflection(raw: dict) -> dict:
 
 
 def fallback_reflection(profile: dict, events: list[dict], lang: str) -> dict:
-    """Deterministic reflection summary in ``en`` or ``pt-BR``.
+    """Deterministic reflection summary in the requested language.
 
     Builds 1-3 sentences referencing the Sim name and dominant themes.
     Leaves ``personality`` as the profile's existing personality.
@@ -131,20 +120,14 @@ def fallback_reflection(profile: dict, events: list[dict], lang: str) -> dict:
 
     summary, themes = _summarize_events(events, target_lang)
 
-    if target_lang == "pt-BR":
-        parts = [f"{name} reflete sobre os acontecimentos recentes."]
-        if summary:
-            parts.append(summary)
-        if themes:
-            parts.append("Principais focos: " + ", ".join(themes) + ".")
-        text = " ".join(parts)
-    else:
-        parts = [f"{name} reflects on recent events."]
-        if summary:
-            parts.append(summary)
-        if themes:
-            parts.append("Main focuses: " + ", ".join(themes) + ".")
-        text = " ".join(parts)
+    parts = [content_i18n.t(target_lang, "reflection.intro", name=name)]
+    if summary:
+        parts.append(summary)
+    if themes:
+        parts.append(
+            content_i18n.t(target_lang, "reflection.focuses", themes=", ".join(themes))
+        )
+    text = " ".join(parts)
 
     return {
         "text": text,
@@ -215,7 +198,7 @@ async def reflect(
             f"Dominant themes: {', '.join(themes) or 'none'}\n\n"
             "Instructions:\n"
             f"- Write a 2-4 sentence reflection for {name}.\n"
-            f"- Write only in {_lang_name(target_lang)}.\n"
+            f"- Write only in {content_i18n.language_name(target_lang)}.\n"
             "- Extract 2-4 concise insights as an array.\n"
             "- Drift the personality description slightly based on the events.\n"
             "- Optionally propose ONE trait to add and ONE to remove (or null).\n"
