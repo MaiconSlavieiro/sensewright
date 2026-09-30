@@ -23,10 +23,6 @@ logs:
 build-mod:
 	python mod/build.py
 
-# Tuning package (pie-menu interactions) — pure-Python DBPF; no 3.7 needed.
-build-package:
-	python mod/build_package.py
-
 # Dev-only build using the current interpreter (wrong bytecode for the game)
 build-mod-dev:
 	python mod/build.py --allow-any-python

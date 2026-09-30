@@ -53,13 +53,22 @@ Write-Host "Copying mod package..." -ForegroundColor Cyan
 Copy-Item -Path $modDist -Destination $modsDest -Force
 Write-Host "  Copied: Sensewright.ts4script" -ForegroundColor Green
 
-# Copy the optional tuning .package (pie menu, etc.) when it was built.
-$packageDist = Join-Path $repoRoot "dist\Sensewright.package"
-if (Test-Path $packageDist) {
-    Copy-Item -Path $packageDist -Destination $modsDest -Force
-    Write-Host "  Copied: Sensewright.package" -ForegroundColor Green
+# Stack base libraries (S4CL + Lot 51 Core) must be installed by the player at
+# the Mods ROOT. Sensewright no longer ships a .package or XmlInjector: the pie
+# menu is now registered in Python through S4CL.
+$requiredLibs = @("sims4communitylib", "lot51_core")
+$missingLibs = @()
+foreach ($lib in $requiredLibs) {
+    $found = Get-ChildItem -Path $modsRoot -Recurse -Depth 1 -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "$lib*.ts4script" } | Select-Object -First 1
+    if (-not $found) { $missingLibs += $lib }
+}
+if ($missingLibs.Count -eq 0) {
+    Write-Host "  Libraries present at Mods root: $($requiredLibs -join ', ')" -ForegroundColor Green
 } else {
-    Write-Host "  (no Sensewright.package built - skipping)" -ForegroundColor DarkGray
+    Write-Host "  [WARN] Missing stack libraries: $($missingLibs -join ', ')" -ForegroundColor Yellow
+    Write-Host "         Download Sims 4 Community Library (S4CL) and Lot 51 Core Library" -ForegroundColor Yellow
+    Write-Host "         and place both at the Mods root (top level or one folder deep)." -ForegroundColor Yellow
 }
 
 # Copy sidecar source (excluding venvs, caches, tests, locks)

@@ -143,6 +143,23 @@ if (Test-Path $modDist) {
     Write-Host "[INFO] Mod package not built yet. Run 'make build-mod'." -ForegroundColor Gray
 }
 
+# 7. Stack libraries (S4CL + Lot 51 Core) at the Mods root
+Write-Host ""
+Write-Host "--- Modding Stack Libraries ---" -ForegroundColor Cyan
+if (Test-Path $sims4ModsPath) {
+    foreach ($lib in @("sims4communitylib", "lot51_core")) {
+        $found = Get-ChildItem -Path $sims4ModsPath -Recurse -Depth 1 -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$lib*.ts4script" } | Select-Object -First 1
+        if ($found) {
+            Write-Host "[OK] $lib present: $($found.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "[WARN] $lib not found at the Mods root (required stack base)." -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host "[INFO] Mods folder not found; skipping stack library check." -ForegroundColor Gray
+}
+
 # Summary
 Write-Host ""
 Write-Host "=== Summary ===" -ForegroundColor Cyan

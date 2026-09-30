@@ -13,17 +13,16 @@
 
 | Item | Value |
 |---|---|
-| Repo root | `C:\workspace\sims-sense-8-agent` (git repo; `main` → `origin` github.com/MaiconSlavieiro/sensewright) |
-| In-game mod | `mod/sensewright_mod/` (Python 3.7, stdlib only) |
+| Repo root | `C:\workspace\sensewright` (git repo, branch **`migrate-s4cl-lot51`**; pre-migration on `main` / tag `pre-migracao`) |
+| In-game mod | `mod/sensewright_mod/` (Python 3.7; **stdlib + S4CL + Lot 51 Core**) |
 | Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
 | Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.22"` |
-| Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` **+ `Sensewright.package`** |
-| Tuning package | `dist/Sensewright.package` — pie-menu interactions + XmlInjector snippet + STBL (en/pt-BR) |
-| XmlInjector lib | `...\Mods\XmlInjector_Script_v4.2.ts4script` (Mods **root**; required dependency) |
+| Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` (no `.package`; XmlInjector retired) |
+| Stack libs | `...\Mods\` root: `sims4communitylib*.ts4script` + `lot51_core*.ts4script` (required) |
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
 | Game install | `C:\Program Files\EA Games\The Sims 4` |
-| Tests | sidecar **461**, mod **363**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
+| Tests | sidecar **461**, mod **360**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
 
 **Sidecar runs from source with the workspace venv** (no PyInstaller yet — Phase 6).
 The mod **autoboots** it (`install-mod.ps1` writes the venv interpreter to
@@ -33,8 +32,7 @@ The mod **autoboots** it (`install-mod.ps1` writes the venv interpreter to
 
 ```powershell
 py -3.7 mod\build.py            # -> dist\Sensewright.ts4script
-python mod\build_package.py     # -> dist\Sensewright.package  (tuning/pie menu)
-powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies both + sidecar
+powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies the mod + sidecar
 ```
 
 **Tests**
@@ -45,9 +43,10 @@ python -m pytest mod\tests -q
 ```
 
 > Decompiled EA sources live in the gitignored `research/ts4/`; cloned reference
-> mods in `research/ui-refs/` (also gitignored). The XmlInjector modder docs were
-> downloaded to `%TEMP%\opencode\xmlinj` (temp; re-download from
-> <https://scumbumbomods.com/xml-injector> if needed).
+> mods in `research/ui-refs/` (also gitignored). The stack migration (S4CL + Lot 51
+> Core) is documented in **`docs/stack_migration.md`** — including the
+> live-validation checklist for the library import paths and the pie-menu display
+> names. XmlInjector and the tuning `.package` are **retired**.
 
 ---
 
@@ -213,6 +212,11 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 
 ## 5. Pending live validation (priority order)
 
+0. **Stack migration (S4CL + Lot 51)** — see `docs/stack_migration.md`: confirm the
+   library import paths resolve, `lot51_status()` reports `available/tick=true`, the
+   pulse runs off `CoreEvent.GAME_TICK`, S4CL notifications render, the pie menu
+   shows the 4 items **without XmlInjector**, display names switch with `sw.lang`,
+   and `sw.panel` opens.
 1. **`.22` changes** above: play a pie-menu/click interaction and confirm the log
    shows the player-priority lock arming on both sides (mod rails +
    `POST /v1/config/player-activity`), and that the agent's own pushes do **not**

@@ -1,8 +1,33 @@
 # Third-party notices
 
-Sensewright is released under the MIT License (see `LICENSE`). It adapts a small
-amount of source code from the projects below. Their notices are reproduced here
-as required by their licenses.
+Sensewright is released under the MIT License (see `LICENSE`). It **depends on**
+two community libraries at runtime (installed by the player, not bundled) and
+adapts a small amount of source code from the projects below. Their notices are
+reproduced here as required by their licenses.
+
+---
+
+## Sims 4 Community Library (S4CL) - runtime dependency
+
+- Source: <https://github.com/ColonolNutty/Sims4CommunityLibrary>
+- License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+- Copyright (c) ColonolNutty / DeviantGameMods
+
+Used for notifications, native dialogs, the immediate-super-interaction base
+class and (forward) tuning-id utilities. The library is **not** redistributed
+with Sensewright; players install it at the Mods root. Attribution: Sensewright's
+`integrations.py` is written against S4CL's public API.
+
+## Lot 51 Core Library - runtime dependency
+
+- Source: <https://github.com/lot51/core-library>
+- Site: <https://lot51.cc/core>
+- License: MIT
+- Copyright (c) 2022 Lot 51
+
+Used for the event bus (zone load/unload, game tick, save), the custom service
+manager and logger/config helpers. Not redistributed; players install it at the
+Mods root.
 
 ---
 

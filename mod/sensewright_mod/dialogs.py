@@ -1,11 +1,13 @@
 """
 Native dialog helpers for Sensewright (text input, confirmation).
 
-Production helpers used by the pie-menu entries (and, later, the panel). All game
-imports are lazy and guarded; the public functions are best-effort and never raise.
+The stack base is used first (S4CL ok/cancel via ``integrations``); the
+previously validated native dialogs remain the fallback. All game/library
+imports are lazy and guarded; the public functions are best-effort and never
+raise.
 """
 
-from . import i18n
+from . import i18n, integrations
 from .debug_log import log_exception
 
 
@@ -138,7 +140,20 @@ def prompt_text(sim_info, title, body, placeholder="", initial="", on_submit=Non
 
 
 def confirm(sim_info, title, body, on_ok=None):
-    """Open a native Ok/Cancel confirmation dialog. Returns True when shown."""
+    """Open a confirmation dialog. Returns True when shown.
+
+    Tries the S4CL ok/cancel dialog (stack base) first, then the validated
+    native ``god_ui._show_ok_cancel`` path.
+    """
+    # Stack base: S4CL ok/cancel.
+    try:
+        dialog = integrations.s4cl_ok_cancel(title, body)
+        if dialog is not None and integrations.s4cl_show_ok_cancel(
+                dialog, _owner(sim_info), on_confirm=on_ok):
+            return True
+    except Exception as exc:
+        log_exception("dialogs.confirm.s4cl", exc)
+
     try:
         from .god_ui import _show_ok_cancel
     except Exception as exc:

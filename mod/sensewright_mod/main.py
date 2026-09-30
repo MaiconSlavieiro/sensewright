@@ -32,7 +32,7 @@ except Exception:
     sims4 = type("sims4", (), {"commands": _DummyCommands()})  # type: ignore
 
 
-from . import god_ui, hud, i18n, ui_probe
+from . import god_ui, hud, i18n, panel_ui
 from .config import (
     get_base_url,
     write_ui_language,
@@ -587,37 +587,20 @@ def cmd_hud(action: str = "", _connection=None) -> None:
         _output(_connection, i18n.t("cmd.hud.usage"))
 
 
-@sims4.commands.Command("sw.uitest", command_type=sims4.commands.CommandType.Live)
-def cmd_uitest(kind: str = "", _connection=None) -> None:
-    """Native-dialog spike (P0): notification|okcancel|picker|response|input|multi|all|probe."""
+@sims4.commands.Command("sw.panel", command_type=sims4.commands.CommandType.Live)
+def cmd_panel(_connection=None) -> None:
+    """Open the Sensewright configuration panel (stack base: S4CL dialogs)."""
     _note_player_active()
-    kind = (kind or "").strip().lower()
     try:
         sim_info = _get_sim_info()
     except Exception:
         sim_info = None
-
-    if kind in ("probe", "inspect"):
-        _output(_connection, i18n.t("cmd.uitest.probe", report=ui_probe.format_report()))
-        return
-    if kind == "clicked":
-        _output(_connection, i18n.t("cmd.uitest.clicked"))
-        return
-
-    if kind == "all":
-        results = ui_probe.run_all(sim_info)
-    elif not kind:
-        results = [ui_probe.run(ui_probe.DEFAULT_KIND, sim_info)]
-    elif kind in ui_probe.KINDS:
-        results = [ui_probe.run(kind, sim_info)]
-    else:
-        _output(_connection, i18n.t(
-            "cmd.uitest.unknown", kind=kind, kinds=", ".join(ui_probe.KINDS)))
-        return
-
-    for result in results:
-        if result is not None:
-            _output(_connection, ui_probe.format_result(result))
+    try:
+        shown = panel_ui.open_panel(sim_info)
+    except Exception:
+        shown = False
+    if not shown:
+        _output(_connection, i18n.t("panel.unavailable"))
 
 
 def _god_controls_snapshot():

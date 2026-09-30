@@ -26,7 +26,7 @@ Sensewright is split into two strictly isolated packages:
 
 | Layer | Package | Runtime | Deps allowed |
 |---|---|---|---|
-| **In-game mod** | `mod/sensewright_mod/` | Python 3.7 (game sandbox) | **stdlib only** (no pip packages) |
+| **In-game mod** | `mod/sensewright_mod/` | Python 3.7 (game sandbox) | **stdlib + S4CL + Lot 51 Core** (runtime libs installed by the player) |
 | **Sidecar** | `sidecar/sensewright_sidecar/` | Python 3.12+ | Pydantic v2, FastAPI, httpx, SQLite (stdlib) |
 
 **The sidecar never imports game modules. The mod never imports third-party libs.**
@@ -70,7 +70,9 @@ simulation loops.
   - `from __future__ import annotations` (**breaks TS4 command parsing** — the game
     introspects type annotations at runtime for `@sims4.commands.Command`; stringified
     annotations cause the parser to fail silently)
-  - Third-party libraries (no `pydantic`, `requests`, `dataclasses` beyond stdlib)
+  - Third-party libraries **except** the stack base (`sims4communitylib`,
+    `lot51_core`), which must be imported **only through `integrations.py`**
+    (no `pydantic`, `requests`, `dataclasses` beyond stdlib)
   - `asyncio` (the game is single-threaded with GIL)
 - **Sidecar (`sidecar/sensewright_sidecar/`):** Python 3.12+. Modern features and
   external libraries are fine.
@@ -104,18 +106,12 @@ sensewright_mod/
 ├── player_activity.py   # wraps Sim.push_super_affordance → player-priority lock
 ├── probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
 ├── dialogs.py           # native text-input and confirmation dialogs
-├── pie_menu.py          # ImmediateSuperInteraction subclasses for pie menu
-└── ui_probe.py          # native TS4 dialog tester (notification, picker, etc.)
-
-mod/tuning/
-├── interactions/        # pie menu XML definitions
-├── stbl.json            # data-driven pie-menu string tables (one entry per language)
-└── snippets/
-    └── sw_injector.xml  # XmlInjector snippet to add interactions to Sims
+├── pie_menu.py          # S4CL interactions (registered in Python; no XmlInjector)
+├── panel_ui.py          # R7 config panel over GET /v1/god/controls (S4CL dialogs)
+└── integrations.py      # the stack seam: Lot 51 Core + S4CL lookups (guarded)
 
 mod/
-├── build.py             # Python 3.7 bytecode → dist/Sensewright.ts4script
-└── build_package.py     # pure-Python DBPF writer → dist/Sensewright.package
+└── build.py             # Python 3.7 bytecode → dist/Sensewright.ts4script
 ```
 
 ### Sidecar (`sensewright_sidecar/`)
@@ -315,10 +311,13 @@ sensewright_sidecar/
 - **Use injections over hard overrides:** Inject or wrap existing functions via
   decorators rather than overriding original methods. Prevents conflicts with
   other mods.
-- **Leverage existing frameworks (XmlInjector):** We use the community-standard **XmlInjector** 
-  to add interactions to the Sim pie menu (`mod/tuning/snippets/sw_injector.xml`).
-- **UI and Dialogs:** All custom UI must use TS4's native dialogs (pickers, text input, ok/cancel).
-  We do not use Flash/GFX. See `mod/sensewright_mod/ui_probe.py` for examples of valid dialog classes.
+- **Stack base (S4CL + Lot 51):** do all library access through
+  `integrations.py`. Pie-menu interactions are registered in Python via S4CL
+  (`pie_menu.install`); the event bus / cadence is Lot 51's. **XmlInjector, the
+  tuning `.package` and `build_package.py` were retired.**
+- **UI and Dialogs:** prefer the stack (S4CL notifications/dialogs) and fall back
+  to TS4's native dialogs. We do not use Flash/GFX. See `chat_ui.py`,
+  `dialogs.py` and `panel_ui.py`.
 - **Installation structure:** The game only reads `.ts4script` files up to one
   subfolder deep inside the `Mods` folder.
 - **Patch testing:** TS4 patches frequently break script mods. Always re-test
@@ -353,8 +352,9 @@ These bugs were found during in-game validation and are critical to avoid:
    `services.game_clock_service()`, etc. all return `None` at import. Use lazy
    resolution and the deferred-flush pattern in `events.py`. **The deferred flush
    only retries where `ensure_started()` is called**, so don't rely on command
-   paths alone — `install_zone_hook()` wraps `zone.Zone.update` to auto-start the
-   collector at zone load (then self-uninstalls).
+   paths alone — `install_zone_hook()` drives the collector (via the **Lot 51
+   `GAME_TICK`** when the library is present, else the native `zone.Zone.update`
+   wrapper).
 
 3. **Alarm owners must be live _and ticked_.** Passing `None` as the alarm owner
    raises `ValueError('Alarm created without owner')`. Use
@@ -385,10 +385,11 @@ These bugs were found during in-game validation and are critical to avoid:
    `Buff.buff_type.__name__` (e.g. `buff_Sleeping`). Detected live via the probe.
 
 9. **Don't rely on game-clock alarms for the loop.** Alarms with `owner=object_sim`
-   or `owner=Zone` registered but never fired live. Use the `zone.Zone.update`
-   heartbeat (`state_collector.install_zone_hook`) and start the collector only
-   once the active Sim is instanced. See `docs/ts4_internals.md` for the confirmed
-   autonomy/buff/event/zone APIs.
+   or `owner=Zone` registered but never fired live. The loop is driven by the
+   **Lot 51 `GAME_TICK`** (`state_collector.install_zone_hook` →
+   `events.register_lot51_tick`), with the native `zone.Zone.update` wrapper as
+   fallback; start the collector only once the active Sim is instanced. See
+   `docs/ts4_internals.md`.
 
 10. **Tuning XML must be zlib compressed in the `.package`.** TS4 stores tuning as
     zlib-compressed XML, not raw XML. Uncompressed resources with the "uncompressed" flag
@@ -413,11 +414,12 @@ These bugs were found during in-game validation and are critical to avoid:
 14. **Alarm callbacks must accept `*args`.** The game passes the `AlarmHandle` to the
     callback; a zero-arg callback raises `TypeError` on fire (fixed in build `.13`).
 
-15. **Pie-menu interactions require XmlInjector.** A bare `interaction` tuning is
-    **never offered** by the game — it must be injected via an XmlInjector snippet
-    (`mod/tuning/snippets/sw_injector.xml`). XmlInjector must be installed in the
-    **Mods root** as a dependency. This was the multi-build wall where `test()` was
-    never called.
+15. **Pie-menu interactions use S4CL registration (XmlInjector retired).** A bare
+    `interaction` tuning is never offered; the 4 Sensewright items are S4CL
+    `CommonImmediateSuperInteraction` classes registered in Python
+    (`pie_menu.install`). **Live-validation risk:** the S4CL registry path/name and
+    per-locale dynamic display names (`sw.lang`) must be confirmed in-game — see
+    `docs/stack_migration.md`.
 
 16. **Never hardcode locales.** Do not write `("en","pt-BR")`, `_LANG_NAMES`,
     `if lang == "pt-BR"`, or inline Portuguese/English content strings in code.
@@ -425,30 +427,35 @@ These bugs were found during in-game validation and are critical to avoid:
     `i18n.available_locales()` / `content_i18n.default_lang()`. A short token like
     `en` must match on a BCP-47 boundary (else `french` false-matches `en`).
 
+17. **All stack access goes through `integrations.py`.** Never
+    `import lot51_core` / `import sims4communitylib` elsewhere. The helpers are
+    guarded and return `None`/`False` when a library is missing (the offline test
+    host has neither), so features degrade instead of crashing.
+
 ---
 
 ## 13. Build and Deploy
 
-There are **two artifacts** — both must be rebuilt and reinstalled after a change:
+There is **one artifact** to rebuild on a mod change (the tuning `.package` and
+`build_package.py` were retired with the S4CL migration):
 
 ```powershell
 py -3.7 mod\build.py            # -> dist\Sensewright.ts4script  (script mod)
-python mod\build_package.py     # -> dist\Sensewright.package   (tuning/pie menu)
-powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies both + sidecar
+powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies it + sidecar
 ```
 
 - **Script mod:** `mod/build.py` compiles with Python 3.7. The bytecode magic must
   be `42 0d 0d 0a` (3.7). Use `--allow-any-python` only for dev builds.
-- **Tuning package:** `mod/build_package.py` is a pure-Python DBPF writer (no 3.7
-  needed) that packs the interaction XML, the XmlInjector snippet, and the
-  data-driven STBLs (`mod/tuning/stbl.json` — one entry per language). See gotchas
-  §12.10–§12.13.
+- **Stack libraries:** the player installs **S4CL** and **Lot 51 Core** at the Mods
+  root (top level or one folder deep). Sensewright no longer ships a `.package` or
+  requires XmlInjector.
 - **Sidecar:** runs **from source** with the workspace venv (no PyInstaller yet —
   Phase 6). The mod **autoboots** it: `install-mod.ps1` writes the venv interpreter
   to `sidecar/python.txt` and `config.find_python()` reads it; it auto-exits with
   the game. Reinstall after any venv change.
-- **Install:** `scripts/install-mod.ps1` copies the `.ts4script` + `.package` +
-  sidecar into `Mods\Sensewright\`. **XmlInjector** must be in the **Mods root**.
+- **Install:** `scripts/install-mod.ps1` copies the `.ts4script` + sidecar into
+  `Mods\Sensewright\`, and warns when the stack libraries (S4CL / Lot 51 Core) are
+  missing from the Mods root.
 - **Health check:** `scripts/doctor.ps1` (`make doctor`) validates the environment;
   `make status` / `GET http://127.0.0.1:8765/v1/health` checks a running sidecar.
 - **Dev loop:** `scripts/dev.ps1` (`make dev`) is the development helper.
@@ -459,7 +466,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies both
 |---|---|
 | `make install` | `uv sync --extra dev` in `sidecar/` |
 | `make run` | run the sidecar (`uv run python -m sensewright_sidecar`) |
-| `make build-mod` / `build-package` | the two artifacts above |
+| `make build-mod` | build the `.ts4script` artifact |
 | `make install-mod` | `scripts/install-mod.ps1` |
 | `make check` | sidecar + mod pytest |
 | `make doctor` / `status` / `logs` / `dev` | env check / health / tail log / dev helper |
@@ -483,9 +490,10 @@ new game API.
 > re-check.
 > **R7 (native config panel):** P1 is done (sidecar `ControlSpec`
 > `target`/`path` promotion + `data/panel.toml` overlay + i18n; `ui.language`
-> options are data-driven), **P2 is next** — `mod/sensewright_mod/panel_ui.py`
-> (model + native renderer + console fallback), `sw.set`/`sw.panel`,
-> `http_client.set_god_controls` (already added), boot-notification button.
+> options are data-driven). **P2 (in-game panel) is now implemented on the stack
+> base** — `mod/sensewright_mod/panel_ui.py` (sections from `GET /v1/god/controls`,
+> S4CL dialog + console fallback), `sw.panel` cheat and a pie-menu entry. Live
+> validation of the S4CL dialog navigation is pending.
 > **R1 (native `say_to` lever spike)** still needs live runtime validation, as do
 > the `.22` player-activity detection + precise `cancel_current` changes.
 > Files: `agent/seats.py`, `agent/intents.py`, `agent/cognition.py`,
@@ -552,7 +560,7 @@ Checklists for the most common changes. Keep the two packages in lock-step.
 
 - [ ] Sidecar tests green: `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
       (currently **461**).
-- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **363**).
+- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **360**).
 - [ ] Lint clean (sidecar: ruff). Mod compiles with `py -3.7 mod\build.py`.
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` (Added/Changed/Fixed).
 - [ ] If tests were added, update the counts in §10 of this skill.

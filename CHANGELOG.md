@@ -12,6 +12,42 @@ All notable changes to **Sensewright** are documented in this file.
 
 ## [Unreleased] â€” Phases 2, 2b, 3, 4, 5a, 5b, 5c + v0.2 Â§14: Directives, Census, Agents, Evolution, God foundation, backgrounds, orchestration & autonomous Sim agents
 
+### In-game stack migration: S4CL + Lot 51 Core
+The in-game mod is now **based on S4CL and Lot 51 Core** (branch
+`migrate-s4cl-lot51`); the player installs both libraries at the Mods root. All
+library access is isolated in `mod/sensewright_mod/integrations.py`.
+
+**Added**
+- **`integrations.py`** - guarded stack seam for Lot 51 (`event_handler`/`CoreEvent`,
+  `service_manager`, logger/config) and S4CL (notifications, ok/cancel +
+  choose-option dialogs, immediate-super-interaction base + registry). Every helper
+  returns `None`/`False` when a library (or the game) is absent.
+- **`panel_ui.py`** - R7/P2 config panel over `GET /v1/god/controls` (sections from
+  the ControlSpec list; S4CL dialog + console fallback). New `sw.panel` cheat and a
+  pie-menu entry.
+- **Lot 51 event bus** in `events.py` (`register_lot51_tick`,
+  `install_lot51_lifecycle`, `lot51_status`); the pulse loop now prefers
+  `CoreEvent.GAME_TICK` (`state_collector`), with the native `Zone.update` wrapper
+  as fallback.
+- **S4CL first** for notifications (`chat_ui.show_notification`) and confirmation
+  (`dialogs.confirm`), with the validated native paths as fallback.
+- Tests: `test_integrations.py`, `test_panel_ui.py`; rewrote `test_pie_menu.py`.
+
+**Changed**
+- **Pie menu** is now S4CL Python registration (`pie_menu.install`) - no XmlInjector
+  and no tuning `.package`.
+- `docs/stack_migration.md` documents the API surface used and the live-validation
+  checklist. `SKILL.md` / `PLANO.md` §2.4 / `THIRD_PARTY_NOTICES.md` (S4CL CC BY 4.0
+  + Lot 51 MIT) / `install-mod.ps1` / `doctor.ps1` / `Makefile` updated.
+
+**Removed**
+- `mod/tuning/**`, `mod/build_package.py`, `mod/sensewright_mod/ui_probe.py` and the
+  `sw.uitest` cheat (XML/package/XmlInjector pipeline retired).
+
+**Notes**
+- Live validation of the exact S4CL/Lot 51 import paths and the pie-menu
+  display-name localization is pending (see `docs/stack_migration.md`).
+
 ### Changed - Sidecar content localization is data-driven (sidecar only)
 All deterministic (no-LLM) content strings moved out of Python into flat JSON
 locale tables, so adding a language is a data change (drop a JSON file + add a

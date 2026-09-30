@@ -13,6 +13,7 @@ from .debug_log import (
     safe_call as _safe_call,
     safe_getattr as _safe_getattr,
 )
+from . import integrations
 
 # Event handler type
 EventHandler = Callable[[Any], None]
@@ -481,3 +482,141 @@ Alarms (recurring):
 - Every 2 sim-hours: Run reflection/evolution for tracked Sims
 - Every 10 sim-minutes: Check for autonomy directives from sidecar
 """
+
+
+# =============================================================================
+# Lot 51 Core Library event bus (the new stack base)
+# =============================================================================
+#
+# Lot 51 exposes a supported event bus (``@event_handler(CoreEvent...)``) whose
+# handlers are called on the game thread with a ``context`` object. This replaces
+# the fragile native alarm owner + ``zone.Zone.update`` heartbeat for the
+# *cadence*: the state collector registers its zone tick here, and falls back to
+# the native hook only when the library is missing.
+#
+# The mapping below is defensive: Lot 51's enum member names have varied across
+# releases, so several candidates are tried and the first that exists wins.
+
+_LOT51_STATE = {"installed": False, "tick": False, "registered": []}
+
+# our concept -> candidate CoreEvent member names.
+_LOT51_EVENT_MEMBERS = {
+    "zone_load": ("ZONE_LOAD", "ZONELOAD"),
+    "zone_unload": ("ZONE_UNLOAD", "ZONEUNLOAD"),
+    "zone_late_load": ("ZONE_LATE_LOAD",),
+    "save": ("GAME_SAVE", "GAMESAVE"),
+    "pre_save": ("GAME_PRE_SAVE", "GAMEPRESAVE"),
+    "game_setup": ("GAME_SETUP", "GAMESETUP"),
+    "build_buy_enter": ("BUILD_BUY_ENTER", "BUILD_BUY_MODE_ENTER"),
+    "build_buy_exit": ("BUILD_BUY_EXIT", "BUILD_BUY_MODE_EXIT"),
+    "tick": ("GAME_TICK", "GAME_UPDATE"),
+    "object_added": ("GAME_OBJECT_ADDED",),
+    "object_destroyed": ("GAME_OBJECT_DESTROYED",),
+}
+
+
+def lot51_available() -> bool:
+    """True when the Lot 51 event bus is usable (library present)."""
+    handler, core_event = integrations.lot51_events()
+    return handler is not None and core_event is not None
+
+
+def _lot51_member(core_event, concept: str):
+    for name in _LOT51_EVENT_MEMBERS.get(concept, ()):
+        member = getattr(core_event, name, None)
+        if member is not None:
+            return member
+    return None
+
+
+def register_lot51_tick(callback: Callable) -> bool:
+    """Register ``callback`` on the Lot 51 game tick (cadence loop).
+
+    ``callback`` is called with no arguments (the context is consumed here). The
+    game tick fires on the server clock; callers must throttle their own work
+    (the state collector throttles to ~15 wall-clock seconds).
+    """
+    handler, core_event = integrations.lot51_events()
+    if handler is None or core_event is None:
+        return False
+    member = _lot51_member(core_event, "tick")
+    if member is None:
+        return False
+
+    def _on_tick(service=None, context=None, **kwargs):
+        try:
+            callback()
+        except Exception as exc:
+            log_exception("events.lot51.tick", exc)
+
+    try:
+        handler(member)(_on_tick)
+        _LOT51_STATE["tick"] = True
+        _LOT51_STATE["registered"].append("tick")
+        debug_log("events: Lot 51 tick handler registered")
+        return True
+    except Exception as exc:
+        log_exception("events.register_lot51_tick", exc)
+        return False
+
+
+def install_lot51_lifecycle(on_zone_load: Callable = None,
+                            on_zone_unload: Callable = None,
+                            on_save: Callable = None,
+                            on_pre_save: Callable = None,
+                            on_tick: Callable = None) -> bool:
+    """Register lifecycle callbacks on the Lot 51 CoreEvent bus.
+
+    Every callback is optional; each is registered only when both the callback
+    and the corresponding CoreEvent member exist. Returns True when at least one
+    handler was registered. Never raises.
+    """
+    handler, core_event = integrations.lot51_events()
+    if handler is None or core_event is None:
+        return False
+
+    specs = (
+        ("zone_load", on_zone_load),
+        ("zone_unload", on_zone_unload),
+        ("save", on_save),
+        ("pre_save", on_pre_save),
+        ("tick", on_tick),
+    )
+    any_registered = False
+    for concept, callback in specs:
+        if callback is None:
+            continue
+        member = _lot51_member(core_event, concept)
+        if member is None:
+            continue
+
+        def _make_handler(user_callback):
+            def _on_event(service=None, context=None, **kwargs):
+                try:
+                    user_callback(context)
+                except Exception as exc:
+                    log_exception("events.lot51.{}".format(concept), exc)
+            return _on_event
+
+        try:
+            handler(member)(_make_handler(callback))
+            _LOT51_STATE["registered"].append(concept)
+            any_registered = True
+        except Exception as exc:
+            log_exception("events.install_lot51_lifecycle({})".format(concept), exc)
+
+    if any_registered:
+        _LOT51_STATE["installed"] = True
+        debug_log("events: Lot 51 lifecycle registered ({})".format(
+            ",".join(_LOT51_STATE["registered"])))
+    return any_registered
+
+
+def lot51_status() -> Dict[str, Any]:
+    """Introspection for ``sw.probe`` / logs."""
+    return {
+        "available": lot51_available(),
+        "installed": _LOT51_STATE["installed"],
+        "tick": _LOT51_STATE["tick"],
+        "registered": list(_LOT51_STATE["registered"]),
+    }

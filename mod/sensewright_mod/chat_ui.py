@@ -1,10 +1,18 @@
 """
 Chat UI rendering for Sensewright.
-3-layer fallback: UiDialogNotification -> sims4.commands output -> debug log.
-All game imports are lazy/guarded so module imports fine outside the game.
+
+4-layer fallback (the new stack is preferred, the validated native path is the
+safety net):
+  0. S4CL ``CommonBasicNotification`` (``integrations``) - the stack base.
+  1. native ``UiDialogNotification`` (validated in-game).
+  2. ``sims4.commands`` cheat-console output.
+  3. debug log.
+
+All library/game imports are lazy and guarded so the module imports fine outside
+the game (including on a plain CPython for the test suite).
 """
 
-from . import i18n
+from . import i18n, integrations
 from .debug_log import debug_log, log_exception
 
 
@@ -132,7 +140,7 @@ def _build_dialog(title, text, sim_info=None):
 def notification_diagnostics(title, text, sim_info=None):
     """Attempt the dialog path and report the exact failure. Never raises.
 
-    Used by the ``sw.uitest`` cheat to pinpoint why no in-game UI appears.
+    Diagnostic helper retained for the debug log / external probes.
     Returns ``{"ok", "layer", "error"}``.
     """
     dialog, error = _build_dialog(title, text, sim_info)
@@ -156,11 +164,20 @@ def show_notification(
     Show a notification to the player.
     Returns True if successful, False if all fallbacks failed.
 
-    ``title``/``text`` are plain strings turned into localized strings via
-    ``LocalizationHelperTuning.get_raw_text`` (the validated runtime path).
-    ``urgent`` is kept for API compatibility; the notification tunable exposes
-    urgency as an enum, so it is not forwarded here.
+    ``title``/``text`` are plain strings; the S4CL notification (stack base) is
+    preferred and the validated native ``UiDialogNotification`` path is the
+    fallback. ``urgent`` is kept for API compatibility; the native notification
+    tunable exposes urgency as an enum, so it is not forwarded here.
     """
+    # Layer 0: S4CL CommonBasicNotification (the stack base).
+    try:
+        notification = integrations.s4cl_notification(title, text)
+        if notification is not None and integrations.s4cl_show_notification(
+                notification, _notification_owner(sim_info)):
+            return True
+    except Exception as exc:
+        _log("show_notification.s4cl", exc)
+
     # Layer 1: UiDialogNotification
     dialog, error = _build_dialog(title, text, sim_info)
     if dialog is not None:

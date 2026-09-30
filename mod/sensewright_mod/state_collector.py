@@ -1622,16 +1622,58 @@ def ensure_started() -> bool:
 # non-empty census) and then drives a **wall-clock throttled** pulse/pull. The
 # per-frame cost after startup is one timestamp comparison.
 ZONE_PULSE_INTERVAL_SECONDS = 15.0
-_ZONE_HOOK = {"installed": False, "started": False, "last_pulse": 0.0}
+_ZONE_HOOK = {"installed": False, "started": False, "last_pulse": 0.0, "driver": None}
+
+
+def _active_sim_ready() -> bool:
+    """True once the active Sim is instanced (zone fully loaded)."""
+    try:
+        sim_info = sim_context._get_active_sim_info()
+        if sim_info is None:
+            return False
+        return sim_context._get_sim_instance(sim_info) is not None
+    except Exception:
+        return False
+
+
+def _zone_tick_impl() -> None:
+    """One heartbeat: start the collector once, then pulse on a wall-clock cadence.
+
+    Driven by the Lot 51 game tick when available (stack base), else by the
+    native ``Zone.update`` wrapper. Never raises.
+    """
+    if not _ZONE_HOOK["started"]:
+        # Wait for the active Sim instance: it makes the census non-empty.
+        if _active_sim_ready() and ensure_started():
+            _ZONE_HOOK["started"] = True
+            debug_log("zone hook: collector auto-started (driver={})".format(
+                _ZONE_HOOK["driver"]))
+        else:
+            return
+    now = time.monotonic()
+    if (now - _ZONE_HOOK["last_pulse"]) < ZONE_PULSE_INTERVAL_SECONDS:
+        return
+    _ZONE_HOOK["last_pulse"] = now
+    validation_log("zone-pulse: heartbeat")
+    pulse_and_pull()
 
 
 def install_zone_hook() -> bool:
-    """Wrap ``Zone.update`` to start the collector and drive the pulse loop.
+    """Start the pulse loop: Lot 51 game tick first, native ``Zone.update`` fallback.
 
     Never raises; a no-op outside the game.
     """
     if _ZONE_HOOK["installed"]:
         return True
+
+    # Stack base: the Lot 51 CoreEvent bus drives the loop with no injection.
+    if events.register_lot51_tick(_zone_tick_impl):
+        _ZONE_HOOK["installed"] = True
+        _ZONE_HOOK["driver"] = "lot51"
+        debug_log("zone hook: driven by Lot 51 game tick")
+        return True
+
+    # Fallback: wrap ``Zone.update`` (native heartbeat).
     try:
         import zone as zone_module  # type: ignore
     except Exception:
@@ -1646,36 +1688,10 @@ def install_zone_hook() -> bool:
         _ZONE_HOOK["installed"] = True
         return True
 
-    def _active_sim_ready() -> bool:
-        """True once the active Sim is instanced (zone fully loaded)."""
-        try:
-            sim_info = sim_context._get_active_sim_info()
-            if sim_info is None:
-                return False
-            return sim_context._get_sim_instance(sim_info) is not None
-        except Exception:
-            return False
-
-    def _zone_tick() -> None:
-        if not _ZONE_HOOK["started"]:
-            # Wait for the active Sim instance: it owns the alarms and makes the
-            # census non-empty (starting earlier gave owner=Zone and 0 sims).
-            if _active_sim_ready() and ensure_started():
-                _ZONE_HOOK["started"] = True
-                debug_log("zone hook: collector auto-started at zone load")
-            else:
-                return
-        now = time.monotonic()
-        if (now - _ZONE_HOOK["last_pulse"]) < ZONE_PULSE_INTERVAL_SECONDS:
-            return
-        _ZONE_HOOK["last_pulse"] = now
-        validation_log("zone-pulse: heartbeat")
-        pulse_and_pull()
-
     def _wrapper(self, *args, **kwargs):
         result = original(self, *args, **kwargs)
         try:
-            _zone_tick()
+            _zone_tick_impl()
         except Exception as exc:
             log_exception("state_collector.zone_hook", exc)
         return result
@@ -1683,7 +1699,8 @@ def install_zone_hook() -> bool:
     _wrapper._sensewright_zone_hook = True
     zone_cls.update = _wrapper
     _ZONE_HOOK["installed"] = True
-    debug_log("zone hook installed")
+    _ZONE_HOOK["driver"] = "native"
+    debug_log("zone hook installed (native Zone.update)")
     return True
 
 

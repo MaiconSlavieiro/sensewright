@@ -241,5 +241,18 @@
   "god.control.network.host.desc": "Interface de rede em que o sidecar escuta (requer reinício).",
   "god.panel.title": "Controles do God",
   "god.panel.body": "{controls}",
-  "god.panel.unavailable": "Controles do God indisponíveis. Verifique se o sidecar está rodando."
+  "god.panel.unavailable": "Controles do God indisponíveis. Verifique se o sidecar está rodando.",
+  "cmd.pie.panel": "Abrir Painel Sensewright",
+  "cmd.pie.chat": "Conversar…",
+  "cmd.pie.confirm": "Confirmar…",
+  "cmd.pie.hud": "HUD on/off",
+  "panel.title": "Configuração do Sensewright",
+  "panel.choose_section": "Escolha uma seção para configurar.",
+  "panel.unavailable": "Configuração indisponível. Verifique se o sidecar está rodando.",
+  "panel.section.god": "God",
+  "panel.section.agents": "Agentes",
+  "panel.section.llm": "LLM",
+  "panel.section.memory": "Memória",
+  "panel.section.ui": "Interface",
+  "panel.section.runtime": "Execução"
 }

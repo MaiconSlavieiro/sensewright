@@ -6,6 +6,14 @@ Package entry point. Registers commands and starts autoboot.
 
 __version__ = "0.1.0"
 
+# Resolve the community modding stack (Lot 51 Core + S4CL). Guarded: the mod
+# still works (degraded, native fallbacks) when a library is missing.
+try:
+    from . import integrations
+    integrations.refresh()
+except Exception:
+    pass
+
 # Resolve the active locale before commands/LLM calls run
 # (config [ui].language override -> game language -> en).
 try:
@@ -22,6 +30,13 @@ try:
     main.autoboot()
 except Exception:
     # Silent fail - mod stays functional in native mode
+    pass
+
+# Register the pie-menu interactions with S4CL (stack base; no XML package).
+try:
+    from . import pie_menu
+    pie_menu.install()
+except Exception:
     pass
 
 # Start the event-driven state collector (guarded, best-effort).
