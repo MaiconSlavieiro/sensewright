@@ -127,6 +127,9 @@ class GodConfigRequest(BaseModel):
     powers: dict[str, bool] | None = None
     # Free-form ControlSpec-validated overrides (e.g. evolution_speed).
     settings: dict[str, Any] | None = None
+    # P1: persist the validated overrides to data/panel.toml so they survive a
+    # sidecar restart (never writes config.toml).
+    persist: bool = False
 
 
 class EventRecord(BaseModel):

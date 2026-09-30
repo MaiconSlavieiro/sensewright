@@ -6,10 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
+from sensewright_sidecar import panel_store
 from sensewright_sidecar.config import Settings
 from sensewright_sidecar.god.controls import (
+    apply_control_values_to_settings,
     apply_values_to_agents_config,
-    apply_values_to_god_config,
 )
 from sensewright_sidecar.routers.deps import get_settings, require_auth
 from sensewright_sidecar.schemas import (
@@ -123,25 +124,22 @@ async def config_god(
     if req.settings:
         values.update(req.settings)
 
+    applied: dict[str, Any] = {}
     if values:
         try:
-            patch = apply_values_to_god_config(values)
-            agent_patch = apply_values_to_agents_config(values)
+            applied = apply_control_values_to_settings(settings, values)
         except ValueError as exc:
             return AckResponse(ok=False, detail=str(exc))
-        for key, value in patch.items():
-            if key == "powers":
-                god.powers.update(value)
-            elif key == "settings":
-                god.settings.update(value)
-            else:
-                setattr(god, key, value)
-        _apply_agents_patch(settings.agents, agent_patch)
-        if agent_patch:
+        if apply_values_to_agents_config(applied):
             try:
                 from sensewright_sidecar.agent import graph as agent_graph
 
                 agent_graph.update_agents()
+            except Exception:
+                pass
+        if req.persist and applied:
+            try:
+                panel_store.save_overrides(settings.data_dir, applied)
             except Exception:
                 pass
 
@@ -155,17 +153,12 @@ async def config_god(
     return AckResponse(ok=True)
 
 
-def _apply_agents_patch(agents, patch: dict[str, Any]) -> None:
-    """Shallow-merge a validated agent-control patch into ``AgentsConfig``."""
-    if not patch:
-        return
-    if "agent_seats" in patch:
-        agents.agent_seats = int(patch["agent_seats"])
-    initiative = patch.get("initiative") or {}
-    for key, value in initiative.items():
-        if hasattr(agents.initiative, key):
-            setattr(agents.initiative, key, value)
-    layers = patch.get("layers") or {}
-    for key, value in layers.items():
-        if hasattr(agents.layers, key):
-            setattr(agents.layers, key, value)
+@router.post("/config/panel/reset", response_model=AckResponse)
+async def config_panel_reset(
+    request: Request,
+    _auth: None = Depends(require_auth),
+) -> AckResponse:
+    """Delete the ``data/panel.toml`` overlay (revert to ``config.toml``)."""
+    settings: Settings = get_settings(request)
+    removed = panel_store.clear_overrides(settings.data_dir)
+    return AckResponse(ok=True, detail="reset" if removed else "absent")

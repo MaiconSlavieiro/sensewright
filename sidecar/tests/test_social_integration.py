@@ -100,11 +100,12 @@ async def test_pair_cooldown_blocks_a_repeat_pulse():
     assert len(third["social"]) == 1
 
 
-async def test_player_sims_never_pair():
+async def test_household_sims_may_pair():
     agency = Agency(make_settings(), clock=FakeClock())
     result = await agency.ingest_tick(tick([(10, "semi", True), (11, "full", True)]))
-    assert result["social"] == []
-    assert result["social_intents"] == []
+    # v0.3 R5 fix: household Sims are included (and preferred), so a dialogue forms.
+    assert len(result["social"]) == 1
+    assert result["social_intents"]
 
 
 async def test_sleeping_and_off_sims_are_excluded():

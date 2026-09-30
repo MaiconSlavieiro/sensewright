@@ -34,7 +34,7 @@ models) and is mirrored by plain dicts in the mod's `http_client.py`.
 
 ## 2. Safety and Best-Effort Paradigm (In-Game Mod)
 
-The Sims 4 does not tolerate unhandled exceptions — they crash the game or break
+The Sims 4 does not tolerate unhandled exceptions â€” they crash the game or break
 simulation loops.
 
 - **Always guard game APIs:** Wrap game object manipulations and API lookups using
@@ -46,7 +46,7 @@ simulation loops.
   to write to `sensewright_output.log` so developers can debug without crashing the
   game. Logging is gated behind `DEBUG_MODE` (`SENSEWRIGHT_DEBUG` env var).
 - **Validation logging:** use `validation_log()` for the **semantic** decisions
-  (which intent/tool ran, seat sync, roster) — it prefixes `[validate]` and is
+  (which intent/tool ran, seat sync, roster) â€” it prefixes `[validate]` and is
   gated by `SENSEWRIGHT_VALIDATION` (on by default). The sidecar mirrors this with
   `logger.info` (pulse/intent/cognition/event summaries). Together with the
   uvicorn access log, an in-game session can be validated from the two logs.
@@ -61,8 +61,8 @@ simulation loops.
 - **Mod (`mod/sensewright_mod/`):** Python 3.7 **only**. You **cannot** use:
   - Walrus operator (`:=`)
   - `match` statements
-  - Modern union types (`int | str` — use `Union[int, str]`)
-  - `from __future__ import annotations` (**breaks TS4 command parsing** — the game
+  - Modern union types (`int | str` â€” use `Union[int, str]`)
+  - `from __future__ import annotations` (**breaks TS4 command parsing** â€” the game
     introspects type annotations at runtime for `@sims4.commands.Command`; stringified
     annotations cause the parser to fail silently)
   - Third-party libraries (no `pydantic`, `requests`, `dataclasses` beyond stdlib)
@@ -78,95 +78,97 @@ simulation loops.
 
 ```
 sensewright_mod/
-├── __init__.py          # registers cheat commands at import
-├── config.py            # sidecar URL + timeouts; reads port/token/lang
-├── debug_log.py         # gated best-effort logging to sensewright_output.log
-├── i18n.py              # locale loader + t(key, **args) + game-language detection
-├── locales/
-│   ├── en.json          # default locale (source of truth)
-│   └── pt-BR.json       # Brazilian Portuguese translation
-├── main.py              # @sims4.commands.Command bindings (sw.chat, sw.help, etc.)
-├── sim_context.py       # collects Sim state → primitive-only dicts
-├── state_collector.py   # zone pulse, census, event ingestion, directive pull, sleep
-├── events.py            # event subscriptions + alarm management (deferred flush)
-├── http_client.py       # POST via urllib; typed errors; payload sanitization
-├── tool_executor.py     # dispatches tool_calls → game functions → POST result
-├── rails.py             # mod-side rate limit + player-priority lock + never-tools
-├── chat_ui.py           # notification → dialog → console fallback for chat
-├── hud.py               # sw.hud debug HUD: periodic in-game status line
-├── god_ui.py            # zeitgeist onboarding / household background dialogs
-└── probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
+â”œâ”€â”€ __init__.py          # registers cheat commands at import
+â”œâ”€â”€ config.py            # sidecar URL + timeouts; reads port/token/lang
+â”œâ”€â”€ debug_log.py         # gated best-effort logging to sensewright_output.log
+â”œâ”€â”€ i18n.py              # locale loader + t(key, **args) + game-language detection
+â”œâ”€â”€ locales/
+â”‚   â”œâ”€â”€ en.json          # default locale (source of truth)
+â”‚   â””â”€â”€ pt-BR.json       # Brazilian Portuguese translation
+â”œâ”€â”€ main.py              # @sims4.commands.Command bindings (sw.chat, sw.help, etc.)
+â”œâ”€â”€ sim_context.py       # collects Sim state â†’ primitive-only dicts
+â”œâ”€â”€ state_collector.py   # zone pulse, census, event ingestion, directive pull, sleep
+â”œâ”€â”€ events.py            # event subscriptions + alarm management (deferred flush)
+â”œâ”€â”€ http_client.py       # POST via urllib; typed errors; payload sanitization
+â”œâ”€â”€ tool_executor.py     # dispatches tool_calls â†’ game functions â†’ POST result
+â”œâ”€â”€ rails.py             # mod-side rate limit + player-priority lock + never-tools
+â”œâ”€â”€ chat_ui.py           # notification â†’ dialog â†’ console fallback for chat
+â”œâ”€â”€ hud.py               # sw.hud debug HUD: periodic in-game status line
+â”œâ”€â”€ god_ui.py            # zeitgeist onboarding / household background dialogs
+├── player_activity.py   # wraps Sim.push_super_affordance → player-priority lock
+â””â”€â”€ probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
 ```
 
 ### Sidecar (`sensewright_sidecar/`)
 
 ```
 sensewright_sidecar/
-├── server.py            # FastAPI app + lifespan
-├── config.py            # Pydantic Settings, config.toml loader
-├── schemas.py           # Pydantic v2 wire models (THE contract with the mod)
-├── auth.py              # shared-token auth (X-Sensewright-Token)
-├── lifecycle.py         # game-process watchdog: exits with The Sims 4
-├── locales.py           # sidecar-side i18n for system messages
-├── routers/             # FastAPI route modules
-│   ├── admin.py         # /v1/config/*, /v1/reset
-│   ├── autonomy.py      # /v1/autonomy/tick, /v1/autonomy/directives
-│   ├── chat.py          # /v1/chat, /v1/hey
-│   ├── events.py        # /v1/events
-│   ├── god.py           # /v1/god/*, /v1/census
-│   ├── health.py        # /v1/health, /v1/status
-│   ├── lifecycle.py     # /v1/lifecycle/attach
-│   └── profiles.py      # /v1/profile
-├── agent/               # Core agent logic
-│   ├── graph.py         # State machine: the central orchestrator
-│   ├── nodes.py         # Graph node implementations
-│   ├── state.py         # AgentState, Turn, Memory, ToolCall models
-│   ├── prompts.py       # System/user prompt templates (language-aware)
-│   ├── profiler.py      # 1-sentence → full profile JSON
-│   ├── evolution.py     # Reflection loop, personality drift, trait-swap
-│   ├── personality.py   # Psyche + life_story + sleep consolidation
-│   ├── agency.py        # Agency scheduler + seats + IntentBus + pull (v0.3 R2/R3)
-│   ├── seats.py         # SeatManager: agent-seat pool (v0.3 R2)
-│   ├── intents.py       # Intent model + IntentBus (v0.3 R3)
-│   ├── cognition.py     # CognitionLayer: daily plan/goals at sleep (v0.3 R4)
-│   ├── social.py        # SocialLayer: sim<->sim dialogue channel (v0.3 R5)
-│   ├── context_forge.py # per-Sim / pair context assembly (v0.3 R3)
-│   ├── coordinator.py   # Single-writer arbitration (agent vs God)
-│   ├── initiative.py    # LLM impulse prompt building + execution
-│   └── memory_fallback.py
-├── llm/
-│   ├── base.py          # LLMProvider protocol
-│   ├── chain.py         # Ordered fallback + circuit breaker
-│   ├── limits.py        # Per-provider RPM/RPD rate limiter
-│   ├── budgeter.py      # Per-Sim daily request cap
-│   ├── registry.py      # Auto-discovery of free models
-│   └── providers/
-│       ├── openai_compat.py  # OpenAI-compat base + OpenCodeZenProvider
-│       ├── openrouter.py     # OpenRouter (:free, free_only guard)
-│       ├── gemini.py         # Gemini (free tier, last resort)
-│       └── deepseek.py       # DeepSeek (paid, God)
-├── memory/
-│   ├── base.py          # MemoryProvider protocol
-│   ├── sqlite_store.py  # SQLite store + embeddings + decay columns
-│   ├── embeddings.py    # Cloudflare BGE-M3 + lexical fallback
-│   ├── consolidation.py # Dialogue → consolidated memory event
-│   └── decay.py         # Strength decay, touch, déjà vu, pruning
-├── god/
-│   ├── orchestrator.py  # God agent intervention loop
-│   ├── interventions.py # Intervention deck (presets)
-│   ├── world_model.py   # Census → WorldState, aggregates
-│   ├── zeitgeist.py     # Tag normalization, templates, suggest + rewrite
-│   ├── controls.py      # ControlSpec registry (single source of truth)
-│   ├── backgrounder.py  # Sim/household background writer
-│   ├── scheduler.py     # Progressive background priority queue
-│   └── budgeter.py      # Sliding-window + daily quota for backgrounds
-├── tools/
-│   ├── schemas.py       # JSONSchema per tool (THE tool contract)
-│   ├── registry.py      # Autonomy level → tool-set mapping
-│   └── rails.py         # Sidecar-side safety rails
-└── observability/
-    ├── logging.py       # Rotating file logger
-    └── audit.py         # JSONL audit log of tool calls
+â”œâ”€â”€ server.py            # FastAPI app + lifespan
+â”œâ”€â”€ config.py            # Pydantic Settings, config.toml loader
+â”œâ”€â”€ schemas.py           # Pydantic v2 wire models (THE contract with the mod)
+â”œâ”€â”€ auth.py              # shared-token auth (X-Sensewright-Token)
+â”œâ”€â”€ lifecycle.py         # game-process watchdog: exits with The Sims 4
+â”œâ”€â”€ locales.py           # sidecar-side i18n for system messages
+â”œâ”€â”€ panel_store.py       # data/panel.toml overlay for panel ControlSpec values (P1)
+â”œâ”€â”€ routers/             # FastAPI route modules
+â”‚   â”œâ”€â”€ admin.py         # /v1/config/*, /v1/reset
+â”‚   â”œâ”€â”€ autonomy.py      # /v1/autonomy/tick, /v1/autonomy/directives
+â”‚   â”œâ”€â”€ chat.py          # /v1/chat, /v1/hey
+â”‚   â”œâ”€â”€ events.py        # /v1/events
+â”‚   â”œâ”€â”€ god.py           # /v1/god/*, /v1/census
+â”‚   â”œâ”€â”€ health.py        # /v1/health, /v1/status
+â”‚   â”œâ”€â”€ lifecycle.py     # /v1/lifecycle/attach
+â”‚   â””â”€â”€ profiles.py      # /v1/profile
+â”œâ”€â”€ agent/               # Core agent logic
+â”‚   â”œâ”€â”€ graph.py         # State machine: the central orchestrator
+â”‚   â”œâ”€â”€ nodes.py         # Graph node implementations
+â”‚   â”œâ”€â”€ state.py         # AgentState, Turn, Memory, ToolCall models
+â”‚   â”œâ”€â”€ prompts.py       # System/user prompt templates (language-aware)
+â”‚   â”œâ”€â”€ profiler.py      # 1-sentence â†’ full profile JSON
+â”‚   â”œâ”€â”€ evolution.py     # Reflection loop, personality drift, trait-swap
+â”‚   â”œâ”€â”€ personality.py   # Psyche + life_story + sleep consolidation
+â”‚   â”œâ”€â”€ agency.py        # Agency scheduler + seats + IntentBus + pull (v0.3 R2/R3)
+â”‚   â”œâ”€â”€ seats.py         # SeatManager: agent-seat pool (v0.3 R2)
+â”‚   â”œâ”€â”€ intents.py       # Intent model + IntentBus (v0.3 R3)
+â”‚   â”œâ”€â”€ cognition.py     # CognitionLayer: daily plan/goals at sleep (v0.3 R4)
+â”‚   â”œâ”€â”€ social.py        # SocialLayer: sim<->sim dialogue channel (v0.3 R5)
+â”‚   â”œâ”€â”€ context_forge.py # per-Sim / pair context assembly (v0.3 R3)
+â”‚   â”œâ”€â”€ coordinator.py   # Single-writer arbitration (agent vs God)
+â”‚   â”œâ”€â”€ initiative.py    # LLM impulse prompt building + execution
+â”‚   â””â”€â”€ memory_fallback.py
+â”œâ”€â”€ llm/
+â”‚   â”œâ”€â”€ base.py          # LLMProvider protocol
+â”‚   â”œâ”€â”€ chain.py         # Ordered fallback + circuit breaker
+â”‚   â”œâ”€â”€ limits.py        # Per-provider RPM/RPD rate limiter
+â”‚   â”œâ”€â”€ budgeter.py      # Per-Sim daily request cap
+â”‚   â”œâ”€â”€ registry.py      # Auto-discovery of free models
+â”‚   â””â”€â”€ providers/
+â”‚       â”œâ”€â”€ openai_compat.py  # OpenAI-compat base + OpenCodeZenProvider
+â”‚       â”œâ”€â”€ openrouter.py     # OpenRouter (:free, free_only guard)
+â”‚       â”œâ”€â”€ gemini.py         # Gemini (free tier, last resort)
+â”‚       â””â”€â”€ deepseek.py       # DeepSeek (paid, God)
+â”œâ”€â”€ memory/
+â”‚   â”œâ”€â”€ base.py          # MemoryProvider protocol
+â”‚   â”œâ”€â”€ sqlite_store.py  # SQLite store + embeddings + decay columns
+â”‚   â”œâ”€â”€ embeddings.py    # Cloudflare BGE-M3 + lexical fallback
+â”‚   â”œâ”€â”€ consolidation.py # Dialogue â†’ consolidated memory event
+â”‚   â””â”€â”€ decay.py         # Strength decay, touch, dÃ©jÃ  vu, pruning
+â”œâ”€â”€ god/
+â”‚   â”œâ”€â”€ orchestrator.py  # God agent intervention loop
+â”‚   â”œâ”€â”€ interventions.py # Intervention deck (presets)
+â”‚   â”œâ”€â”€ world_model.py   # Census â†’ WorldState, aggregates
+â”‚   â”œâ”€â”€ zeitgeist.py     # Tag normalization, templates, suggest + rewrite
+â”‚   â”œâ”€â”€ controls.py      # ControlSpec registry (single source of truth)
+â”‚   â”œâ”€â”€ backgrounder.py  # Sim/household background writer
+â”‚   â”œâ”€â”€ scheduler.py     # Progressive background priority queue
+â”‚   â””â”€â”€ budgeter.py      # Sliding-window + daily quota for backgrounds
+â”œâ”€â”€ tools/
+â”‚   â”œâ”€â”€ schemas.py       # JSONSchema per tool (THE tool contract)
+â”‚   â”œâ”€â”€ registry.py      # Autonomy level â†’ tool-set mapping
+â”‚   â””â”€â”€ rails.py         # Sidecar-side safety rails
+â””â”€â”€ observability/
+    â”œâ”€â”€ logging.py       # Rotating file logger
+    â””â”€â”€ audit.py         # JSONL audit log of tool calls
 ```
 
 ---
@@ -196,7 +198,7 @@ sensewright_sidecar/
 - **Never** use `lambda` for type aliases (e.g. `ToolFunc = lambda args: Dict`).
   Always use `from typing import Callable, Dict` and `ToolFunc = Callable[...]`.
 - In the mod (3.7), use `typing.Union`, `typing.Optional`, `typing.Dict`, etc.
-  Do **not** use `from __future__ import annotations` (see §3).
+  Do **not** use `from __future__ import annotations` (see Â§3).
 - In the sidecar (3.12+), modern syntax (`int | str`, `dict[str, Any]`) is fine.
 
 ---
@@ -218,18 +220,18 @@ sensewright_sidecar/
 - **Config model hierarchy** (`sidecar/.../config.py`):
   ```
   Settings
-  ├── UiConfig           [ui]
-  ├── NetworkConfig       [network]
-  ├── LoggingConfig       [logging]
-  ├── LLMConfig           [llm]
-  │   └── ProviderConfig  [llm.providers.<name>]
-  ├── MemoryConfig        [memory]
-  ├── AgentsConfig        [agents]
-  │   ├── EvolutionConfig [agents.evolution]
-  │   ├── InitiativeConfig [agents.initiative]
-  │   └── PersonalityConfig [agents.personality]
-  └── GodConfig           [god]
-      └── BackgroundsConfig [god.backgrounds]
+  â”œâ”€â”€ UiConfig           [ui]
+  â”œâ”€â”€ NetworkConfig       [network]
+  â”œâ”€â”€ LoggingConfig       [logging]
+  â”œâ”€â”€ LLMConfig           [llm]
+  â”‚   â””â”€â”€ ProviderConfig  [llm.providers.<name>]
+  â”œâ”€â”€ MemoryConfig        [memory]
+  â”œâ”€â”€ AgentsConfig        [agents]
+  â”‚   â”œâ”€â”€ EvolutionConfig [agents.evolution]
+  â”‚   â”œâ”€â”€ InitiativeConfig [agents.initiative]
+  â”‚   â””â”€â”€ PersonalityConfig [agents.personality]
+  â””â”€â”€ GodConfig           [god]
+      â””â”€â”€ BackgroundsConfig [god.backgrounds]
   ```
 - When adding a new config field: add it to the Pydantic model, document it in
   `config.example.toml`, and update `PLANO.md` Appendix A if significant.
@@ -255,11 +257,11 @@ sensewright_sidecar/
 
 ## 10. Test Conventions
 
-- **Sidecar tests:** `sidecar/tests/` — run with
+- **Sidecar tests:** `sidecar/tests/` â€” run with
   `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
-- **Mod tests:** `mod/tests/` — run with `python -m pytest mod\tests -q`
+- **Mod tests:** `mod/tests/` â€” run with `python -m pytest mod\tests -q`
   (uses the system Python, not 3.7, since tests don't need the game runtime)
-- **Current counts:** sidecar **406**, mod **305** (update when adding tests).
+- **Current counts:** sidecar **437**, mod **337** (update when adding tests).
 - **Every new feature should include tests.** Prefer unit tests; integration tests
   for wire/endpoint behavior.
 - **CHANGELOG** (`CHANGELOG.md`) must be updated for every meaningful change.
@@ -281,10 +283,10 @@ sensewright_sidecar/
   after patches. Use **Better Exceptions** for deep debugging.
 - **EA guidelines:** Mods must be accessible for free (though early access is
   temporarily allowed) and must not use official game logos/trademarks.
-- **Alarms:** Use `alarms.add_alarm(owner, time_span, callback, ...)` — the
+- **Alarms:** Use `alarms.add_alarm(owner, time_span, callback, ...)` â€” the
   top-level `alarms` module (not `sims4.alarms`). Alarms **require a live owner**
   (`AlarmHandle` raises if `owner` is `None`) **and the owner must be a live
-  GameObject the alarm service advances** — the **active Sim instance** works;
+  GameObject the alarm service advances** â€” the **active Sim instance** works;
   the zone/household/service managers may register a handle but never tick (this
   caused the v0.3 pulse/pull alarms to silently never fire). Use
   `events._resolve_alarm_owner` (active Sim instance first) and re-arm on zone
@@ -309,7 +311,7 @@ These bugs were found during in-game validation and are critical to avoid:
    `services.game_clock_service()`, etc. all return `None` at import. Use lazy
    resolution and the deferred-flush pattern in `events.py`. **The deferred flush
    only retries where `ensure_started()` is called**, so don't rely on command
-   paths alone — `install_zone_hook()` wraps `zone.Zone.update` to auto-start the
+   paths alone â€” `install_zone_hook()` wraps `zone.Zone.update` to auto-start the
    collector at zone load (then self-uninstalls).
 
 3. **Alarm owners must be live _and ticked_.** Passing `None` as the alarm owner
@@ -318,7 +320,7 @@ These bugs were found during in-game validation and are critical to avoid:
    household/service owner may register a handle that never fires.
 
 4. **Service accessors are functions, not values.** `services.client_manager` is
-   a function — you must call `services.client_manager()`. Same for
+   a function â€” you must call `services.client_manager()`. Same for
    `sim_info.get_traits()`, `sim_info.get_mood()`, etc. Forgetting the `()` returns
    the bound method object instead of the result.
 
@@ -337,7 +339,7 @@ These bugs were found during in-game validation and are critical to avoid:
 
 8. **Buffs are `SimInfo.Buffs` (property), not `buff_component`.** The buff
    component is `objects.components.buff_component.BuffComponent`; active buffs are
-   `BuffComponent._active_buffs` (handle id → `Buff`), and the tuning id is
+   `BuffComponent._active_buffs` (handle id â†’ `Buff`), and the tuning id is
    `Buff.buff_type.__name__` (e.g. `buff_Sleeping`). Detected live via the probe.
 
 9. **Don't rely on game-clock alarms for the loop.** Alarms with `owner=object_sim`
@@ -350,7 +352,7 @@ These bugs were found during in-game validation and are critical to avoid:
 
 ## 13. Build and Deploy
 
-- **Mod build:** `python mod/build.py` compiles with Python 3.7 → `dist/Sensewright.ts4script`.
+- **Mod build:** `python mod/build.py` compiles with Python 3.7 â†’ `dist/Sensewright.ts4script`.
   The bytecode magic must be `42 0d 0d 0a` (3.7). Use `--allow-any-python` for dev.
 - **Sidecar:** Currently runs from source (`python -m sensewright_sidecar`).
   PyInstaller packaging is planned for Phase 6.
@@ -364,9 +366,9 @@ These bugs were found during in-game validation and are critical to avoid:
 
 ---
 
-## 14. v0.3 Direction (Inhabited Agents) — R2–R7 Implemented
+## 14. v0.3 Direction (Inhabited Agents) â€” R2â€“R7 Implemented
 
-> **R2 (agent seats), R3 (intents), R4 (cognition/daily plan), R5 (sim↔sim
+> **R2 (agent seats), R3 (intents), R4 (cognition/daily plan), R5 (simâ†”sim
 > channel) are implemented; R6 (God director scoping) and R7 (panel fallback) are
 > verified** (`agent/seats.py`, `agent/intents.py`, `agent/cognition.py`,
 > `agent/social.py`, `agent/context_forge.py`, `graph.py`,
@@ -385,9 +387,9 @@ the Sim) to **inhabitation + nudge** (biasing native autonomy):
   social, God) has a budget, cadence, and deterministic fallback.
 - **Intent model:** Agents emit intents (not commands). Each intent carries a
   native-lever payload and a lifecycle (`expires_at`).
-- **Sim↔Sim dialogue channel:** Two agent-owned Sims get a real conversation.
+- **Simâ†”Sim dialogue channel:** Two agent-owned Sims get a real conversation.
 
-Implementation phases: R1 (lever spike) → R2 (seats) → R3 (intents) → R4
-(cognition) → R5 (sim↔sim) → R6 (God director) → R7 (panel).
+Implementation phases: R1 (lever spike) â†’ R2 (seats) â†’ R3 (intents) â†’ R4
+(cognition) â†’ R5 (simâ†”sim) â†’ R6 (God director) â†’ R7 (panel).
 
-See `PLANO.md` §15 for the full design.
+See `PLANO.md` Â§15 for the full design.

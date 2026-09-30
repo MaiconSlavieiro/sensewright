@@ -111,8 +111,9 @@ def note_heartbeat(tick_result=None, pull_result=None, sims=0, sidecar_state=Non
     flipped = previous is not None and previous != sidecar_state
     if flipped:
         _notify("hud.sidecar." + sidecar_state)
-    if flipped or (_state["beats"] % max(1, EVERY_BEATS) == 0):
-        emit_line()
+    # The periodic status line is log-only (a notification every beat is noisy);
+    # ``sw.hud now`` still surfaces it on demand.
+    _log_line()
 
 
 def note_intent(intent, result):
@@ -129,17 +130,17 @@ def note_intent(intent, result):
     name = str(intent.get("name") or kind)
     error = result.get("error") if isinstance(result, dict) else None
     status = "OK" if ok else (error or "FAIL")
-    _notify("hud.intent", kind=kind, name=name, status=status)
+    _log("hud.intent", kind=kind, name=name, status=status)
 
 
-def emit_line():
-    """Emit the compact status line regardless of the enabled flag. Never raises."""
+def _line_message():
+    """The compact localized status line."""
     state = _state["sidecar"]
     key = {
         _ON: "hud.line",
         _ERROR: "hud.line.error",
     }.get(state, "hud.line.native")
-    _notify(
+    return _t(
         key,
         sidecar=_SIDECAR_TOKENS.get(state, "OFF"),
         beats=_state["beats"],
@@ -148,6 +149,21 @@ def emit_line():
         ok=_state["intents_ok"],
         total=_state["intents_total"],
     )
+
+
+def _log_line():
+    """Write the compact status line to the log only (no notification)."""
+    try:
+        from .debug_log import validation_log
+
+        validation_log("hud: {}".format(_line_message()))
+    except Exception as exc:
+        log_exception("hud._log_line", exc)
+
+
+def emit_line():
+    """Emit the compact status line as a notification. Never raises."""
+    return _notify_message(_line_message())
 
 
 def render_status():
@@ -177,13 +193,23 @@ def _t(key, **args):
         return key
 
 
-def _notify(key, **args):
+def _log(key, **args):
+    """Localize a HUD line and write it to the log only (no notification)."""
     try:
         message = i18n.t(key, **args)
     except Exception as exc:
-        log_exception("hud._notify", exc)
+        log_exception("hud._log", exc)
         message = key
-    # Always keep a trace in sensewright_output.log, even if the UI cannot render.
+    try:
+        from .debug_log import validation_log
+
+        validation_log("hud: {}".format(message))
+    except Exception:
+        pass
+
+
+def _notify_message(message):
+    """Log a HUD line and surface it as an in-game notification."""
     try:
         from .debug_log import validation_log
 
@@ -191,6 +217,15 @@ def _notify(key, **args):
     except Exception:
         pass
     return notify(message)
+
+
+def _notify(key, **args):
+    try:
+        message = i18n.t(key, **args)
+    except Exception as exc:
+        log_exception("hud._notify", exc)
+        message = key
+    return _notify_message(message)
 
 
 def notify(message):

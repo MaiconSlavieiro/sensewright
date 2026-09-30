@@ -10,6 +10,7 @@ from sensewright_sidecar.agent.social import (
     SocialLayer,
     clean_line,
     render_dialogue,
+    sim_brief,
     template_dialogue,
 )
 from sensewright_sidecar.config import AgentsConfig, LayersConfig, Settings
@@ -24,9 +25,11 @@ class FakeRegistry:
     def __init__(self, text: str) -> None:
         self.text = text
         self.calls = 0
+        self.messages = []
 
     async def complete(self, messages, **kwargs):
         self.calls += 1
+        self.messages.append(messages)
         return FakeResponse(self.text)
 
 
@@ -226,6 +229,75 @@ async def test_render_dialogue_respects_max_lines():
     assert len(dlg.lines) == DIALOGUE_MAX_LINES
 
 
+async def test_render_dialogue_enforces_pt_br_prompt():
+    registry = FakeRegistry(
+        '{"topic": "cafe", "lines": [{"speaker": "a", "text": "Bom dia!", "tone": "warm"}, '
+        '{"speaker": "b", "text": "Bom dia!", "tone": "warm"}]}'
+    )
+    await render_dialogue({}, {}, None, registry, "pt-BR", 1, 2)
+
+    system = registry.messages[0][0]["content"]
+    user = registry.messages[0][1]["content"]
+    assert "Brazilian Portuguese" in system
+    assert "do NOT use English" in system
+    assert "Brazilian Portuguese" in user
+
+
+async def test_render_dialogue_english_does_not_forbid_english():
+    registry = FakeRegistry(
+        '{"topic": "x", "lines": [{"speaker": "a", "text": "Hi", "tone": "warm"}]}'
+    )
+    await render_dialogue({}, {}, None, registry, "en", 1, 2)
+
+    system = registry.messages[0][0]["content"]
+    assert "English" in system
+    assert "do NOT use English" not in system
+
+
+async def test_render_dialogue_uses_extra_context_and_sim_ids():
+    registry = FakeRegistry(
+        '{"topic": "x", "lines": [{"speaker": "a", "text": "Hi", "tone": "warm"}, '
+        '{"speaker": "b", "text": "Hey", "tone": "warm"}]}'
+    )
+    await render_dialogue(
+        {"name": "Ana"},
+        {"name": "Bob"},
+        None,
+        registry,
+        "en",
+        1,
+        2,
+        extra_a="Background: baker",
+        extra_b="Background: doctor",
+    )
+
+    user = registry.messages[0][1]["content"]
+    assert "Background: baker" in user
+    assert "Background: doctor" in user
+    assert "sim_id 1" in user
+    assert "sim_id 2" in user
+
+
+# ─── sim_brief ───────────────────────────────────────────────────────────
+
+
+def test_sim_brief_includes_background_personality_memory_and_partner():
+    entry = {
+        "profile": {"backstory": "grew up on a farm", "personality": "sunny"},
+        "memories": [{"summary": "married Alex"}],
+    }
+    brief = sim_brief(entry, other_name="Bea")
+    assert "grew up on a farm" in brief
+    assert "sunny" in brief
+    assert "married Alex" in brief
+    assert "Bea" in brief
+
+
+def test_sim_brief_empty_when_no_context():
+    assert sim_brief(None) == ""
+    assert sim_brief({}) == ""
+
+
 # ─── SocialLayer.configure ───────────────────────────────────────────────
 
 
@@ -344,30 +416,29 @@ def test_eligible_handles_invalid_sim_id():
 # ─── SocialLayer.pick_pairs ──────────────────────────────────────────────
 
 
-def test_pick_pairs_excludes_player_sims():
+def test_pick_pairs_prefers_household_sims():
     sims = [
         {"sim_id": 1, "sleeping": False, "autonomy": "full", "is_player": True},
         {"sim_id": 2, "sleeping": False, "autonomy": "full", "is_player": False},
         {"sim_id": 3, "sleeping": False, "autonomy": "full", "is_player": False},
     ]
-    layer = SocialLayer(max_pairs=1)
+    layer = SocialLayer(max_pairs=1, rng=__import__("random").Random(0))
     pairs = layer.pick_pairs(sims)
-    # Only non-player Sims (2, 3) should pair
     assert len(pairs) == 1
     a, b = pairs[0]
-    assert a["sim_id"] in (2, 3)
-    assert b["sim_id"] in (2, 3)
+    # Household Sims are preferred, so sim 1 (household) must be in the pair.
+    assert a["sim_id"] == 1 or b["sim_id"] == 1
     assert a["sim_id"] != b["sim_id"]
 
 
-def test_pick_pairs_returns_empty_when_fewer_than_two_non_player():
+def test_pick_pairs_pairs_two_household_sims():
     sims = [
         {"sim_id": 1, "sleeping": False, "autonomy": "full", "is_player": True},
         {"sim_id": 2, "sleeping": False, "autonomy": "full", "is_player": True},
     ]
     layer = SocialLayer()
     pairs = layer.pick_pairs(sims)
-    assert pairs == []
+    assert len(pairs) == 1
 
 
 def test_pick_pairs_enforces_cooldown():
@@ -528,6 +599,36 @@ async def test_plan_never_raises_even_on_errors():
     # Template fallback works, so we get a dialogue
     assert len(dialogues) == 1
     assert dialogues[0].source == "template"
+
+
+async def test_dialogue_for_pair_feeds_sim_context_into_prompt():
+    class FakeForge:
+        async def build(self, job_a, job_b, relationship):
+            return {
+                "a": {
+                    "profile": {"name": "Ana", "backstory": "baker"},
+                    "memories": [{"summary": "met Bob"}],
+                },
+                "b": {"profile": {"name": "Bob", "personality": "grumpy"}},
+            }
+
+    registry = FakeRegistry(
+        '{"topic": "bread", "lines": [{"speaker": "a", "text": "Fresh bread?", "tone": "warm"}, '
+        '{"speaker": "b", "text": "Sure.", "tone": "grumpy"}]}'
+    )
+    layer = SocialLayer(max_pairs=1, registry=registry)
+    a = {"sim_id": 1, "sleeping": False, "autonomy": "full", "is_player": True}
+    b = {"sim_id": 2, "sleeping": False, "autonomy": "full", "is_player": True}
+
+    dlg = await layer._dialogue_for_pair(
+        a, b, player_id="p", save_id="s", lang="en", forge=FakeForge()
+    )
+
+    assert dlg is not None
+    user = registry.messages[0][1]["content"]
+    assert "baker" in user
+    assert "met Bob" in user
+    assert "grumpy" in user
 
 
 # ─── SocialLayer.snapshot ────────────────────────────────────────────────

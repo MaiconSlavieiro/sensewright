@@ -243,6 +243,7 @@ sensewright_mod/
 ├── rails.py             # mod-side rate limit + player-priority lock + never-tools
 ├── chat_ui.py           # UiDialogNotification → UiDialogOkCancel → console
 ├── god_ui.py            # zeitgeist onboarding / household background dialogs
+├── player_activity.py   # wraps Sim.push_super_affordance → player-priority lock
 └── probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
 ```
 

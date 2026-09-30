@@ -206,10 +206,14 @@ credit the originals in `docs/`/`CHANGELOG.md`.
 
 ## 6. Roadmap
 
-1. **P1 — Model + persistence (sidecar, offline-testable).** Promote §1.4 into
-   `ControlSpec` with `target`/`path`; generic `apply_values_to_settings` /
-   `values_from_settings`; `POST /v1/config/god?persist` → `panel.toml` overlay;
-   mark `restart_only`. i18n label/desc keys for every spec.
+1. **P1 — Model + persistence (sidecar).** ✅ **Done** (build `2026-09-29.21`).
+   §1.4 promoted into `ControlSpec` with `target`/`path`; generic
+   `apply_values_to_settings` / `apply_control_values_to_settings` /
+   `values_from_settings`; `POST /v1/config/god?persist` → `panel.toml` overlay
+   (`panel_store.py`; deep-merged in `load_settings`);
+   `POST /v1/config/panel/reset`; `restart_only` marked (hidden + never
+   persisted); i18n label/desc keys for every spec. Tests:
+   `sidecar/tests/test_controls_panel.py`.
 2. **P2 — Native panel (mod).** `panel_ui.py` (model + native renderer +
    console fallback) + `sw.set`; `http_client.set_god_controls`; boot-notification
    button; `cmd.help.body`.
@@ -219,10 +223,31 @@ credit the originals in `docs/`/`CHANGELOG.md`.
 4. **P3 — Live validation + docs.** Round-trip on the client, restart-persistence
    check, `[validate]` logs, CHANGELOG/STATUS/PLANO, test counts.
 
-### P0 — In-game spike (before P2 ships)
-Extend `sw.uitest` to confirm on the live client: (a) `UiObjectPicker` rows +
-pagination; (b) a response dialog with `SEND_COMMAND` buttons; (c) the numeric
-input dialog; (d) multi-select. The result fixes the widget matrix + fallbacks.
+### P0 — In-game spike (validated live)
+**Validated** (build `2026-09-29.9`): `mod/sensewright_mod/ui_probe.py` + `sw.uitest`
+kinds confirm on the live client: (a) picker rows + pagination (`picker`, 24
+rows); (b) a response dialog with `SEND_COMMAND` buttons (`response` → a button
+runs `sw.uitest clicked`); (c) the numeric input dialog (`input`,
+`UiDialogTextInputOk` + `UiTextInput`); (d) multi-select (`multi`, picker with
+`max_selectable > 1`). All **8 kinds render** (`ok=True` in the log). Run
+`sw.uitest all` (or one kind), and `sw.uitest probe` for a no-UI
+class-availability report. Each probe returns `{kind, ok, layer, error}` and logs
+`[validate] uitest …`.
+
+Live findings (build `2026-09-29.8`): the **object skin** (`picker`) reads best;
+rows should carry an **icon**. Confirmed from the shipped bytecode that
+`ObjectPickerRow(icon=<ResourceKey>)` (row reads `.type/.group/.instance`, builds
+`IconInfoData(icon_resource=…)`) — so `picker_icons` decorates rows with real EA
+icons (object definitions / mood / traits) with **no `.package`**. Player text
+must be short; long copy goes in the **row tooltip**. TS4 renders **DDS**
+textures, not SVG: per-setting custom art needs an SVG→DDS→DBPF pipeline
+(`research/ui-refs/ShadySimDeals/build_mod.py` is the writer reference).
+
+APIs were cross-checked against the shipped `simulation.zip` bytecode
+(`ui.ui_dialog_picker.UiDialogObjectPicker`/`UiObjectPicker`/`UiSimPicker`,
+`ui.ui_dialog_generic.UiDialogTextInputOk`, `ui.ui_text_input.UiTextInput`,
+`ui.ui_dialog.UiDialogResponse` + `UiDialogUiRequest.SEND_COMMAND`,
+`distributor.shared_messages.IconInfoData`).
 
 ---
 

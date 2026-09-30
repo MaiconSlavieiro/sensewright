@@ -97,7 +97,11 @@ def _first_attr(values, names):
 
 
 def _current_lang() -> str:
-    """Current UI language for outgoing events."""
+    """Current UI language for outgoing events (retries game detection)."""
+    try:
+        i18n.ensure_locale()
+    except Exception:
+        pass
     try:
         lang = i18n.current_locale()
         if lang:
@@ -740,16 +744,41 @@ def pulse_and_pull() -> None:
         log_exception("state_collector.pulse_and_pull(hud)", exc)
 
 
-def _show_autonomy_text(key: str, text: str) -> None:
-    """Best-effort notification for an LLM-generated directive line."""
+def _sim_info_by_id(sim_id) -> Optional[Any]:
+    """Resolve a SimInfo by id (best-effort). Never raises."""
+    try:
+        import services  # type: ignore
+
+        manager = services.sim_info_manager()
+        if manager is not None and sim_id:
+            return manager.get(int(sim_id))
+    except Exception as exc:
+        log_exception("state_collector._sim_info_by_id", exc)
+    return None
+
+
+def _show_autonomy_text(key: str, text: str, speaker_sim_info=None) -> None:
+    """Best-effort speech notification attributed to the speaking Sim."""
     try:
         message = i18n.t(key, text=text)
     except Exception:
         message = text
+
+    sim_info = speaker_sim_info
+    if sim_info is None:
+        try:
+            sim_info = sim_context._get_active_sim_info()
+        except Exception:
+            sim_info = None
+
+    # Attribute the line to the speaker (shows who is talking).
     try:
-        sim_info = sim_context._get_active_sim_info()
+        name = _full_name_of(sim_info) if sim_info is not None else ""
     except Exception:
-        sim_info = None
+        name = ""
+    if name:
+        message = "{}: {}".format(name, message)
+
     try:
         if chat_ui.show_simple_notification(message, sim_info):
             return
@@ -810,11 +839,15 @@ def pull_and_execute_directives(sim: Optional[Dict[str, Any]] = None):
             hud.note_intent(intent, result)
         except Exception as exc:
             log_exception("state_collector.pull_and_execute(hud)", exc)
-        # A "speak" intent surfaces its line as a speech notification.
+        # A "speak" intent surfaces its line as a speech notification, attributed
+        # to the speaking Sim (name + native owner portrait).
         if isinstance(result, dict):
             text = result.get("text")
             if isinstance(text, str) and text.strip():
-                _show_autonomy_text("notify.social.speech", text)
+                _show_autonomy_text(
+                    "notify.social.speech", text,
+                    _sim_info_by_id(intent.get("sim_id")),
+                )
     return response
 
 
@@ -1200,15 +1233,20 @@ class StateCollector:
 
     # --- handlers ---
 
-    def _on_snapshot_alarm(self) -> None:
-        """Alarm callback: sample and forward a snapshot."""
+    def _on_snapshot_alarm(self, *args, **kwargs) -> None:
+        """Alarm callback: sample and forward a snapshot.
+
+        The game calls alarm callbacks with an argument (the alarm handle), so
+        ``*args`` is required (a bare ``self`` raised
+        "_on_snapshot_alarm() takes 1 positional argument but 2 were given").
+        """
         debug_log("_on_snapshot_alarm fired")
         try:
             self.sample_and_send()
         except Exception as exc:
             log_exception("StateCollector._on_snapshot_alarm", exc)
 
-    def _on_autonomy_alarm(self) -> None:
+    def _on_autonomy_alarm(self, *args, **kwargs) -> None:
         """Alarm callback: send the zone pulse to the sidecar."""
         debug_log("_on_autonomy_alarm fired")
         try:
@@ -1217,7 +1255,7 @@ class StateCollector:
         except Exception as exc:
             log_exception("StateCollector._on_autonomy_alarm", exc)
 
-    def _on_directive_alarm(self) -> None:
+    def _on_directive_alarm(self, *args, **kwargs) -> None:
         """Alarm callback: pull and execute pending per-Sim directives."""
         debug_log("_on_directive_alarm fired")
         try:

@@ -48,6 +48,17 @@ _LAYER_KEYS = {
 
 _EVOLUTION_SPEEDS = ("slow", "normal", "fast")
 
+# P1 (docs/ui_panel.md §1.4): promoted mod/global settings + their option sets.
+_UI_LANGUAGES = ("auto", "en", "pt-BR")
+_DECAY_PRESETS = ("fast", "normal", "slow")
+_TRAIT_SWAP_MODES = ("off", "propose", "auto")
+
+# Settings-path groups consumed by the patch builders below. Specs whose
+# ``target`` is not in one of these groups are applied directly to the live
+# ``Settings`` object by :func:`apply_values_to_settings`.
+_GOD_PATCH_TARGETS = frozenset({"god", "god.settings", "god.powers"})
+_AGENT_PATCH_TARGETS = frozenset({"agents", "agents.initiative", "agents.layers"})
+
 
 class ControlOption(BaseModel):
     """A select/tags option, localized through ``label_key``."""
@@ -70,6 +81,14 @@ class ControlSpec(BaseModel):
     options: list[ControlOption] = Field(default_factory=list)
     requires_power: str | None = None
     advanced: bool = False
+    # P1: where the value lives in ``Settings``. ``target`` is a dotted path
+    # (e.g. ``agents.personality``) and ``path`` the field within it (defaults
+    # to ``key``). Docs only use them; the mod panel renders the label keys.
+    target: str | None = None
+    path: str | None = None
+    # Read once at sidecar startup: never persisted to ``panel.toml`` and hidden
+    # from the panel by default.
+    restart_only: bool = False
 
     def validate(self, value: Any) -> Any:
         """Coerce/validate a single value; raise ``ValueError`` when invalid."""
@@ -120,6 +139,8 @@ def _slider(key: str, default: float, description_key: str) -> ControlSpec:
         min_value=0.0,
         max_value=1.0,
         step=0.05,
+        target="god",
+        path=key,
     )
 
 
@@ -130,11 +151,20 @@ def _power(key: str, default: bool) -> ControlSpec:
         label_key=f"god.control.power_{key}.label",
         description_key=f"god.control.power_{key}.desc",
         default=default,
+        target="god.powers",
+        path=key,
     )
 
 
 def _agent_slider(
-    key: str, default: float, *, minimum: float, maximum: float, step: float
+    key: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+    step: float,
+    target: str,
+    path: str | None = None,
 ) -> ControlSpec:
     return ControlSpec(
         key=key,
@@ -146,6 +176,43 @@ def _agent_slider(
         max_value=maximum,
         step=step,
         advanced=True,
+        target=target,
+        path=path or key,
+    )
+
+
+def _promoted(
+    key: str,
+    kind: ControlKind,
+    default,
+    *,
+    target: str,
+    path: str | None = None,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    step: float | None = None,
+    options: tuple[str, ...] = (),
+    option_prefix: str = "god.option",
+    restart_only: bool = False,
+) -> ControlSpec:
+    """Build a promoted §1.4 control (``advanced``, with an explicit path)."""
+    return ControlSpec(
+        key=key,
+        kind=kind,
+        label_key=f"god.control.{key}.label",
+        description_key=f"god.control.{key}.desc",
+        default=default,
+        min_value=minimum,
+        max_value=maximum,
+        step=step,
+        options=[
+            ControlOption(value=value, label_key=f"{option_prefix}.{value}")
+            for value in options
+        ],
+        advanced=True,
+        target=target,
+        path=path or key,
+        restart_only=restart_only,
     )
 
 
@@ -162,6 +229,8 @@ CONTROL_SPECS: list[ControlSpec] = [
         description_key="god.control.evolution_speed.desc",
         default="normal",
         options=[ControlOption(value=v, label_key=f"god.speed.{v}") for v in _EVOLUTION_SPEEDS],
+        target="god.settings",
+        path="evolution_speed",
     ),
     ControlSpec(
         key="mood_tags",
@@ -170,6 +239,8 @@ CONTROL_SPECS: list[ControlSpec] = [
         description_key="god.control.mood_tags.desc",
         default=[],
         options=[ControlOption(value=tag, label_key=f"god.tag.{tag}") for tag in MOOD_TAGS],
+        target="god.settings",
+        path="mood_tags",
     ),
     _power("spawn_npc", True),
     _power("apply_trait", True),
@@ -178,10 +249,14 @@ CONTROL_SPECS: list[ControlSpec] = [
     _power("relationship_shift", True),
     _power("extreme_events", False),
     # v0.3 §15.6: agent-roster dials (advanced; routed to ``settings.agents``).
-    _agent_slider("agent_seats", 12, minimum=1, maximum=24, step=1),
-    _agent_slider("impulse_frequency", 0.2, minimum=0.0, maximum=1.0, step=0.05),
+    _agent_slider("agent_seats", 12, minimum=1, maximum=24, step=1, target="agents"),
     _agent_slider(
-        "player_sim_impulse_frequency", 0.0, minimum=0.0, maximum=1.0, step=0.05
+        "impulse_frequency", 0.2, minimum=0.0, maximum=1.0, step=0.05,
+        target="agents.initiative",
+    ),
+    _agent_slider(
+        "player_sim_impulse_frequency", 0.0, minimum=0.0, maximum=1.0, step=0.05,
+        target="agents.initiative",
     ),
     ControlSpec(
         key="reactions_enabled",
@@ -190,6 +265,8 @@ CONTROL_SPECS: list[ControlSpec] = [
         description_key="god.control.reactions_enabled.desc",
         default=True,
         advanced=True,
+        target="agents.initiative",
+        path="reactions_enabled",
     ),
     ControlSpec(
         key="reasoning_effort",
@@ -202,6 +279,8 @@ CONTROL_SPECS: list[ControlSpec] = [
             for v in _REASONING_EFFORTS
         ],
         advanced=True,
+        target="agents.initiative",
+        path="reasoning_effort",
     ),
     ControlSpec(
         key="layer_memory",
@@ -210,6 +289,8 @@ CONTROL_SPECS: list[ControlSpec] = [
         description_key="god.control.layer_memory.desc",
         default=True,
         advanced=True,
+        target="agents.layers",
+        path="memory",
     ),
     ControlSpec(
         key="layer_cognition",
@@ -218,6 +299,8 @@ CONTROL_SPECS: list[ControlSpec] = [
         description_key="god.control.layer_cognition.desc",
         default=True,
         advanced=True,
+        target="agents.layers",
+        path="cognition",
     ),
     ControlSpec(
         key="layer_social",
@@ -226,7 +309,58 @@ CONTROL_SPECS: list[ControlSpec] = [
         description_key="god.control.layer_social.desc",
         default=True,
         advanced=True,
+        target="agents.layers",
+        path="social",
     ),
+    # ── P1 (docs/ui_panel.md §1.4): promoted mod/global settings ──
+    _promoted("ui.language", "select", "auto", target="ui", path="language",
+              options=_UI_LANGUAGES, option_prefix="god.lang"),
+    _promoted("llm.temperature", "slider", 0.8, target="llm", path="temperature",
+              minimum=0.0, maximum=2.0, step=0.05),
+    _promoted("llm.max_tokens", "slider", 700, target="llm", path="max_tokens",
+              minimum=128, maximum=4096, step=64),
+    _promoted("llm.budget_per_sim_per_day", "slider", 500, target="llm",
+              path="budget_per_sim_per_day", minimum=0, maximum=2000, step=50),
+    _promoted("memory.consolidation_enabled", "toggle", True, target="memory",
+              path="consolidation_enabled"),
+    _promoted("memory.decay_preset", "select", "normal", target="memory",
+              path="decay_preset", options=_DECAY_PRESETS, option_prefix="god.decay"),
+    _promoted("memory.dejavu_chance", "slider", 0.05, target="memory",
+              path="dejavu_chance", minimum=0.0, maximum=0.5, step=0.01),
+    _promoted("agents.personality.absorption_enabled", "toggle", True,
+              target="agents.personality", path="absorption_enabled"),
+    _promoted("agents.personality.salience_threshold", "slider", 1.5,
+              target="agents.personality", path="salience_threshold",
+              minimum=0.0, maximum=5.0, step=0.1),
+    _promoted("agents.personality.sleep_consolidation", "toggle", True,
+              target="agents.personality", path="sleep_consolidation"),
+    _promoted("agents.evolution.enabled", "toggle", True,
+              target="agents.evolution", path="enabled"),
+    _promoted("agents.evolution.trait_swap", "select", "propose",
+              target="agents.evolution", path="trait_swap",
+              options=_TRAIT_SWAP_MODES, option_prefix="god.trait_swap"),
+    _promoted("agents.evolution.drift_strength", "slider", 0.2,
+              target="agents.evolution", path="drift_strength",
+              minimum=0.0, maximum=1.0, step=0.05),
+    _promoted("agents.social.max_pairs_per_tick", "slider", 1,
+              target="agents.social", path="max_pairs_per_tick",
+              minimum=0, maximum=4, step=1),
+    _promoted("agents.social.pair_cooldown_seconds", "slider", 180,
+              target="agents.social", path="pair_cooldown_seconds",
+              minimum=30, maximum=600, step=30),
+    _promoted("god.backgrounds.enabled", "toggle", True,
+              target="god.backgrounds", path="enabled"),
+    _promoted("god.backgrounds.batch_size", "slider", 2,
+              target="god.backgrounds", path="batch_size",
+              minimum=1, maximum=10, step=1),
+    _promoted("runtime.expose_roster", "toggle", True,
+              target="runtime", path="expose_roster"),
+    # Read once at startup → restart_only (hidden from the panel, never persisted).
+    _promoted("runtime.shutdown_on_game_exit", "toggle", True,
+              target="runtime", path="shutdown_on_game_exit", restart_only=True),
+    _promoted("network.host", "select", "127.0.0.1", target="network", path="host",
+              options=("127.0.0.1", "0.0.0.0"), option_prefix="god.network",
+              restart_only=True),
 ]
 
 CONTROL_SPEC_BY_KEY: dict[str, ControlSpec] = {spec.key: spec for spec in CONTROL_SPECS}
@@ -234,14 +368,47 @@ CONTROL_SPEC_BY_KEY: dict[str, ControlSpec] = {spec.key: spec for spec in CONTRO
 _POWER_PREFIX = "power_"
 
 
-def list_controls(include_advanced: bool = True) -> list[ControlSpec]:
-    """Return the control specs, optionally hiding advanced ones."""
-    return [spec for spec in CONTROL_SPECS if include_advanced or not spec.advanced]
+_MISSING = object()
+
+
+def list_controls(
+    include_advanced: bool = True, include_restart_only: bool = False
+) -> list[ControlSpec]:
+    """Return the control specs, optionally hiding advanced/restart-only ones."""
+    return [
+        spec
+        for spec in CONTROL_SPECS
+        if (include_advanced or not spec.advanced)
+        and (include_restart_only or not spec.restart_only)
+    ]
 
 
 def get_control(key: str) -> ControlSpec | None:
     """Return a spec by key, or None."""
     return CONTROL_SPEC_BY_KEY.get(key)
+
+
+def _resolve_target(settings: Any, target: str | None) -> Any:
+    """Resolve a dotted ``Settings`` path (e.g. ``agents.personality``)."""
+    obj = settings
+    for part in (target or "").split("."):
+        if not part:
+            continue
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return None
+    return obj
+
+
+def _read_target(settings: Any, spec: ControlSpec) -> Any:
+    """Read a spec's current value from its target/path (``_MISSING`` if absent)."""
+    obj = _resolve_target(settings, spec.target)
+    if obj is None:
+        return _MISSING
+    field = spec.path or spec.key
+    if isinstance(obj, dict):
+        return obj.get(field, _MISSING)
+    return getattr(obj, field, _MISSING)
 
 
 def default_values() -> dict[str, Any]:
@@ -296,21 +463,28 @@ def values_from_god_config(god_config: Any) -> dict[str, Any]:
 
 
 def apply_values_to_god_config(values: dict[str, Any] | None) -> dict[str, Any]:
-    """Map validated control values into a ``GodConfig`` patch dict."""
+    """Map validated God control values into a ``GodConfig`` patch dict.
+
+    Only specs whose ``target`` is a God path are consumed (promoted
+    ``god.backgrounds`` etc. are applied by :func:`apply_values_to_settings`).
+    """
     validated = validate_values(values)
     patch: dict[str, Any] = {}
     powers_patch: dict[str, bool] = {}
     settings_patch: dict[str, Any] = {}
 
     for key, value in validated.items():
-        if key.startswith(_POWER_PREFIX):
-            powers_patch[key[len(_POWER_PREFIX):]] = bool(value)
-        elif key == "evolution_speed":
-            settings_patch["evolution_speed"] = value
-        elif key == "mood_tags":
-            settings_patch["mood_tags"] = value
+        spec = CONTROL_SPEC_BY_KEY.get(key)
+        target = spec.target if spec else None
+        if target not in _GOD_PATCH_TARGETS:
+            continue
+        field = spec.path or key
+        if target == "god.powers":
+            powers_patch[field] = bool(value)
+        elif target == "god.settings":
+            settings_patch[field] = value
         else:
-            patch[key] = value
+            patch[field] = value
 
     if powers_patch:
         patch["powers"] = powers_patch
@@ -320,22 +494,32 @@ def apply_values_to_god_config(values: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def values_from_settings(settings: Any) -> dict[str, Any]:
-    """Full control-value map: God dials plus the v0.3 agent-roster dials."""
+    """Full control-value map: God dials, agent-roster dials and §1.4 specs."""
     values = values_from_god_config(settings.god)
     agents = getattr(settings, "agents", None)
-    if agents is None:
-        return values
-    values["agent_seats"] = agents.seat_count
-    values["impulse_frequency"] = agents.initiative.impulse_frequency
-    values["player_sim_impulse_frequency"] = agents.initiative.player_sim_impulse_frequency
-    values["reactions_enabled"] = bool(agents.initiative.reactions_enabled)
-    values["reasoning_effort"] = (
-        getattr(agents.initiative, "reasoning_effort", None)
-        or getattr(settings.llm, "reasoning_effort", "none")
-    )
-    layers = getattr(agents, "layers", None)
-    for key, attr in _LAYER_KEYS.items():
-        values[key] = bool(getattr(layers, attr, True)) if layers is not None else True
+    if agents is not None:
+        values["agent_seats"] = agents.seat_count
+        values["impulse_frequency"] = agents.initiative.impulse_frequency
+        values["player_sim_impulse_frequency"] = (
+            agents.initiative.player_sim_impulse_frequency
+        )
+        values["reactions_enabled"] = bool(agents.initiative.reactions_enabled)
+        values["reasoning_effort"] = (
+            getattr(agents.initiative, "reasoning_effort", None)
+            or getattr(settings.llm, "reasoning_effort", "none")
+        )
+        layers = getattr(agents, "layers", None)
+        for key, attr in _LAYER_KEYS.items():
+            values[key] = (
+                bool(getattr(layers, attr, True)) if layers is not None else True
+            )
+    # Promoted §1.4 specs: read directly from their target/path.
+    for spec in CONTROL_SPECS:
+        if spec.target in _GOD_PATCH_TARGETS or spec.target in _AGENT_PATCH_TARGETS:
+            continue
+        current = _read_target(settings, spec)
+        if current is not _MISSING:
+            values[spec.key] = current
     return values
 
 
@@ -343,23 +527,29 @@ def apply_values_to_agents_config(values: dict[str, Any] | None) -> dict[str, An
     """Map validated agent-control values into an ``AgentsConfig`` patch dict.
 
     Returns ``{"agent_seats": int, "initiative": {...}, "layers": {...}}`` suitable
-    for a shallow merge by the caller. Only agent-control keys are consumed.
+    for a shallow merge by the caller. Only agent-roster keys are consumed.
     """
     validated = validate_values(values)
     patch: dict[str, Any] = {}
     initiative: dict[str, Any] = {}
     layers: dict[str, Any] = {}
     for key, value in validated.items():
-        if key == "agent_seats":
-            patch["agent_seats"] = int(value)
-        elif key in ("impulse_frequency", "player_sim_impulse_frequency"):
-            initiative[key] = float(value)
-        elif key == "reactions_enabled":
-            initiative["reactions_enabled"] = bool(value)
-        elif key == "reasoning_effort":
-            initiative["reasoning_effort"] = str(value)
-        elif key in _LAYER_KEYS:
-            layers[_LAYER_KEYS[key]] = bool(value)
+        spec = CONTROL_SPEC_BY_KEY.get(key)
+        target = spec.target if spec else None
+        if target not in _AGENT_PATCH_TARGETS:
+            continue
+        field = spec.path or key
+        if target == "agents":
+            patch[field] = int(value)
+        elif target == "agents.initiative":
+            if field in ("impulse_frequency", "player_sim_impulse_frequency"):
+                initiative[field] = float(value)
+            elif field == "reactions_enabled":
+                initiative[field] = bool(value)
+            elif field == "reasoning_effort":
+                initiative[field] = str(value)
+        elif target == "agents.layers":
+            layers[field] = bool(value)
     if initiative:
         patch["initiative"] = initiative
     if layers:
@@ -367,6 +557,89 @@ def apply_values_to_agents_config(values: dict[str, Any] | None) -> dict[str, An
     return patch
 
 
-def controls_payload(include_advanced: bool = True) -> list[dict[str, Any]]:
+def apply_agents_patch(agents: Any, patch: dict[str, Any]) -> None:
+    """Shallow-merge a validated agent-control patch into ``AgentsConfig``."""
+    if not patch:
+        return
+    if "agent_seats" in patch:
+        agents.agent_seats = int(patch["agent_seats"])
+    initiative = patch.get("initiative") or {}
+    for key, value in initiative.items():
+        if hasattr(agents.initiative, key):
+            setattr(agents.initiative, key, value)
+    layers = patch.get("layers") or {}
+    for key, value in layers.items():
+        if hasattr(agents.layers, key):
+            setattr(agents.layers, key, value)
+
+
+def apply_values_to_settings(
+    settings: Any, values: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Apply the promoted (target/path) control values to a live ``Settings``.
+
+    God and agent-roster keys are ignored here; use
+    :func:`apply_control_values_to_settings` for a full map. Returns the applied
+    values. Unknown/invalid keys raise ``ValueError``.
+    """
+    validated = validate_values(values)
+    applied: dict[str, Any] = {}
+    for key, value in validated.items():
+        spec = CONTROL_SPEC_BY_KEY[key]
+        if (
+            not spec.target
+            or spec.target in _GOD_PATCH_TARGETS
+            or spec.target in _AGENT_PATCH_TARGETS
+        ):
+            continue
+        obj = _resolve_target(settings, spec.target)
+        if obj is None:
+            continue
+        field = spec.path or key
+        if isinstance(obj, dict):
+            obj[field] = value
+        else:
+            setattr(obj, field, value)
+        applied[key] = value
+    return applied
+
+
+def apply_control_values_to_settings(
+    settings: Any, values: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Validate and apply a flat control-value map to a live ``Settings``.
+
+    Covers God dials/powers, agent-roster dials and the promoted §1.4 specs.
+    Returns the validated values that were applied. Unknown/invalid keys raise
+    ``ValueError``.
+    """
+    validated = validate_values(values)
+    if not validated:
+        return {}
+
+    god = getattr(settings, "god", None)
+    if god is not None:
+        for key, value in apply_values_to_god_config(validated).items():
+            if key == "powers":
+                god.powers.update(value)
+            elif key == "settings":
+                god.settings.update(value)
+            else:
+                setattr(god, key, value)
+
+    agents = getattr(settings, "agents", None)
+    if agents is not None:
+        apply_agents_patch(agents, apply_values_to_agents_config(validated))
+
+    apply_values_to_settings(settings, validated)
+    return validated
+
+
+def controls_payload(
+    include_advanced: bool = True, include_restart_only: bool = False
+) -> list[dict[str, Any]]:
     """JSON-serializable spec list for ``GET /v1/god/controls``."""
-    return [spec.model_dump() for spec in list_controls(include_advanced)]
+    return [
+        spec.model_dump()
+        for spec in list_controls(include_advanced, include_restart_only)
+    ]

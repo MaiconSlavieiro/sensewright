@@ -39,6 +39,44 @@ def _template_lines(lang: str) -> tuple[str, str]:
     return _TEMPLATE_LINES.get(lang) or _TEMPLATE_LINES["en"]
 
 
+# Human-readable language names, used to enforce the output language.
+_LANG_NAMES = {
+    "en": "English",
+    "pt-BR": "Brazilian Portuguese",
+}
+
+
+def _lang_name(lang: str) -> str:
+    return _LANG_NAMES.get(lang) or _LANG_NAMES["en"]
+
+
+def sim_brief(entry: dict[str, Any] | None, other_name: str = "") -> str:
+    """One-line context for a Sim: background, personality, memories, partner."""
+    entry = entry or {}
+    profile = entry.get("profile") or {}
+    parts: list[str] = []
+    background = profile.get("backstory") or profile.get("background")
+    if background:
+        parts.append(f"Background: {background}")
+    personality = profile.get("personality") or profile.get("speech_style")
+    if personality:
+        parts.append(f"Personality: {personality}")
+    memories = entry.get("memories") or []
+    snippets: list[str] = []
+    for memory in memories[:3]:
+        if isinstance(memory, dict):
+            text = memory.get("summary") or memory.get("text") or memory.get("event") or ""
+            if text:
+                snippets.append(str(text))
+        elif isinstance(memory, str) and memory:
+            snippets.append(memory)
+    if snippets:
+        parts.append("Recent memories: " + "; ".join(snippets))
+    if other_name:
+        parts.append(f"Talking with: {other_name}")
+    return " | ".join(parts)
+
+
 DEFAULT_MAX_PAIRS = 1
 DEFAULT_PAIR_COOLDOWN_SECONDS = 180.0
 DIALOGUE_MAX_LINES = 2
@@ -178,6 +216,8 @@ async def render_dialogue(
     a_id: int,
     b_id: int,
     max_tokens: int = 200,
+    extra_a: str = "",
+    extra_b: str = "",
 ) -> Dialogue:
     """Render a dialogue via LLM or template fallback."""
     if registry is None:
@@ -198,19 +238,27 @@ async def render_dialogue(
             if rel_level is not None:
                 rel_desc += f" (level {rel_level})"
 
+    lang_name = _lang_name(lang)
     system = (
-        f"You are writing a brief dialogue between two Sims in The Sims 4. "
-        f"Reply in {lang} with STRICT JSON only."
+        "You write short, natural, in-character dialogue between two Sims in "
+        f"The Sims 4. Write ALL spoken text in {lang_name} ({lang}). "
+        "Reply with STRICT JSON only, no markdown fences, no meta commentary."
     )
+    if lang != "en":
+        system += (
+            f" The dialogue must be entirely in {lang_name}; do NOT use English."
+        )
+
     user = (
-        f"Sim A: {name_a}. Personality: {personality_a or 'neutral'}.\n"
-        f"Sim B: {name_b}. Personality: {personality_b or 'neutral'}.\n"
+        f"Sim A: {name_a} (sim_id {a_id}). {extra_a or ('Personality: ' + (personality_a or 'neutral'))}\n"
+        f"Sim B: {name_b} (sim_id {b_id}). {extra_b or ('Personality: ' + (personality_b or 'neutral'))}\n"
         f"{rel_desc}\n\n"
-        f"Write a short, natural dialogue (1-2 lines) as JSON:\n"
+        f"Write a short, natural dialogue (1-2 lines) in {lang_name} as JSON:\n"
         f'{{"topic": "...", "lines": [{{"speaker": "a", "text": "...", "tone": "..."}}, '
         f'{{"speaker": "b", "text": "...", "tone": "..."}}]}}\n'
         f"Rules: max {DIALOGUE_MAX_LINES} lines, alternating speakers, "
         f"each line non-empty, tone is one word (friendly, flirty, tense, casual, warm). "
+        f"Every line must be written in {lang_name}. "
         f"No meta commentary. No markdown fences."
     )
 
@@ -358,34 +406,37 @@ class SocialLayer:
         """Pick disjoint pairs of non-player Sims, honoring pair_cooldown.
         Returns at most self.max_pairs pairs. Deterministic but shuffled with self._rng."""
         eligible = self.eligible(sims, seated_ids)
-        # Filter out player Sims (PLANO §15.8 R5: two agent-owned Sims)
-        non_player = [s for s in eligible if not s.get("is_player")]
-        if len(non_player) < 2:
+        if len(eligible) < 2:
             return []
 
-        # Sort for determinism, then shuffle with rng
-        non_player.sort(key=lambda s: int(s.get("sim_id", 0)))
-        if self._rng is not None:
-            try:
-                self._rng.shuffle(non_player)
-            except Exception:
-                pass
+        # v0.3 R5 fix: prefer household Sims (and household<->guest pairs) so the
+        # player's household is involved instead of two visiting passers-by.
+        household = [s for s in eligible if s.get("is_player")]
+        visitors = [s for s in eligible if not s.get("is_player")]
+        for group in (household, visitors):
+            group.sort(key=lambda s: int(s.get("sim_id", 0)))
+            if self._rng is not None:
+                try:
+                    self._rng.shuffle(group)
+                except Exception:
+                    pass
+        ordered = household + visitors
 
         now_ts = now if now is not None else self._clock()
         pairs: list[tuple[dict, dict]] = []
         used: set[int] = set()
 
-        for i in range(len(non_player)):
+        for i in range(len(ordered)):
             if len(pairs) >= self.max_pairs:
                 break
-            a = non_player[i]
+            a = ordered[i]
             a_id = int(a.get("sim_id", 0))
             if a_id in used:
                 continue
-            for j in range(i + 1, len(non_player)):
+            for j in range(i + 1, len(ordered)):
                 if len(pairs) >= self.max_pairs:
                     break
-                b = non_player[j]
+                b = ordered[j]
                 b_id = int(b.get("sim_id", 0))
                 if b_id in used:
                     continue
@@ -441,6 +492,11 @@ class SocialLayer:
         profile_a = ctx.get("a", {}).get("profile", {})
         profile_b = ctx.get("b", {}).get("profile", {})
 
+        name_a = str((profile_a or {}).get("name") or a.get("full_name") or f"Sim {a_id}")
+        name_b = str((profile_b or {}).get("name") or b.get("full_name") or f"Sim {b_id}")
+        extra_a = sim_brief(ctx.get("a"), name_b)
+        extra_b = sim_brief(ctx.get("b"), name_a)
+
         dialogue = await render_dialogue(
             profile_a,
             profile_b,
@@ -450,6 +506,8 @@ class SocialLayer:
             a_id,
             b_id,
             max_tokens=self.line_max_tokens,
+            extra_a=extra_a,
+            extra_b=extra_b,
         )
 
         # The pair time is recorded once, in ``pick_pairs`` (cooldown authority).

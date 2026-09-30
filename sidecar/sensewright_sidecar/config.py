@@ -325,6 +325,20 @@ def load_settings(config_path: str | os.PathLike[str] | None = None) -> Settings
 
     raw = expand_env(_load_toml(path))
     settings = Settings(**raw, home=home, config_path=path)
+
+    # Panel overlay (P1): data/panel.toml overrides config.toml for the
+    # ControlSpec values changed from the in-game panel. Lazy imports avoid a
+    # circular import (controls -> schemas -> ... on startup).
+    try:
+        from . import panel_store
+        from .god.controls import apply_control_values_to_settings
+
+        overrides = panel_store.load_overrides(settings.data_dir)
+        if overrides:
+            apply_control_values_to_settings(settings, overrides)
+    except Exception:
+        pass
+
     if not settings.lang or settings.lang == "en":
         # ``lang`` is the *resolved* language; the raw preference lives in ui.language.
         env_lang = os.environ.get("SENSEWRIGHT_LANG")

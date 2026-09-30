@@ -53,6 +53,15 @@ Write-Host "Copying mod package..." -ForegroundColor Cyan
 Copy-Item -Path $modDist -Destination $modsDest -Force
 Write-Host "  Copied: Sensewright.ts4script" -ForegroundColor Green
 
+# Copy the optional tuning .package (pie menu, etc.) when it was built.
+$packageDist = Join-Path $repoRoot "dist\Sensewright.package"
+if (Test-Path $packageDist) {
+    Copy-Item -Path $packageDist -Destination $modsDest -Force
+    Write-Host "  Copied: Sensewright.package" -ForegroundColor Green
+} else {
+    Write-Host "  (no Sensewright.package built - skipping)" -ForegroundColor DarkGray
+}
+
 # Copy sidecar source (excluding venvs, caches, tests, locks)
 Write-Host "Copying sidecar..." -ForegroundColor Cyan
 $sidecarFiles = Get-ChildItem -Path $sidecarSrc -Recurse -File | Where-Object {

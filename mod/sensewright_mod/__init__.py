@@ -36,6 +36,15 @@ except Exception:
     # No game/alarms available or collector unavailable - keep running
     pass
 
+# Detect real player interactions (pie menu/clicks) to arm the player-priority
+# lock. Best-effort; also retried from the command path (main._ensure_ready).
+try:
+    from . import player_activity
+    player_activity.install()
+except Exception:
+    # Game API unavailable at load - _ensure_ready() retries later
+    pass
+
 # Expose key functions for external access
 from .i18n import t, set_locale, current_locale, detect_game_language  # noqa: F401
 from .config import mod_root, sidecar_dir, runtime_path, read_ui_language, write_ui_language  # noqa: F401

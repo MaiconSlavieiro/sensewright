@@ -32,7 +32,7 @@ except Exception:
     sims4 = type("sims4", (), {"commands": _DummyCommands()})  # type: ignore
 
 
-from . import chat_ui, god_ui, hud, i18n
+from . import god_ui, hud, i18n, ui_probe
 from .config import (
     get_base_url,
     write_ui_language,
@@ -76,7 +76,7 @@ VALID_LANGUAGES = ("auto", "en", "pt-BR")
 
 # Bumped on each in-game behaviour change so the loaded build can be confirmed
 # from `sensewright_output.log` (the game only loads script mods at startup).
-_BUILD = "2026-09-29.2"
+_BUILD = "2026-09-29.22"
 
 
 def _join_args(first, rest) -> str:
@@ -157,6 +157,11 @@ def _ensure_ready() -> None:
     try:
         from . import state_collector
         state_collector.ensure_started()
+    except Exception:
+        pass
+    try:
+        from . import player_activity
+        player_activity.install()
     except Exception:
         pass
 
@@ -325,6 +330,35 @@ def _render_response(response, sim_info, _connection=None) -> None:
 
 # --- Command implementations ---
 
+
+def run_chat(text: str, sim_info=None, _connection=None) -> None:
+    """Send one chat turn for ``sim_info`` and render the reply.
+
+    Shared by the ``sw.chat`` command and the pie-menu "Chat…" entry. Best-effort:
+    never raises.
+    """
+    if not text:
+        _output(_connection, i18n.t("error.bad_request"))
+        return
+    try:
+        if sim_info is None:
+            sim_info = _get_sim_info()
+        if sim_info is None:
+            _output(_connection, i18n.t("error.bad_request"))
+            return
+
+        sim_dict = _build_sim_dict(sim_info)
+        context = collect(sim_info)
+        lang = _get_current_lang()
+        response = chat(sim_dict, text, context, lang=lang)
+        _render_response(response, sim_info, _connection)
+    except (SidecarUnreachable, SidecarError) as e:
+        _handle_sidecar_error(e, _connection)
+    except Exception as e:
+        _log_exception("run_chat", e)
+        _output(_connection, i18n.t("error.internal"))
+
+
 @sims4.commands.Command("sw.help", command_type=sims4.commands.CommandType.Live)
 def cmd_help(_connection=None) -> None:
     """Show help for all Sensewright commands."""
@@ -394,36 +428,7 @@ def cmd_chat(message=None, *args, _connection=None) -> None:
     _note_player_active()
     text = _join_args(message, args)
     _debug_log("sw.chat invoked build={} args={!r} -> {!r}".format(_BUILD, args, text))
-    if not text:
-        _output(_connection, i18n.t("error.bad_request"))
-        return
-
-    # Everything (including context collection) stays inside the try so a
-    # failure always surfaces instead of dying silently in the command system.
-    try:
-        sim_info = _get_sim_info()
-        if sim_info is None:
-            _output(_connection, i18n.t("error.bad_request"))
-            return
-
-        sim_dict = _build_sim_dict(sim_info)
-        context = collect(sim_info)
-        lang = _get_current_lang()
-        _debug_log("sw.chat lang={!r} save_id={!r} traits={} rels={}".format(
-            lang,
-            context.get("save_id", ""),
-            len(context.get("traits", []) or []),
-            len(context.get("relationships", []) or []),
-        ))
-
-        response = chat(sim_dict, text, context, lang=lang)
-        _render_response(response, sim_info, _connection)
-
-    except (SidecarUnreachable, SidecarError) as e:
-        _handle_sidecar_error(e, _connection)
-    except Exception as e:
-        _log_exception("sw.chat", e)
-        _output(_connection, i18n.t("error.internal"))
+    run_chat(text, None, _connection)
 
 
 @sims4.commands.Command("sw.hey", command_type=sims4.commands.CommandType.Live)
@@ -580,25 +585,36 @@ def cmd_hud(action: str = "", _connection=None) -> None:
 
 
 @sims4.commands.Command("sw.uitest", command_type=sims4.commands.CommandType.Live)
-def cmd_uitest(_connection=None) -> None:
-    """Diagnose the in-game notification path (why no UI appears)."""
+def cmd_uitest(kind: str = "", _connection=None) -> None:
+    """Native-dialog spike (P0): notification|okcancel|picker|response|input|multi|all|probe."""
     _note_player_active()
+    kind = (kind or "").strip().lower()
     try:
         sim_info = _get_sim_info()
     except Exception:
         sim_info = None
-    try:
-        diag = chat_ui.notification_diagnostics("Sensewright", i18n.t("cmd.uitest.body"), sim_info)
-    except Exception as e:
-        _log_exception("sw.uitest", e)
-        _output(_connection, i18n.t("error.internal"))
+
+    if kind in ("probe", "inspect"):
+        _output(_connection, i18n.t("cmd.uitest.probe", report=ui_probe.format_report()))
         return
-    _output(_connection, i18n.t(
-        "cmd.uitest.result",
-        ok=diag.get("ok"),
-        layer=diag.get("layer"),
-        error=diag.get("error") or "-",
-    ))
+    if kind == "clicked":
+        _output(_connection, i18n.t("cmd.uitest.clicked"))
+        return
+
+    if kind == "all":
+        results = ui_probe.run_all(sim_info)
+    elif not kind:
+        results = [ui_probe.run(ui_probe.DEFAULT_KIND, sim_info)]
+    elif kind in ui_probe.KINDS:
+        results = [ui_probe.run(kind, sim_info)]
+    else:
+        _output(_connection, i18n.t(
+            "cmd.uitest.unknown", kind=kind, kinds=", ".join(ui_probe.KINDS)))
+        return
+
+    for result in results:
+        if result is not None:
+            _output(_connection, ui_probe.format_result(result))
 
 
 @sims4.commands.Command("sw.god", command_type=sims4.commands.CommandType.Live)

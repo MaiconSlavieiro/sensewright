@@ -277,11 +277,46 @@ def _push_affordance(sim_instance, affordance, target=None, target_context=None)
     if queue_push_super is not None:
         _safe_call(queue_push_super, affordance, target, context)
         return True
+    # Fallback from dnavaria/sims4ai (MIT): queue.run_super(affordance, target=).
+    run_super = _safe_getattr(queue, "run_super", None)
+    if run_super is not None:
+        _safe_call(run_super, affordance, target=target)
+        return True
     push_interaction = _safe_getattr(queue, "push_interaction", None)
     if push_interaction is not None:
         _safe_call(push_interaction, affordance, target)
         return True
     return False
+
+
+def _cancel_running_interaction(queue):
+    """Cancel only the currently running interaction on ``queue``.
+
+    The ``full`` autonomy level overrides the Sim's *current* interaction, so
+    cancelling just ``queue.running`` is the faithful lever (cancelling the
+    whole queue drops queued intents too). Returns ``True`` on success; never
+    raises. Adapted from ``dnavaria/sims4ai`` (MIT), which validated the
+    ``cancel(finishing_type=None, cancel_reason_msg=...)`` signature.
+    """
+    running = _safe_getattr(queue, "running", None)
+    if running is None:
+        return False
+    cancel = _safe_getattr(running, "cancel", None)
+    if cancel is None:
+        return False
+    try:
+        cancel(finishing_type=None,
+               cancel_reason_msg="Sensewright agent cancelled the current interaction")
+        return True
+    except TypeError:
+        # Older patches: cancel() signature varies. Try without kwargs.
+        try:
+            cancel()
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
 
 
 # Backwards-compatible aliases (code review item H5): the shared guards in
@@ -733,15 +768,21 @@ def tool_cancel_current(args: Dict[str, Any]) -> Dict[str, Any]:
         if queue is None:
             return {"ok": False, "error": "not_implemented"}
 
+        # Prefer cancelling only the *running* interaction: that is the precise
+        # "override its own current interaction" lever the full autonomy level
+        # promises. Fall back to clearing the whole queue.
+        if _cancel_running_interaction(queue):
+            return {"ok": True, "result": {"cancelled": True, "scope": "running"}}
+
         cancel_all = _safe_getattr(queue, "cancel_all", None)
         if cancel_all is not None:
             _safe_call(cancel_all)
-            return {"ok": True, "result": {"cancelled": True}}
+            return {"ok": True, "result": {"cancelled": True, "scope": "queue"}}
 
         clear = _safe_getattr(queue, "clear", None)
         if clear is not None:
             _safe_call(clear)
-            return {"ok": True, "result": {"cancelled": True}}
+            return {"ok": True, "result": {"cancelled": True, "scope": "queue"}}
 
         return {"ok": False, "error": "not_implemented"}
     except Exception as e:
