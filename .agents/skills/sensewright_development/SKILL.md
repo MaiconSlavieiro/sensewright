@@ -109,6 +109,7 @@ sensewright_mod/
 ├── dialogs.py           # native text-input and confirmation dialogs
 ├── pie_menu.py          # S4CL interactions (tuning .package + registry; no XmlInjector)
 ├── panel_ui.py          # R7 config panel over GET /v1/god/controls (S4CL dialogs)
+├── stack_service.py     # Lot 51 custom service: owns the collector lifecycle
 └── integrations.py      # the stack seam: Lot 51 Core + S4CL lookups (guarded)
 
 mod/
@@ -300,7 +301,7 @@ sensewright_sidecar/
   `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
 - **Mod tests:** `mod/tests/` — run with `python -m pytest mod\tests -q`
   (uses the system Python, not 3.7, since tests don't need the game runtime)
-- **Current counts:** sidecar **461**, mod **375** (update when adding tests).
+- **Current counts:** sidecar **461**, mod **381** (update when adding tests).
 - **Every new feature should include tests.** Prefer unit tests; integration tests
   for wire/endpoint behavior.
 - **CHANGELOG** (`CHANGELOG.md`) must be updated for every meaningful change.
@@ -573,7 +574,7 @@ Checklists for the most common changes. Keep the two packages in lock-step.
 
 - [ ] Sidecar tests green: `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
       (currently **461**).
-- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **375**).
+- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **381**).
 - [ ] Lint clean (sidecar: ruff). Mod compiles with `py -3.7 mod\build.py`.
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` (Added/Changed/Fixed).
 - [ ] If tests were added, update the counts in §10 of this skill.

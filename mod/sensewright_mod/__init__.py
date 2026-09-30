@@ -52,6 +52,15 @@ except Exception:
     # No game/alarms available or collector unavailable - keep running
     pass
 
+# Register the Lot 51 custom service: it owns the collector lifecycle
+# (on_zone_load -> ensure_started, stop -> stop) on the stack base. No-op
+# without the library (offline tests / native-only installs).
+try:
+    from . import stack_service
+    stack_service.register()
+except Exception:
+    pass
+
 # Detect real player interactions (pie menu/clicks) to arm the player-priority
 # lock. Best-effort; also retried from the command path (main._ensure_ready).
 try:

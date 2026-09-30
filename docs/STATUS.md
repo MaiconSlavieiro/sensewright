@@ -1,6 +1,6 @@
 # Sensewright — Status & Handoff
 
-> Last updated: **2026-09-30**. In-game build: **`2026-09-29.24`**;
+> Last updated: **2026-09-30**. In-game build: **`2026-09-29.25`**;
 > **in-game layer migrated to the stack base (S4CL + Lot 51 Core)** on branch
 > **`migrate-s4cl-lot51`** (repo moved to `C:\workspace\sensewright`). Cheats are
 > **`sw.*`**, artifacts `Sensewright.ts4script` + `Sensewright.package` (tuning),
@@ -23,13 +23,13 @@
 | Repo root | `C:\workspace\sensewright` (git repo, branch **`migrate-s4cl-lot51`**; pre-migration on `main` / tag `pre-migracao`) |
 | In-game mod | `mod/sensewright_mod/` (Python 3.7; **stdlib + S4CL + Lot 51 Core**) |
 | Sidecar | `sidecar/sensewright_sidecar/` (Python 3.12 target; runs on 3.10.11 here) |
-| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.24"` |
+| Build stamp | `mod/sensewright_mod/main.py` → `_BUILD = "2026-09-29.25"` |
 | Installed artifact | `...\Mods\Sensewright\Sensewright.ts4script` + `Sensewright.package` (tuning; XmlInjector retired) |
 | Stack libs | `...\Mods\` root: `sims4communitylib*.ts4script` + `lot51_core*.ts4script` (required) |
 | Sidecar data | `...\Mods\Sensewright\sidecar\data\` (`memory.sqlite3`, `sidecar.log`, `audit.log`, `runtime.json`, `token`) |
 | Mod log | `...\Mods\Sensewright\sensewright_output.log` |
 | Game install | `C:\Program Files\EA Games\The Sims 4` |
-| Tests | sidecar **461**, mod **375**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
+| Tests | sidecar **461**, mod **381**; ruff clean (sidecar); `py -3.7 mod/build.py` clean |
 
 **Sidecar runs from source with the workspace venv** (no PyInstaller yet — Phase 6).
 The mod **autoboots** it (`install-mod.ps1` writes the venv interpreter to
@@ -150,7 +150,19 @@ native API map learned in P0 still applies to that fallback:
 
 ---
 
-## 4. What changed in `.24` / `.23` / `.22` / `.21` / `.20`
+## 4. What changed in `.25` / `.24` / `.23` / `.22` / `.21` / `.20`
+
+**`.25` (Lot 51 custom service, needs a live re-check):** the stack base owns the
+collector lifecycle:
+
+1. `stack_service.py` (new) registers a `sims4.service_manager.Service` subclass
+   with Lot 51 (`lot51_service_base` + `lot51_register_service`); `on_zone_load`
+   calls `state_collector.ensure_started()`, `stop` calls
+   `state_collector.stop()`. `__init__` registers it after the zone hook.
+2. **Fixed** the Lot 51 `CoreEvent` member mapping: `OBJECT_ADDED` /
+   `OBJECT_DESTROYED` (was `GAME_OBJECT_ADDED`/`GAME_OBJECT_DESTROYED`, which
+   never resolved) and `LOADING_SCREEN_LIFTED` for the late zone load.
+3. Tests: mod **375 -> 381**.
 
 **`.24` (Fase E, needs a live re-check):** the collectors read trait/buff/career/
 age/gender through S4CL utilities first, native fallback kept:
@@ -317,7 +329,7 @@ keys), so no live check needed beyond the rebuilt artifact loading.
 
 **Current TODO on the board — resume the stack migration.** The in-game layer is
 already based on **S4CL + Lot 51 Core** (branch `migrate-s4cl-lot51`), offline-green
-(366 mod tests, `py -3.7 mod/build.py` builds the `.ts4script` + `.package`). Next
+(381 mod tests, `py -3.7 mod/build.py` builds the `.ts4script` + `.package`). Next
 session, in order:
 
 1. **Validate the stack live** (`docs/stack_migration.md` checklist): install S4CL +
@@ -336,7 +348,10 @@ session, in order:
    `CommonAgeUtils`/`CommonGenderUtils`) with the validated native paths as
    fallback, keeping the primitive-coercion contract and **exact** tuning-id
    matching (SKILL §7). Needs a live re-check (trait/buff/career reads).
-4. **Optional**: move the remaining native alarms to a Lot 51 custom service and
-   drop the fallback once the tick path is proven stable.
+4. **Lot 51 custom service — done offline (build `.25`)**: `stack_service.py`
+   owns the collector lifecycle; the CoreEvent mapping was corrected
+   (`OBJECT_ADDED`/`OBJECT_DESTROYED`, `LOADING_SCREEN_LIFTED`). The native
+   alarms remain as a safety net until the tick path is proven live, then they can
+   be dropped.
 5. Then resume the previous board: God submenu (computer), agent submenu (Sim),
    custom pie category + own icons (DDS pipeline).

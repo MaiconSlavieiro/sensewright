@@ -404,6 +404,22 @@ def collect_probe(sim_info=None, *, include_modules: bool = True) -> Dict[str, A
             log_exception("probe.collect_probe.queue", exc)
     sections["queue"] = queue_desc
 
+    # Stack base introspection: which libraries resolved, the Lot 51 event bus
+    # state and whether the custom service registered (live-validation aid).
+    try:
+        from . import events as events_module
+        from . import integrations as integrations_module
+        from . import stack_service
+
+        sections["stack"] = {
+            "summary": integrations_module.stack_summary(),
+            "lot51": events_module.lot51_status(),
+            "service_registered": stack_service.registered(),
+        }
+    except Exception as exc:
+        log_exception("probe.collect_probe.stack", exc)
+        sections["stack"] = {}
+
     if include_modules:
         data["modules"] = _probe_modules()
     return data

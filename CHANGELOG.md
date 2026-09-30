@@ -69,6 +69,25 @@ library access is isolated in `mod/sensewright_mod/integrations.py`.
 - Next session: install S4CL + Lot 51 Core at the Mods root, run the
   `docs/stack_migration.md` checklist. See `docs/STATUS.md` §5/§8.
 
+### Added - Lot 51 custom service owns the collector lifecycle (build `2026-09-29.25`)
+The stack base now owns the in-game startup lifecycle through a **Lot 51 custom
+service** (registered at load, driven by the game's service manager) instead of
+relying on the command paths or the native hook alone.
+
+- **`mod/sensewright_mod/stack_service.py`** (new): `register()` builds a
+  `sims4.service_manager.Service` subclass (guarded, only when Lot 51/the game is
+  present) and registers it via `integrations.lot51_register_service`. Its
+  `on_zone_load` calls `state_collector.ensure_started()`; its `stop` calls
+  `state_collector.stop()`. Idempotent, never raises, no-op offline.
+- **`__init__.py`**: registers the service after the collector/zone hook.
+- **`events.py`**: corrected the Lot 51 `CoreEvent` member mapping against the
+  cloned sources - `OBJECT_ADDED` / `OBJECT_DESTROYED` (the previous
+  `GAME_OBJECT_ADDED` / `GAME_OBJECT_DESTROYED` never resolved, so object events
+  were silently dropped) and `LOADING_SCREEN_LIFTED` for the late zone load.
+- Tests: mod **375 -> 381** (`test_stack_service.py`: offline no-op, lifecycle
+  wiring, idempotency, the verified CoreEvent names, tick error containment; plus
+  a `sw.probe` `sections.stack` check).
+
 ### Changed - Fase E: the collectors read through S4CL utilities (build `2026-09-29.24`)
 The in-game collectors now prefer the S4CL utility classes over raw game objects,
 finishing the stack migration for trait/buff/career/age/gender reads. Each S4CL

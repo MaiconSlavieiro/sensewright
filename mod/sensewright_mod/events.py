@@ -499,19 +499,21 @@ Alarms (recurring):
 
 _LOT51_STATE = {"installed": False, "tick": False, "registered": []}
 
-# our concept -> candidate CoreEvent member names.
+# our concept -> candidate CoreEvent member names. The first candidate is the
+# verified member name (against the cloned sources); the extras tolerate older
+# releases.
 _LOT51_EVENT_MEMBERS = {
     "zone_load": ("ZONE_LOAD", "ZONELOAD"),
     "zone_unload": ("ZONE_UNLOAD", "ZONEUNLOAD"),
-    "zone_late_load": ("ZONE_LATE_LOAD",),
+    "zone_late_load": ("LOADING_SCREEN_LIFTED", "ZONE_LATE_LOAD"),
     "save": ("GAME_SAVE", "GAMESAVE"),
     "pre_save": ("GAME_PRE_SAVE", "GAMEPRESAVE"),
     "game_setup": ("GAME_SETUP", "GAMESETUP"),
     "build_buy_enter": ("BUILD_BUY_ENTER", "BUILD_BUY_MODE_ENTER"),
     "build_buy_exit": ("BUILD_BUY_EXIT", "BUILD_BUY_MODE_EXIT"),
     "tick": ("GAME_TICK", "GAME_UPDATE"),
-    "object_added": ("GAME_OBJECT_ADDED",),
-    "object_destroyed": ("GAME_OBJECT_DESTROYED",),
+    "object_added": ("OBJECT_ADDED", "GAME_OBJECT_ADDED"),
+    "object_destroyed": ("OBJECT_DESTROYED", "GAME_OBJECT_DESTROYED"),
 }
 
 

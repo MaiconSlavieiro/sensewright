@@ -63,6 +63,19 @@ def test_collect_probe_without_sim_is_available_false():
     assert data["sim"]["available"] is False
 
 
+def test_collect_probe_includes_stack_section():
+    class FakeSim(object):
+        id = 1
+        full_name = "Test Sim"
+
+    data = probe.collect_probe(FakeSim(), include_modules=False)
+
+    stack = data["sections"]["stack"]
+    assert "summary" in stack
+    assert "lot51" in stack
+    assert stack["service_registered"] is False
+
+
 def test_dump_probe_writes_lines(monkeypatch):
     lines = []
     monkeypatch.setattr(probe, "debug_log", lambda message: lines.append(message))

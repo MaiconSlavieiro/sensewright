@@ -21,6 +21,8 @@ at the Mods **root** (top level or one folder deep).
 | Notifications | native `UiDialogNotification` | **S4CL `CommonBasicNotification`** first, native path as fallback (`chat_ui.show_notification`) |
 | Confirmation | native ok/cancel | **S4CL ok/cancel** first, native path as fallback (`dialogs.confirm`) |
 | Config panel (R7/P2) | `sw.uitest` spike | real `panel_ui.open_panel` over `GET /v1/god/controls`; `sw.panel` cheat + pie-menu entry |
+| Collector lifecycle | command paths + `Zone.update` start | **Lot 51 custom service** (`stack_service.py`: `on_zone_load` → `ensure_started`, `stop` → `stop`), native hook as fallback |
+| Collector reads (Fase E) | raw game objects | **S4CL utilities first** (`CommonTraitUtils`/`CommonBuffUtils`/`CommonSimCareerUtils`/`CommonAgeUtils`/`CommonGenderUtils`), native paths as fallback |
 | Retired | XmlInjector, `ui_probe.py`, `sw.uitest` | removed (the tuning `.package` is retained) |
 
 All library lookups live in **`mod/sensewright_mod/integrations.py`** — the single
@@ -82,6 +84,9 @@ registers:
 6. Pie-menu display names follow the packaged STBL and, when `get_name` resolves,
    switch with `sw.lang` (en ⇄ pt-BR).
 7. `sw.panel` opens the panel; sections come from `GET /v1/god/controls`.
+8. The Lot 51 **custom service** registers (`stack_service.registered()`); the
+   collector starts on zone load through it, and object events resolve
+   (`OBJECT_ADDED`/`OBJECT_DESTROYED`, corrected against the sources).
 
 ## Rollback
 
