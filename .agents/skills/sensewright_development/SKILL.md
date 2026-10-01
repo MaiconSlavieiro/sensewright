@@ -6,18 +6,58 @@ description: Architecture, constraints, patterns, and gotchas for agents working
 # Sensewright Development Guidelines
 
 When modifying or extending the Sensewright project, adhere to the following rules,
-patterns, and architecture constraints. **Read `PLANO.md` for the full design**;
-this skill covers the day-to-day coding rules.
+patterns, and architecture constraints. This skill is the day-to-day coding rules;
+the design, validation and history live in the **single documentation HTML**
+(`DOC` — see **§0**).
 
 > **Project renamed.** What was once called *SimsSense* is now **Sensewright**:
 > cheats are **`sw.*`**, the artifact is `Sensewright.ts4script`, and the install
 > folder is `Mods\Sensewright\`. Old `ss.*`/SimsSense names are gone — do not
 > reintroduce them.
 
-> **Starting a new session?** Read, in order: **`docs/STATUS.md`** (current build,
-> what's validated live, pending checks, known issues) → **`docs/stack_migration.md`**
-> (S4CL + Lot 51 base, the seam and the live checklist) → **`docs/ts4_internals.md`**
-> (confirmed game APIs) → **`docs/ui_panel.md`** (panel plan) → `PLANO.md`.
+> **Starting a new session?** Open `docs/feature-review.html` and read the tabs, in
+> order: **Início** (status, quick start, build/tests) → **Arquitetura** (two
+> processes, module map, wire, stack base) → **Desenvolvimento** (this skill's
+> conventions) → **Validação** (how to prove each feature in-game) → **Referência**
+> (config, cheats, endpoints) → **Internals TS4** (confirmed game APIs) → **Roadmap**
+> (phases, v0.2/v0.3) → **Changelog** → **Review** (interactive per-feature).
+
+---
+
+## 0. The documentation (`DOC`)
+
+**`DOC` = `docs/feature-review.html`** — the **single source of truth** for
+Sensewright. The standalone `.md` docs were removed: everything lives in this one
+self-contained HTML, openable in any browser. Each topic appears in **exactly one
+tab**, without duplication.
+
+| Tab (`#id`) | Contents | Edit when… |
+|---|---|---|
+| `#inicio` **Início** | what it is, status, quick start, doc map | build/branch/test counts or status change |
+| `#arquitetura` **Arquitetura** | two processes, boot, **module map**, wire protocol, stack base | you add a module, route or the architecture changes |
+| `#desenvolvimento` **Desenvolvimento** | conventions, recipes, gotchas (mirrors this skill) | a convention/recipe/gotcha changes |
+| `#validacao` **Validação** | logs/DB, live checklist, per-area validation, pending list | you validate something live |
+| `#referencia` **Referência** | install, cheats, config/ControlSpec, autonomy, locales, providers | you add a cheat, setting, endpoint or locale |
+| `#internals` **Internals TS4** | confirmed game APIs | you confirm a new engine API |
+| `#roadmap` **Roadmap** | phases, v0.2 §14, v0.3 §15, follow-ups, risks | a feature/phase adds scope |
+| `#changelog` **Changelog** | history per build | every meaningful change |
+| `#review` **Review** | interactive per-feature checklist + JSON export | never (it is a live UI) |
+
+**How to edit.** The markdown is embedded near the end of the file in
+`<script type="text/markdown" id="md-<tab>">…</script>` blocks; the tabbed UI renders
+them with the inlined `marked`. **Edit the markdown inside those blocks** (use the
+editor tools) — the tab re-renders on reload. Do **not** touch the shell (CSS, tab
+bar, `marked`) and do not add/remove `<script>` blocks unless you are adding a tab
+(below). To add a tab you must add three
+pieces — a `.tab` button (in the `<nav class="tabs">`), a `<section class="view"
+id="view-<id>">` with a `<div class="doc" id="doc-<id>">`, and an `md-<id>` markdown
+block — and list it in this table and in the Início tab. Cross-link tabs with
+`[texto](#id)`. The `#review` tab is live JS + `localStorage` and exports
+`docs/feature-review.json` (schema `sensewright.feature-review/v2`).
+
+**Never** rewrite the HTML (or any `.json`) with PowerShell `Set-Content -Encoding
+UTF8` — the BOM + mis-decoding double-encodes `—`/`§` (SKILL §12.12). Use the
+editor/Write tools and a **UTF-8 no-BOM** write.
 
 ---
 
@@ -108,6 +148,7 @@ sensewright_mod/
 ├── probe.py             # sw.probe: live autonomy dump (dev, R1/F1)
 ├── dialogs.py           # native text-input and confirmation dialogs
 ├── pie_menu.py          # S4CL interactions (tuning .package + registry; no XmlInjector)
+├── sim_actions.py       # per-Sim pie actions: view/regen background, consolidate
 ├── panel_ui.py          # R7 config panel over GET /v1/god/controls (S4CL dialogs)
 ├── stack_service.py     # Lot 51 custom service: owns the collector lifecycle
 └── integrations.py      # the stack seam: Lot 51 Core + S4CL lookups (guarded)
@@ -134,14 +175,15 @@ sensewright_sidecar/
 ├── panel_store.py       # data/panel.toml overlay for panel ControlSpec values (P1)
 ├── routers/             # FastAPI route modules
 │   ├── admin.py         # /v1/config/*, /v1/reset
-│   ├── autonomy.py      # /v1/autonomy/tick, /v1/autonomy/directives
+│   ├── autonomy.py      # /v1/autonomy/tick, /v1/autonomy/intents (+alias), /v1/agency/seats
 │   ├── chat.py          # /v1/chat, /v1/hey
 │   ├── deps.py          # shared FastAPI dependencies (auth, settings)
 │   ├── events.py        # /v1/events
 │   ├── god.py           # /v1/god/*, /v1/census
 │   ├── health.py        # /v1/health, /v1/status
 │   ├── lifecycle.py     # /v1/lifecycle/attach
-│   └── profiles.py      # /v1/profile
+│   ├── memory.py        # /v1/memory/consolidate (manual fold from the pie menu)
+│   └── profiles.py      # /v1/profile, /v1/evolve
 ├── agent/               # Core agent logic
 │   ├── graph.py         # State machine: the central orchestrator
 │   ├── nodes.py         # Graph node implementations
@@ -258,7 +300,7 @@ sensewright_sidecar/
       └── BackgroundsConfig [god.backgrounds]
   ```
 - When adding a new config field: add it to the Pydantic model, document it in
-  `config.example.toml`, and update `PLANO.md` Appendix A if significant.
+  `config.example.toml`, and update `DOC` → Roadmap Appendix A if significant.
 - **ControlSpec** (`god/controls.py`) is the single source of truth for God dials.
   Adding a control = one `ControlSpec` entry + i18n keys. No router/UI rewrite.
 
@@ -301,10 +343,10 @@ sensewright_sidecar/
   `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
 - **Mod tests:** `mod/tests/` — run with `python -m pytest mod\tests -q`
   (uses the system Python, not 3.7, since tests don't need the game runtime)
-- **Current counts:** sidecar **463**, mod **384** (update when adding tests).
+- **Current counts:** sidecar **546**, mod **412** (update when adding tests).
 - **Every new feature should include tests.** Prefer unit tests; integration tests
   for wire/endpoint behavior.
-- **CHANGELOG** (`CHANGELOG.md`) must be updated for every meaningful change.
+- **CHANGELOG** (`DOC` → Changelog) must be updated for every meaningful change.
   Follow the format: section header (`### Added` / `### Changed` / `### Fixed`),
   bullet points with enough detail for a developer to understand what changed.
 
@@ -394,7 +436,7 @@ These bugs were found during in-game validation and are critical to avoid:
    **Lot 51 `GAME_TICK`** (`state_collector.install_zone_hook` →
    `events.register_lot51_tick`), with the native `zone.Zone.update` wrapper as
    fallback; start the collector only once the active Sim is instanced. See
-   `docs/ts4_internals.md`.
+   `DOC` → Internals TS4.
 
 10. **Tuning XML must be zlib compressed in the `.package`.** TS4 stores tuning as
     zlib-compressed XML, not raw XML. Uncompressed resources with the "uncompressed" flag
@@ -429,7 +471,7 @@ These bugs were found during in-game validation and are critical to avoid:
     `CommonScriptObjectInteractionHandler`s (`CommonInteractionType.ON_SCRIPT_OBJECT_LOAD`)
     for Sims and for `Func_Computer` objects. **Live-validation risk:** the S4CL
     registry path/name and the packaged-STBL display names (`sw.lang`) must be
-    confirmed in-game — see `docs/stack_migration.md`.
+    confirmed in-game — see `DOC` → Arquitetura.
 
 16. **Never hardcode locales.** Do not write `("en","pt-BR")`, `_LANG_NAMES`,
     `if lang == "pt-BR"`, or inline Portuguese/English content strings in code.
@@ -441,6 +483,28 @@ These bugs were found during in-game validation and are critical to avoid:
     `import lot51_core` / `import sims4communitylib` elsewhere. The helpers are
     guarded and return `None`/`False` when a library is missing (the offline test
     host has neither), so features degrade instead of crashing.
+
+18. **An agent's thought is internal — never spoken.** Dialogue LLM calls return
+    exactly one `[thought]…[/thought]` block (recorded as a private `thought` event,
+    used only for the agent's memory/personality/background) plus a **short spoken
+    reply**. Only the spoken part reaches a dialogue surface (player chat **and**
+    sim↔sim). Split with `agent/prompts.split_thought` / `strip_thought`; never surface
+    `response.text` raw (it may contain the thought). Keep the reply short and free of
+    stage directions/asterisks. See `nodes.persist_node` / `format_response_node` and
+    `social.clean_line`.
+
+19. **State the LLM output format explicitly.** Every prompt that is parsed in code
+    (chat thought/speech, `social` JSON, profiler, consolidation, cognition) must spell
+    out the **exact** expected shape ("output nothing else"), and the parser must be
+    robust to missing/extra/malformed fields with a deterministic fallback — never a
+    crash and never a leaked private thought.
+
+20. **Census relationships are persisted.** `sim_context._get_relationships` collects
+    track/type + friendship/romance + the target's known traits; the sidecar stores
+    each edge via `MemoryStore.upsert_relationship` (from `graph.ingest_census`). If you
+    touch the relationship shape, update `state_collector._relationships_of` **and** the
+    sidecar ingestion together (the wire key is `target_id` + optional
+    `track`/`friendship`/`romance`/`known_traits`).
 
 ---
 
@@ -487,12 +551,12 @@ powershell -ExecutionPolicy Bypass -File scripts\install-mod.ps1   # copies both
 
 **Game internals:** decompile the shipped scripts with
 `scripts/decompile-scripts.ps1` into the gitignored `research/ts4/`; the
-confirmed APIs live in **`docs/ts4_internals.md`**. Read those before wiring a
+confirmed APIs live in **`DOC` → Internals TS4**. Read those before wiring a
 new game API.
 
 ---
 
-## 14. v0.3 Direction (Inhabited Agents) — R2–R6 done, R7 in progress
+## 14. v0.3 Direction (Inhabited Agents) — R2–R7 implemented (live validation pending)
 
 > **Live-validated:** R2 (agent seats/eviction), R3 (intents), R4 (cognition/daily
 > plan), R5 (sim↔sim channel — `[validate] social: 1 dialogue pair(s)`), R6 (God
@@ -531,7 +595,7 @@ the Sim) to **inhabitation + nudge** (biasing native autonomy):
 Implementation phases: R1 (lever spike) → R2 (seats) → R3 (intents) → R4
 (cognition) → R5 (sim↔sim) → R6 (God director) → R7 (panel).
 
-See `PLANO.md` §15 for the full design.
+See `DOC` → Roadmap §15 for the full design.
 
 ---
 
@@ -552,7 +616,7 @@ Checklists for the most common changes. Keep the two packages in lock-step.
 5. **i18n:** if it surfaces text, add `notify.*`/`error.*` keys to **both**
    locales.
 6. **Tests:** sidecar (schema/registry) + mod (`tool_executor`) tests.
-7. **Docs:** `CHANGELOG.md`; update `PLANO.md` if the wire contract changed.
+7. **Docs:** `DOC` → Changelog; update `DOC` → Roadmap if the wire contract changed.
 
 ### 15.2 Add a config field
 
@@ -560,7 +624,7 @@ Checklists for the most common changes. Keep the two packages in lock-step.
 2. Document it in `config.example.toml`.
 3. If a player/God dial: add a `ControlSpec` in `god/controls.py` (`target`/`path`,
    `restart_only`) + `god.control.*` i18n keys.
-4. Update `PLANO.md` Appendix A if significant. Add tests + `CHANGELOG.md`.
+4. Update `DOC` → Roadmap Appendix A if significant. Add tests + `DOC` → Changelog.
 
 ### 15.3 Add i18n keys
 
@@ -573,11 +637,52 @@ Checklists for the most common changes. Keep the two packages in lock-step.
 ### 15.4 Definition of done
 
 - [ ] Sidecar tests green: `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
-      (currently **463**).
-- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **384**).
+      (currently **546**).
+- [ ] Mod tests green: `python -m pytest mod\tests -q` (currently **412**).
 - [ ] Lint clean (sidecar: ruff). Mod compiles with `py -3.7 mod\build.py`.
-- [ ] `CHANGELOG.md` updated under `[Unreleased]` (Added/Changed/Fixed).
+- [ ] `DOC` → Changelog updated under `[Unreleased]` (Added/Changed/Fixed).
 - [ ] If tests were added, update the counts in §10 of this skill.
+- [ ] If the change adds **scope** (a new endpoint/cheat/module/config/behavior not
+      yet in `DOC` → Roadmap), update `DOC` → Roadmap too — see **§16 Evolving the Plan**.
 - [ ] For any mod/game change: build **both** artifacts, run `scripts/install-mod.ps1`,
       **restart the game** (script mods load only at boot), validate live, then
-      update `docs/STATUS.md` (§4/§5) and the current TODO.
+      update `DOC` → Início (§4/§5) and the current TODO.
+
+---
+
+## 16. Evolving the Documentation (`DOC`)
+
+**`DOC` is a living artifact.** The moment a change adds scope, update `DOC` in the
+same change — never let an implemented feature live only in the code and the
+Changelog. Each topic has **one home** (see §0); do not duplicate.
+
+| The change is a… | Update in `DOC` |
+|---|---|
+| New HTTP endpoint / route | → **Arquitetura** (wire-protocol table); → **Referência** if player-facing. |
+| New cheat / player command | → **Referência** (cheats table). |
+| New module (sidecar or mod) | → **Arquitetura** (module map). |
+| New config field / block | `config.example.toml` (source of truth) **and** → **Referência** (settings); add a `ControlSpec` if it is a dial. |
+| New player-facing surface (panel/menu/action) | → **Referência** (cheats/panel) and → **Roadmap** if it is new scope. |
+| New behavior/scope of a feature | → **Roadmap** (design) and → **Validação** (how to prove it). |
+| New/validated engine API | → **Internals TS4**. |
+| New milestone / phase | → **Roadmap** (+ the status header in → **Início**). |
+| A live validation result | → **Validação** (+ the feature's row in → **Review**). |
+
+**Rules**
+
+1. **Plan first, or plan-with-the-code — never "later".** Fold any sketch into `DOC`
+   before closing the task.
+2. **No duplication.** Keep a fact in one tab and cross-link with `[texto](#id)`.
+3. **`config.example.toml` wins over the Referência summary.** Keep them consistent.
+4. **Keep status honest.** Mark items pending (not done) until validated in-game; the
+   single status lives in `DOC` → **Início**, per-feature state in `DOC` → **Review**.
+5. **Changelog is mandatory and separate.** Every meaningful change gets a
+   `DOC` → Changelog entry under `[Unreleased]` (`### Added` / `### Changed` / `### Fixed`).
+6. **Encoding.** Edit the embedded markdown with the editor tools; never
+   `Set-Content -Encoding UTF8` (§12.12).
+
+> **Precedent:** all standalone docs were consolidated into this single HTML and then
+> reorganized into de-duplicated Diátaxis tabs; the `PLANO.md`, `CHANGELOG.md`,
+> `docs/STATUS.md`, `docs/validation.md`, `docs/stack_migration.md`,
+> `docs/ts4_internals.md`, `docs/ui_panel.md` and `docs/code_review_2026-09-27.md`
+> files were removed and their content folded into the tabs above.
