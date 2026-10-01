@@ -19,8 +19,11 @@ from sensewright_sidecar.config import (
 from sensewright_sidecar.god.budgeter import BackgroundBudgeter
 from sensewright_sidecar.god.scheduler import (
     PRIORITY_HOUSEHOLD_ACTIVE,
+    PRIORITY_HOUSEHOLD_PLAYER,
+    PRIORITY_PLAYER,
     PRIORITY_RELATED,
     PRIORITY_SIM_ACTIVE,
+    PRIORITY_SIM_PLAYER,
     BackgroundJob,
     BackgroundScheduler,
 )
@@ -297,3 +300,131 @@ async def test_zeitgeist_change_requeues_backgrounds(bg_settings):
     await graph.set_zeitgeist(SIM, ["romance"], "", 0.9, "en")
 
     assert graph.status()["backgrounds"]["queued"] > 0
+
+
+async def test_census_prioritizes_player_household(bg_settings):
+    """The active household's jobs outrank other zone households/Sims."""
+    req = CensusRequest(
+        sim=SIM,  # household_id=5 is the player's household
+        scope="active_zone",
+        sims=[
+            CensusSim(sim_id=10, full_name="Ana", household_id=5, is_player=True),
+            CensusSim(sim_id=20, full_name="Visitor", household_id=6),
+        ],
+        households=[
+            CensusHousehold(household_id=5, name="Silva", members=[10]),
+            CensusHousehold(household_id=6, name="Guest", members=[20]),
+        ],
+    )
+    await graph.ingest_census(req)
+
+    by_key = {job.key: job for job in graph._scheduler._queued.values()}
+    assert by_key["local:save1:household:5"].priority == PRIORITY_HOUSEHOLD_PLAYER
+    assert by_key["local:save1:sim:10"].priority == PRIORITY_SIM_PLAYER
+    assert by_key["local:save1:household:6"].priority == PRIORITY_HOUSEHOLD_ACTIVE
+    assert by_key["local:save1:sim:20"].priority == PRIORITY_SIM_ACTIVE
+    # Player jobs sort ahead of the rest.
+    order = sorted(job.priority for job in graph._scheduler._queued.values())
+    assert order[0] == PRIORITY_HOUSEHOLD_PLAYER
+
+
+async def test_player_background_enqueues_at_top_priority(bg_settings):
+    """A pie-menu (queue) background request goes to the top of the queue."""
+    result = await graph.enqueue_background(
+        BackgroundRequest(sim=SIM, scope="sim", force=True, lang="en")
+    )
+    assert result["ok"] is True
+    assert result["queued"] is True
+
+    job = next(
+        job for job in graph._scheduler._queued.values()
+        if job.scope == "sim" and job.sim_id == 10
+    )
+    assert job.priority == PRIORITY_PLAYER
+    assert job.source == "player"
+
+
+async def test_player_background_returns_cache_hit_inline(bg_settings):
+    """A non-forced request with a cached background answers inline (no queue)."""
+    await graph.ingest_census(_census_request())
+    await graph.process_backgrounds_once()
+
+    result = await graph.enqueue_background(
+        BackgroundRequest(sim=SIM, scope="sim", lang="en")
+    )
+    assert result["ok"] is True
+    assert result["cached"] is True
+    assert result["queued"] is False
+    assert result["background"]
+
+
+async def test_player_consolidate_enqueues_at_top_priority(bg_settings):
+    result = await graph.enqueue_consolidate(SIM, "en")
+    assert result["ok"] is True
+    assert result["queued"] is True
+    assert result["message_key"] == "notify.consolidate.queued"
+
+    job = next(
+        job for job in graph._scheduler._queued.values() if job.kind == "consolidate"
+    )
+    assert job.priority == PRIORITY_PLAYER
+    assert job.source == "player"
+
+
+def test_enrich_sim_entry_resolves_relationship_names_and_kinship():
+    """Census relationships carry only ids; names/labels must be resolved."""
+    census = {
+        "sims": [
+            {
+                "sim_id": 10,
+                "full_name": "Ana",
+                "relationships": [{"target_id": 11, "depth": 30.0}],
+                "kinship": [{"relation": "sister", "target_id": 11, "name": "Bea"}],
+            },
+            {"sim_id": 11, "full_name": "Bea"},
+        ],
+        "households": [],
+    }
+    entry = graph._enrich_sim_entry(census, census["sims"][0])
+    rel = entry["relationships"][0]
+    assert rel["target_name"] == "Bea"
+    assert rel["relation"] == "sister"
+
+
+async def test_inline_background_uses_census_native_data(bg_settings):
+    """An inline background with no ``req.census`` still gets native facts.
+
+    The generator must fall back to the last census (names resolved, kinship and
+    aspiration included) instead of the bare stored profile, otherwise a Sim with
+    a family is described as lonely and their traits/aspiration are ignored.
+    """
+    req = CensusRequest(
+        sim=SIM,
+        scope="active_zone",
+        sims=[
+            CensusSim(
+                sim_id=10,
+                full_name="Ana",
+                household_id=5,
+                aspiration="Soulmate",
+                traits=["trait_FamilyOriented", "trait_GenderFemale"],
+                is_player=True,
+                relationships=[{"target_id": 11, "depth": 40.0}],
+                kinship=[{"relation": "mother", "target_id": 11, "name": "Bea"}],
+            ),
+            CensusSim(sim_id=11, full_name="Bea", household_id=5),
+        ],
+        households=[CensusHousehold(household_id=5, name="Silva", members=[10, 11])],
+    )
+    await graph.ingest_census(req)
+
+    result = await graph.generate_background(
+        BackgroundRequest(sim=SIM, scope="sim", force=True, lang="en")
+    )
+
+    text = result["background"]["text"]
+    assert result["ok"] is True
+    assert "Bea" in text
+    assert "Soulmate" in text
+    assert "Family Oriented" in text
+    assert "GenderFemale" not in text

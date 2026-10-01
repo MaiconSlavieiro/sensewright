@@ -63,6 +63,10 @@ class UiConfig(BaseModel):
     """Player-facing language. ``auto`` follows the game, falling back to en."""
 
     language: str = "auto"
+    # Serve the built-in browser panel at ``/`` (see ``sensewright_sidecar.webui``).
+    # It runs in any browser *alongside* the game. Turn it off to hide it, e.g.
+    # when ``network.host`` is not loopback.
+    web_panel: bool = True
 
 
 class NetworkConfig(BaseModel):
@@ -146,7 +150,9 @@ class InitiativeConfig(BaseModel):
     # ── v0.3 §15.6: impulse/thought frequency dial (0 = sleep-only) ──
     # The agent-roster panel adjusts these live; per-Sim overrides win.
     impulse_frequency: float = 0.2
-    player_sim_impulse_frequency: float = 0.0
+    # The player's own household Sims are inhabited too (a nonzero default);
+    # the player-priority lock in the mod still keeps the player in control.
+    player_sim_impulse_frequency: float = 0.2
     # Salient event reactions stay on independently of the impulse dial.
     reactions_enabled: bool = True
     # ── reasoning dial (per agent) ──
@@ -171,6 +177,13 @@ class SocialConfig(BaseModel):
     # a given pair is left alone before it can talk again (seconds).
     max_pairs_per_tick: int = 1
     pair_cooldown_seconds: float = 180.0
+    # A dialogue now requires the two Sims to be in a *real* native conversation
+    # (mutually targeting each other) and physically close, so agents never
+    # "talk" telepathically across the lot. ``max_pair_distance`` is the maximum
+    # lot-space distance (from the pulse ``location`` "x,y"); when a location is
+    # missing the proximity check is skipped (the conversation gate still holds).
+    require_conversation: bool = True
+    max_pair_distance: float = 4.0
     # Output budget for the model-written exchange (two short lines).
     line_max_tokens: int = 200
 

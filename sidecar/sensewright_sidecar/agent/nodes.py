@@ -10,7 +10,7 @@ from ..memory import MemKey, MemoryStore
 from ..schemas import ChatRequest, ChatResponse, HeyRequest, ToolCall, ToolResultRequest
 from ..tools.rails import DirectiveRails
 from ..tools.registry import get_tool_schemas
-from .prompts import build_hey_prompt, build_system_prompt
+from .prompts import build_hey_prompt, build_system_prompt, split_thought, strip_thought
 from .state import AgentState, Turn
 
 logger = logging.getLogger(__name__)
@@ -26,12 +26,21 @@ class AgentNodes:
         default_autonomy: str = "semi",
         default_lang: str = "en",
         rails: DirectiveRails | None = None,
+        dejavu_chance: float = 0.05,
+        memory_enabled: bool = True,
     ):
         self.registry = registry
         self.memory = memory
         self.default_autonomy = default_autonomy
         self.default_lang = default_lang
         self.rails = rails
+        # M2: probability a forgotten memory resurfaces as a déjà vu hint.
+        try:
+            self.dejavu_chance = min(1.0, max(0.0, float(dejavu_chance)))
+        except (TypeError, ValueError):
+            self.dejavu_chance = 0.05
+        # v0.3 §15.11: the memory layer can be disabled (native deterministic mode).
+        self.memory_enabled = bool(memory_enabled)
         self._states: dict[str, AgentState] = {}
 
     def _get_state(self, sim_key: str) -> AgentState:
@@ -62,31 +71,33 @@ class AgentNodes:
                 state.profile = profile
 
         # Get recent events
-        events = await self.memory.recent_events(mem_key, limit=10)
+        events: list[dict[str, Any]] = []
+        if self.memory_enabled:
+            events = await self.memory.recent_events(mem_key, limit=10)
 
-        # M2: revisiting is remembering — touch the memories used in context.
-        event_ids = [
-            event.get("id")
-            for event in events
-            if isinstance(event, dict) and event.get("id") is not None
-        ]
-        if event_ids:
-            try:
-                await self.memory.touch_events(mem_key, event_ids)
-            except Exception:
-                pass
-
-        # M2: a forgotten memory may resurface as a subtle déjà vu hint.
-        hint = await self._dejavu_hint(mem_key)
-        if hint:
-            events = list(events) + [
-                {
-                    "type": "dejavu",
-                    "content": {"message": hint},
-                    "importance": 0.2,
-                    "strength": 0.1,
-                }
+            # M2: revisiting is remembering — touch the memories used in context.
+            event_ids = [
+                event.get("id")
+                for event in events
+                if isinstance(event, dict) and event.get("id") is not None
             ]
+            if event_ids:
+                try:
+                    await self.memory.touch_events(mem_key, event_ids)
+                except Exception:
+                    pass
+
+            # M2: a forgotten memory may resurface as a subtle déjà vu hint.
+            hint = await self._dejavu_hint(mem_key)
+            if hint:
+                events = list(events) + [
+                    {
+                        "type": "dejavu",
+                        "content": {"message": hint},
+                        "importance": 0.2,
+                        "strength": 0.1,
+                    }
+                ]
 
         return {
             "state": state,
@@ -100,7 +111,9 @@ class AgentNodes:
         """Rarely surface a forgotten memory as a truncated déjà vu hint."""
         import random
 
-        if random.random() >= 0.05:
+        if not self.memory_enabled or self.dejavu_chance <= 0.0:
+            return ""
+        if random.random() >= self.dejavu_chance:
             return ""
         try:
             candidates = await self.memory.recent_events(mem_key, limit=50, min_strength=0.0)
@@ -136,6 +149,11 @@ class AgentNodes:
             "location": req.context.get("location", "unknown"),
             "mood": req.context.get("mood", "neutral"),
             "needs": req.context.get("needs", {}),
+            # Who the Sim is talking to and how well it knows them shapes what is
+            # spoken (the private thought is always free). Best-effort: the mod may
+            # not send these yet.
+            "audience": req.context.get("audience", "someone"),
+            "intimacy": req.context.get("intimacy", "a stranger / unknown"),
         }
 
         # Get tool schemas for autonomy level
@@ -213,18 +231,28 @@ class AgentNodes:
         mem_key = llm_result["mem_key"]
         response = llm_result.get("llm_response")
 
+        # fase-3: the model answers in two channels. Record the private thought as
+        # its own event (so life/memory evolve) and only ever speak `spoken`.
+        thought, spoken = split_thought(response.text if response else "")
+
         turn = Turn(
             user_message=req.message if isinstance(req, ChatRequest) else "",
-            assistant_reply=response.text if response else "",
+            assistant_reply=spoken,
             timestamp=__import__("time").time(),
             lang=llm_result["lang"],
         )
 
         if response:
-            # Add assistant reply as event
+            if thought:
+                await self.memory.add_event(mem_key, {
+                    "type": "thought",
+                    "content": {"text": thought, "kind": "chat"},
+                    "importance": 0.5,
+                })
+            # Add the spoken reply as event
             await self.memory.add_event(mem_key, {
                 "type": "chat",
-                "content": {"role": "assistant", "message": response.text},
+                "content": {"role": "assistant", "message": spoken},
                 "importance": 0.5,
             })
             # Add user message as event
@@ -240,6 +268,8 @@ class AgentNodes:
         return {
             **llm_result,
             "turn": turn,
+            "spoken_text": spoken,
+            "thought": thought,
         }
 
     async def format_response_node(self, persist_result: dict[str, Any]) -> ChatResponse:
@@ -293,7 +323,10 @@ class AgentNodes:
                 },
             )
 
-        reply = response.text or ""
+        # fase-3: only the spoken channel reaches the player (the thought was recorded).
+        reply = persist_result.get("spoken_text")
+        if reply is None:
+            reply = response.text or ""
         message_key: str | None = None
         if not reply:
             if denied and not allowed:
@@ -314,8 +347,9 @@ class AgentNodes:
         """Format the hey response."""
         response = persist_result.get("llm_response")
         if response:
+            # Defensive: a private thought must never be spoken.
             return ChatResponse(
-                reply=response.text,
+                reply=strip_thought(response.text),
                 provider=response.provider,
                 model=response.model,
             )

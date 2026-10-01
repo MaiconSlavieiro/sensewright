@@ -249,6 +249,19 @@ def should_absorb(event: dict, threshold: float) -> bool:
     return salience(event) >= _as_float(threshold, 0.0)
 
 
+# An event this much salience above the absorb threshold is "extreme"
+# (death ≈ 2.5, betrayal/trauma ≈ 2.2, fire/grief ≈ 2.0 for importance 1.0),
+# so it is absorbed immediately instead of waiting for the next sleep (P1).
+EXTREME_SALIENCE_FACTOR = 1.4
+
+
+def is_extreme(event: dict, threshold: float) -> bool:
+    """True when an event is salient enough to absorb immediately (P1)."""
+    if not isinstance(event, dict):
+        return False
+    return salience(event) >= _as_float(threshold, 1.5) * EXTREME_SALIENCE_FACTOR
+
+
 def _matched_keywords(event: dict, table: dict[str, float]) -> list[str]:
     text = " ".join(_event_strings(event)).lower()
     matched = [key for key in table if key in text]

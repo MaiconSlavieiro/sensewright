@@ -139,9 +139,18 @@ async def god_background(
     req: BackgroundRequest,
     _auth: None = Depends(require_auth),
 ) -> BackgroundResponse:
-    """Generate a background story for a sim or household."""
+    """Generate a background story for a sim or household.
+
+    With ``queue=true`` a player action is enqueued at top priority and the
+    request returns immediately (``queued=true``); a cache hit is returned
+    inline. Otherwise the background is generated synchronously.
+    """
     try:
-        result = await _agent_graph().generate_background(req)
+        graph = _agent_graph()
+        if req.queue:
+            result = await graph.enqueue_background(req)
+        else:
+            result = await graph.generate_background(req)
         if isinstance(result, dict) and result.get("ok", True):
             background = result.get("background")
             return BackgroundResponse(
@@ -151,6 +160,7 @@ async def god_background(
                 household_id=result.get("household_id", req.household_id),
                 background=background if isinstance(background, dict) else {},
                 cached=bool(result.get("cached", False)),
+                queued=bool(result.get("queued", False)),
                 provider=result.get("provider"),
                 message_key=result.get("message_key"),
             )
@@ -206,6 +216,7 @@ async def god_census(
                 sims=int(result.get("sims", 0) or 0),
                 households=int(result.get("households", 0) or 0),
                 queued=int(result.get("queued", 0) or 0),
+                diff=result.get("diff"),
                 message_key=result.get("message_key"),
             )
     except Exception:

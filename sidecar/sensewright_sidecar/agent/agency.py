@@ -370,11 +370,17 @@ class Agency:
             seated_ids = [
                 int(seat["sim_id"]) for seat in self.seats.seats_for(player_id, save_id)
             ]
+            # v0.3 R5 fix: only pair Sims who are actually in a native social
+            # conversation with each other (and close enough), so agents never
+            # talk telepathically across the lot.
+            conversing = self.social.filter_conversing(sims)
+            if len(conversing) < 2:
+                return [], []
             forge = PairContext(self._context_forge)
             dialogues = await self.social.plan(
                 player_id=player_id,
                 save_id=save_id,
-                sims=sims,
+                sims=conversing,
                 seated_ids=seated_ids,
                 lang=lang,
                 forge=forge,
@@ -477,6 +483,8 @@ class Agency:
             self._store_outcome(job, result)
             if job.kind == "sleep":
                 self._sleeping.discard((job.player_id, job.save_id, job.sim_id))
+                # v0.3 R3: sleeping invalidates the Sim's pending "next_sleep" intents.
+                self._intents.note_sleep(job.player_id, job.save_id, job.sim_id)
             return result
 
         job.attempts += 1
@@ -677,6 +685,7 @@ class Agency:
             "by_kind": by_kind,
             "pending_directives": self.pending_count(),
             "pending_intents": self.pending_count(),
+            "intents": self._intents.snapshot(),
             "level": self.level,
             "player_sim_level": self.player_sim_level,
             "cooldown_sim_minutes": self.cooldown_sim_minutes,

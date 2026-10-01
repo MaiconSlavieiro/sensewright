@@ -21,8 +21,10 @@ from sensewright_sidecar.routers import (
     god,
     health,
     lifecycle,
+    memory,
     profiles,
 )
+from sensewright_sidecar.webui.router import router as webui_router
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,8 @@ async def lifespan(app: FastAPI):
             await agent_graph.start_backgrounds()
         if hasattr(agent_graph, "start_agency"):
             await agent_graph.start_agency()
+        if hasattr(agent_graph, "maybe_prune_memory"):
+            await agent_graph.maybe_prune_memory(force=True)
     except Exception:
         # Agent module may not exist yet; ignore
         pass
@@ -123,6 +127,9 @@ def create_app(settings: Settings, token: str) -> FastAPI:
     app.state.token = token
     app.state.start_time = time.time()
 
+    # Built-in browser panel (no /v1 prefix): ``/`` + ``/ui/*`` assets.
+    app.include_router(webui_router)
+
     # Include routers with /v1 prefix
     app.include_router(health.router, prefix="/v1")
     app.include_router(chat.router, prefix="/v1")
@@ -131,6 +138,7 @@ def create_app(settings: Settings, token: str) -> FastAPI:
     app.include_router(god.router, prefix="/v1")
     app.include_router(profiles.router, prefix="/v1")
     app.include_router(autonomy.router, prefix="/v1")
+    app.include_router(memory.router, prefix="/v1")
     app.include_router(lifecycle.router, prefix="/v1")
 
     return app

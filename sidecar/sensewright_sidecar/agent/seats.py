@@ -217,4 +217,11 @@ class SeatManager:
             "saves": len(self._seats),
             "by_tier": by_tier,
             "released": self._released,
+            # Active (player_id, save_id) pairs so a UI can discover the current
+            # save without guessing.
+            "active": [
+                {"player_id": player_id, "save_id": save_id, "used": len(bucket)}
+                for (player_id, save_id), bucket in sorted(self._seats.items())
+                if bucket
+            ],
         }

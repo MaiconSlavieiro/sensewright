@@ -8,6 +8,7 @@ and the legacy /v1/autonomy/directives alias keep working.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -19,41 +20,216 @@ from uuid import uuid4
 from .. import content_i18n
 from .context_forge import PairContext
 from .intents import DEFAULT_EXPIRES_AT
+from .prompts import strip_thought
 
 logger = logging.getLogger(__name__)
 
-# Deterministic fallback lines live in the ``social.line.<n>`` content keys (en
-# is the source of truth). The LLM path writes in ``lang``; the template keeps
-# native mode in-character too.
-def _template_lines(lang: str) -> tuple[str, str]:
+# When the current native interaction cannot be classified, fall back to this.
+DEFAULT_TONE = "friendly"
+
+# A native interaction name maps to a dialogue ``(category, tone)`` so the
+# interaction the Sims are actually doing shapes what they say (chat -> small
+# talk, joke -> funny, flirt -> flirty, insult -> tense). Categories also have
+# their own deterministic fallback lines (``social.line.<category>.<n>``).
+_INTERACTION_CATEGORIES = (
+    ("flirt", "flirty"),
+    ("romance", "flirty"),
+    ("kiss", "flirty"),
+    ("joke", "funny"),
+    ("funny", "funny"),
+    ("comedy", "funny"),
+    ("insult", "tense"),
+    ("mean", "tense"),
+    ("argue", "tense"),
+    ("fight", "tense"),
+    ("anger", "tense"),
+)
+
+# Deterministic fallback lines live in the ``social.line.<category>.<n>`` content
+# keys (en is the source of truth). The LLM path writes in ``lang``; the template
+# keeps native mode in-character too.
+def classify_interaction(interaction: str) -> tuple[str, str]:
+    """Map a native interaction name to a ``(category, tone)`` pair."""
+    name = str(interaction or "").lower()
+    for token, category in _INTERACTION_CATEGORIES:
+        if token in name:
+            tone = DEFAULT_TONE if category == "funny" else category
+            return category, tone
+    return "casual", DEFAULT_TONE
+
+
+def _dialogue_lines(lang: str, category: str) -> tuple[str, str]:
     return (
-        content_i18n.t(lang, "social.line.1"),
-        content_i18n.t(lang, "social.line.2"),
+        content_i18n.t(lang, f"social.line.{category}.1"),
+        content_i18n.t(lang, f"social.line.{category}.2"),
     )
 
 
-def sim_brief(entry: dict[str, Any] | None, other_name: str = "") -> str:
-    """One-line context for a Sim: background, personality, memories, partner."""
+def _location_xy(sim: dict[str, Any]) -> tuple[float, float] | None:
+    """Parse a pulse ``location`` ("x,y") into floats, or None when absent."""
+    location = (sim or {}).get("location")
+    if not isinstance(location, str):
+        return None
+    parts = location.split(",")
+    if len(parts) != 2:
+        return None
+    try:
+        return float(parts[0]), float(parts[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _distance_between(a: dict[str, Any], b: dict[str, Any]) -> float | None:
+    """Lot-space distance between two Sims, or None when a location is unknown."""
+    pa = _location_xy(a)
+    pb = _location_xy(b)
+    if pa is None or pb is None:
+        return None
+    return ((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2) ** 0.5
+
+
+def _topic_for(category: str, relationship: dict[str, Any] | None) -> str:
+    """Deterministic topic: the interaction category first, then relationship."""
+    if category == "flirty":
+        return "a flirty exchange"
+    if category == "funny":
+        return "joking around"
+    if category == "tense":
+        return "a tense exchange"
+    rel_type = (relationship or {}).get("type") if relationship else None
+    rel_level = (relationship or {}).get("level") if relationship else None
+    if rel_type == "romantic":
+        return "a quiet moment together"
+    if rel_type == "family":
+        return "family matters"
+    if rel_type == "friend":
+        return "catching up"
+    if rel_level is not None and rel_level < 0:
+        return "a tense exchange"
+    return "small talk"
+
+
+def _clean_text(value: Any) -> str:
+    """Coerce a profile/background value into plain text.
+
+    Backgrounds used to arrive (and still do in legacy saves) as Python-repr or
+    JSON dicts (``{'text': '...'}``) and even double-encoded
+    (``"{'text': '{\\"text\\": ...}'}"``). This unwraps them so the LLM never
+    sees a raw dict repr.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        for key in ("text", "summary", "background", "description"):
+            if value.get(key):
+                return _clean_text(value[key])
+        return ""
+    if isinstance(value, (list, tuple)):
+        return " ".join(_clean_text(item) for item in value if item)
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text.startswith("{") and text.endswith("}"):
+        parsed: Any = None
+        try:
+            parsed = json.loads(text)
+        except (ValueError, TypeError):
+            try:
+                parsed = ast.literal_eval(text)
+            except (ValueError, SyntaxError):
+                parsed = None
+        if isinstance(parsed, dict):
+            inner = _clean_text(parsed)
+            if inner:
+                return inner
+    return text
+
+
+def _memory_text(memory: Any) -> str:
+    """Extract one readable line from a stored memory event.
+
+    Events are shaped ``{"id", "type", "content": {...}, ...}`` (see
+    ``memory/sqlite_store._row_to_event``); the text lives in ``content``. The
+    old code read top-level ``summary``/``text``/``event`` keys, so no memory
+    ever reached the prompt.
+    """
+    if not isinstance(memory, dict):
+        return str(memory).strip() if memory else ""
+    content = memory.get("content")
+    if isinstance(content, dict):
+        for key in ("text", "summary", "message"):
+            if content.get(key):
+                return str(content[key]).strip()
+        topic = str(content.get("topic") or "").strip()
+        lines = content.get("lines")
+        spoken = ""
+        if isinstance(lines, list) and lines and isinstance(lines[0], dict):
+            spoken = str(lines[0].get("text") or "").strip()
+        if topic and spoken:
+            return f"{topic}: {spoken}"
+        if topic or spoken:
+            return topic or spoken
+        for key in ("action", "reason"):
+            if content.get(key):
+                return str(content[key]).strip()
+    for key in ("summary", "text", "event"):
+        if memory.get(key):
+            return str(memory[key]).strip()
+    return ""
+
+
+def _memory_partner_id(memory: Any) -> int | None:
+    """The partner Sim id a memory event was about, or None."""
+    if not isinstance(memory, dict):
+        return None
+    content = memory.get("content")
+    if not isinstance(content, dict):
+        return None
+    value = content.get("with")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def sim_brief(
+    entry: dict[str, Any] | None,
+    other_name: str = "",
+    partner_id: int | None = None,
+) -> str:
+    """One-line context for a Sim: background, personality, memories, partner.
+
+    Memories about ``partner_id`` are surfaced separately ("what you remember
+    about X") so the dialogue can reference shared history with the Sim it is
+    talking to.
+    """
     entry = entry or {}
     profile = entry.get("profile") or {}
     parts: list[str] = []
-    background = profile.get("backstory") or profile.get("background")
+    background = _clean_text(profile.get("backstory")) or _clean_text(profile.get("background"))
     if background:
         parts.append(f"Background: {background}")
-    personality = profile.get("personality") or profile.get("speech_style")
+    personality = _clean_text(profile.get("personality")) or _clean_text(profile.get("speech_style"))
     if personality:
         parts.append(f"Personality: {personality}")
+
     memories = entry.get("memories") or []
-    snippets: list[str] = []
-    for memory in memories[:3]:
-        if isinstance(memory, dict):
-            text = memory.get("summary") or memory.get("text") or memory.get("event") or ""
-            if text:
-                snippets.append(str(text))
-        elif isinstance(memory, str) and memory:
-            snippets.append(memory)
-    if snippets:
-        parts.append("Recent memories: " + "; ".join(snippets))
+    self_snippets: list[str] = []
+    partner_snippets: list[str] = []
+    for memory in memories[:12]:
+        text = _memory_text(memory)
+        if not text:
+            continue
+        if partner_id is not None and _memory_partner_id(memory) == partner_id:
+            partner_snippets.append(text)
+        else:
+            self_snippets.append(text)
+    if self_snippets:
+        parts.append("Recent memories: " + "; ".join(self_snippets[:3]))
+    if partner_snippets and other_name:
+        parts.append(f"What you remember about {other_name}: " + "; ".join(partner_snippets[:3]))
     if other_name:
         parts.append(f"Talking with: {other_name}")
     return " | ".join(parts)
@@ -61,6 +237,7 @@ def sim_brief(entry: dict[str, Any] | None, other_name: str = "") -> str:
 
 DEFAULT_MAX_PAIRS = 1
 DEFAULT_PAIR_COOLDOWN_SECONDS = 180.0
+DEFAULT_MAX_PAIR_DISTANCE = 4.0
 DIALOGUE_MAX_LINES = 2
 
 # Regex to strip meta references like "the user", "the player", etc.
@@ -84,7 +261,8 @@ def clean_line(text: str) -> str:
     """Strip, drop empty/punctuation-only/meta lines; return cleaned text or empty string."""
     if not isinstance(text, str):
         return ""
-    t = text.strip()
+    # A private thought must never be spoken to the other Sim.
+    t = strip_thought(text).strip()
     # Remove surrounding quotes if the whole line is quoted
     if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
         t = t[1:-1].strip()
@@ -159,31 +337,22 @@ def template_dialogue(
     a_id: int = 0,
     b_id: int = 0,
     lang: str = "en",
+    name_a: str | None = None,
+    name_b: str | None = None,
+    interaction: str = "",
 ) -> Dialogue:
     """Deterministic fallback dialogue (native mode or LLM failure)."""
-    name_a = str((profile_a or {}).get("name") or f"Sim {a_id}")
-    name_b = str((profile_b or {}).get("name") or f"Sim {b_id}")
+    name_a = str(name_a or (profile_a or {}).get("name") or f"Sim {a_id}")
+    name_b = str(name_b or (profile_b or {}).get("name") or f"Sim {b_id}")
 
-    rel_type = (relationship or {}).get("type") if relationship else None
-    rel_level = (relationship or {}).get("level") if relationship else None
-
-    # Simple topic based on relationship
-    if rel_type == "romantic":
-        topic = "a quiet moment together"
-    elif rel_type == "family":
-        topic = "family matters"
-    elif rel_type == "friend":
-        topic = "catching up"
-    elif rel_level is not None and rel_level < 0:
-        topic = "a tense exchange"
-    else:
-        topic = "small talk"
+    category, tone = classify_interaction(interaction)
+    topic = _topic_for(category, relationship)
 
     # Two lines, alternating (the spoken words only; the caller attributes them).
-    first, second = _template_lines(lang)
+    first, second = _dialogue_lines(lang, category)
     lines = [
-        {"speaker": "a", "text": first.format(a=name_a, b=name_b), "tone": "friendly"},
-        {"speaker": "b", "text": second.format(a=name_a, b=name_b), "tone": "friendly"},
+        {"speaker": "a", "text": first.format(a=name_a, b=name_b), "tone": tone},
+        {"speaker": "b", "text": second.format(a=name_a, b=name_b), "tone": tone},
     ]
 
     return Dialogue(a=a_id, b=b_id, lines=lines, topic=topic, source="template")
@@ -200,13 +369,25 @@ async def render_dialogue(
     max_tokens: int = 200,
     extra_a: str = "",
     extra_b: str = "",
+    name_a: str | None = None,
+    name_b: str | None = None,
+    interaction: str = "",
 ) -> Dialogue:
-    """Render a dialogue via LLM or template fallback."""
-    if registry is None:
-        return template_dialogue(profile_a, profile_b, relationship, a_id, b_id, lang=lang)
+    """Render a dialogue via LLM or template fallback.
 
-    name_a = str((profile_a or {}).get("name") or f"Sim {a_id}")
-    name_b = str((profile_b or {}).get("name") or f"Sim {b_id}")
+    ``name_a``/``name_b`` override the profile name (so a Sim with no generated
+    profile still speaks under its real ``full_name`` instead of ``Sim <id>``).
+    ``interaction`` is the native interaction the pair is doing; it steers the
+    dialogue's tone/topic.
+    """
+    if registry is None:
+        return template_dialogue(
+            profile_a, profile_b, relationship, a_id, b_id, lang=lang,
+            name_a=name_a, name_b=name_b, interaction=interaction,
+        )
+
+    name_a = str(name_a or (profile_a or {}).get("name") or f"Sim {a_id}")
+    name_b = str(name_b or (profile_b or {}).get("name") or f"Sim {b_id}")
 
     personality_a = str((profile_a or {}).get("personality") or (profile_a or {}).get("speech_style") or "")
     personality_b = str((profile_b or {}).get("personality") or (profile_b or {}).get("speech_style") or "")
@@ -220,6 +401,15 @@ async def render_dialogue(
             if rel_level is not None:
                 rel_desc += f" (level {rel_level})"
 
+    category, tone = classify_interaction(interaction)
+    interaction_desc = ""
+    if interaction:
+        interaction_desc = (
+            f"Native interaction: the two Sims are currently doing "
+            f"'{interaction}' ({category} tone). The dialogue must match this "
+            "interaction and its mood.\n"
+        )
+
     lang_name = content_i18n.language_name(lang)
     system = (
         "You write short, natural, in-character dialogue between two Sims in "
@@ -232,14 +422,16 @@ async def render_dialogue(
         )
 
     user = (
-        f"Sim A: {name_a} (sim_id {a_id}). {extra_a or ('Personality: ' + (personality_a or 'neutral'))}\n"
-        f"Sim B: {name_b} (sim_id {b_id}). {extra_b or ('Personality: ' + (personality_b or 'neutral'))}\n"
-        f"{rel_desc}\n\n"
+        f"Sim A: {name_a}. {extra_a or ('Personality: ' + (personality_a or 'neutral'))}\n"
+        f"Sim B: {name_b}. {extra_b or ('Personality: ' + (personality_b or 'neutral'))}\n"
+        f"{rel_desc}\n"
+        f"{interaction_desc}\n"
         f"Write a short, natural dialogue (1-2 lines) in {lang_name} as JSON:\n"
         f'{{"topic": "...", "lines": [{{"speaker": "a", "text": "...", "tone": "..."}}, '
         f'{{"speaker": "b", "text": "...", "tone": "..."}}]}}\n'
         f"Rules: max {DIALOGUE_MAX_LINES} lines, alternating speakers, "
         f"each line non-empty, tone is one word (friendly, flirty, tense, casual, warm). "
+        f"Use the Sims' names, never numeric ids. "
         f"Every line must be written in {lang_name}. "
         f"No meta commentary. No markdown fences."
     )
@@ -249,11 +441,17 @@ async def render_dialogue(
         {"role": "user", "content": user},
     ]
 
+    def _fallback() -> Dialogue:
+        return template_dialogue(
+            profile_a, profile_b, relationship, a_id, b_id, lang=lang,
+            name_a=name_a, name_b=name_b, interaction=interaction,
+        )
+
     try:
         response = await registry.complete(messages, lang=lang, max_tokens=max_tokens)
     except Exception as exc:
         logger.warning("social dialogue LLM call failed, using template: %s", exc)
-        return template_dialogue(profile_a, profile_b, relationship, a_id, b_id, lang=lang)
+        return _fallback()
 
     raw = str(getattr(response, "text", "") or "").strip()
     # Strip markdown fences
@@ -265,15 +463,15 @@ async def render_dialogue(
     try:
         data = json.loads(raw)
     except (TypeError, ValueError):
-        return template_dialogue(profile_a, profile_b, relationship, a_id, b_id, lang=lang)
+        return _fallback()
 
     if not isinstance(data, dict):
-        return template_dialogue(profile_a, profile_b, relationship, a_id, b_id, lang=lang)
+        return _fallback()
 
     topic = str(data.get("topic") or "").strip()
     raw_lines = data.get("lines")
     if not isinstance(raw_lines, list) or not raw_lines:
-        return template_dialogue(profile_a, profile_b, relationship, a_id, b_id, lang=lang)
+        return _fallback()
 
     lines: list[dict[str, Any]] = []
     for item in raw_lines:
@@ -285,13 +483,16 @@ async def render_dialogue(
         text = clean_line(str(item.get("text") or ""))
         if not text:
             continue
-        tone = str(item.get("tone") or "friendly").strip() or "friendly"
-        lines.append({"speaker": speaker, "text": text, "tone": tone})
+        line_tone = str(item.get("tone") or tone).strip() or tone
+        lines.append({"speaker": speaker, "text": text, "tone": line_tone})
         if len(lines) >= DIALOGUE_MAX_LINES:
             break
 
     if not lines:
-        return template_dialogue(profile_a, profile_b, relationship, a_id, b_id, lang=lang)
+        return _fallback()
+
+    if not topic:
+        topic = _topic_for(category, relationship)
 
     return Dialogue(a=a_id, b=b_id, lines=lines, topic=topic, source="llm")
 
@@ -310,6 +511,8 @@ class SocialLayer:
         clock: Any = None,
         max_pairs: int | None = None,
         pair_cooldown_seconds: float | None = None,
+        require_conversation: bool | None = None,
+        max_pair_distance: float | None = None,
     ) -> None:
         self._registry = registry
         self._rng = rng
@@ -320,12 +523,27 @@ class SocialLayer:
         self.pair_cooldown = (
             pair_cooldown_seconds if pair_cooldown_seconds is not None else DEFAULT_PAIR_COOLDOWN_SECONDS
         )
+        self.require_conversation = True if require_conversation is None else bool(require_conversation)
+        self.max_pair_distance = (
+            DEFAULT_MAX_PAIR_DISTANCE if max_pair_distance is None else float(max_pair_distance)
+        )
         self.line_max_tokens = 200
         if settings is not None:
             self.configure(settings)
+        # Explicit constructor args win over settings (targeted overrides/tests).
+        if max_pairs is not None:
+            self.max_pairs = int(max_pairs)
+        if pair_cooldown_seconds is not None:
+            self.pair_cooldown = float(pair_cooldown_seconds)
+        if require_conversation is not None:
+            self.require_conversation = bool(require_conversation)
+        if max_pair_distance is not None:
+            self.max_pair_distance = float(max_pair_distance)
 
     def configure(self, settings: Any) -> None:
-        """Read settings.agents.layers.social (enable) and settings.agents.social (max_pairs_per_tick, pair_cooldown_seconds) defensively."""
+        """Read settings.agents.layers.social (enable) and settings.agents.social
+        (max_pairs_per_tick, pair_cooldown_seconds, require_conversation,
+        max_pair_distance) defensively."""
         try:
             layers = getattr(getattr(settings, "agents", None), "layers", None)
             self.enabled = bool(getattr(layers, "social", True)) if layers is not None else True
@@ -339,15 +557,23 @@ class SocialLayer:
                 self.max_pairs = int(getattr(social_cfg, "max_pairs_per_tick", DEFAULT_MAX_PAIRS) or DEFAULT_MAX_PAIRS)
                 self.pair_cooldown = float(getattr(social_cfg, "pair_cooldown_seconds", DEFAULT_PAIR_COOLDOWN_SECONDS) or DEFAULT_PAIR_COOLDOWN_SECONDS)
                 self.line_max_tokens = int(getattr(social_cfg, "line_max_tokens", 200) or 200)
+                self.require_conversation = bool(getattr(social_cfg, "require_conversation", True))
+                self.max_pair_distance = float(
+                    getattr(social_cfg, "max_pair_distance", DEFAULT_MAX_PAIR_DISTANCE)
+                    or DEFAULT_MAX_PAIR_DISTANCE
+                )
         except Exception:
             self.max_pairs = DEFAULT_MAX_PAIRS
             self.pair_cooldown = DEFAULT_PAIR_COOLDOWN_SECONDS
             self.line_max_tokens = 200
+            self.require_conversation = True
+            self.max_pair_distance = DEFAULT_MAX_PAIR_DISTANCE
 
         # Ensure sensible bounds
         self.max_pairs = max(1, self.max_pairs)
         self.pair_cooldown = max(0.0, self.pair_cooldown)
         self.line_max_tokens = max(1, self.line_max_tokens)
+        self.max_pair_distance = max(0.0, float(self.max_pair_distance))
 
     def set_registry(self, registry: Any) -> None:
         self._registry = registry
@@ -375,6 +601,55 @@ class SocialLayer:
             if seated_set and sim_id not in seated_set:
                 continue
             seen.add(sim_id)
+            out.append(sim)
+        return out
+
+    @staticmethod
+    def _target_id_of(sim: dict[str, Any]) -> int | None:
+        """The Sim id this Sim is currently in a native social interaction with."""
+        value = (sim or {}).get("interaction_target_sim_id")
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def filter_conversing(self, sims: list[dict[str, Any]] | None) -> list[dict]:
+        """Keep only Sims in a *real* native conversation (v0.3 R5 fix).
+
+        A Sim qualifies when it targets another Sim present in the pulse, that
+        Sim targets it back, and the two are within ``max_pair_distance`` (when
+        both locations are known). When ``require_conversation`` is off this is a
+        pass-through. This is what stops agents from "talking telepathically"
+        across the lot.
+        """
+        sims = list(sims or [])
+        if not self.require_conversation:
+            return sims
+
+        by_id: dict[int, dict] = {}
+        for sim in sims:
+            try:
+                by_id[int(sim.get("sim_id"))] = sim
+            except (TypeError, ValueError):
+                continue
+
+        out: list[dict] = []
+        for sim in sims:
+            try:
+                sim_id = int(sim.get("sim_id"))
+            except (TypeError, ValueError):
+                continue
+            partner_id = self._target_id_of(sim)
+            if partner_id is None or partner_id == sim_id:
+                continue
+            partner = by_id.get(partner_id)
+            if partner is None or self._target_id_of(partner) != sim_id:
+                continue
+            distance = _distance_between(sim, partner)
+            if distance is not None and distance > self.max_pair_distance:
+                continue
             out.append(sim)
         return out
 
@@ -480,8 +755,13 @@ class SocialLayer:
 
         name_a = str((profile_a or {}).get("name") or a.get("full_name") or f"Sim {a_id}")
         name_b = str((profile_b or {}).get("name") or b.get("full_name") or f"Sim {b_id}")
-        extra_a = sim_brief(ctx.get("a"), name_b)
-        extra_b = sim_brief(ctx.get("b"), name_a)
+        extra_a = sim_brief(ctx.get("a"), name_b, partner_id=b_id)
+        extra_b = sim_brief(ctx.get("b"), name_a, partner_id=a_id)
+
+        # The native interaction the pair is doing shapes the dialogue's content.
+        interaction = str(
+            a.get("current_interaction") or b.get("current_interaction") or ""
+        ).strip()
 
         dialogue = await render_dialogue(
             profile_a,
@@ -494,6 +774,9 @@ class SocialLayer:
             max_tokens=self.line_max_tokens,
             extra_a=extra_a,
             extra_b=extra_b,
+            name_a=name_a,
+            name_b=name_b,
+            interaction=interaction,
         )
 
         # The pair time is recorded once, in ``pick_pairs`` (cooldown authority).
@@ -544,5 +827,7 @@ class SocialLayer:
             "enabled": self.enabled,
             "max_pairs": self.max_pairs,
             "pair_cooldown_s": self.pair_cooldown,
+            "require_conversation": self.require_conversation,
+            "max_pair_distance": self.max_pair_distance,
             "pairs_seen": len(self._last_pair_at),
         }

@@ -46,16 +46,33 @@ def make_settings(
     )
 
 
-def tick(sims: list[tuple[int, str, bool]], *, sleeping: tuple[int, ...] = ()) -> AutonomyTickRequest:
-    states = [
-        AutonomySimState(
-            sim_id=sim_id,
-            autonomy=autonomy,
-            is_player=is_player,
-            sleeping=sim_id in sleeping,
+def tick(
+    sims: list[tuple[int, str, bool]],
+    *,
+    sleeping: tuple[int, ...] = (),
+    conversation: bool = True,
+    locations: dict[int, str] | None = None,
+) -> AutonomyTickRequest:
+    ids = [sim_id for sim_id, _, _ in sims]
+    states = []
+    for index, (sim_id, autonomy, is_player) in enumerate(sims):
+        partner = None
+        if conversation:
+            if index % 2 == 0 and index + 1 < len(ids):
+                partner = ids[index + 1]
+            elif index % 2 == 1:
+                partner = ids[index - 1]
+        states.append(
+            AutonomySimState(
+                sim_id=sim_id,
+                autonomy=autonomy,
+                is_player=is_player,
+                sleeping=sim_id in sleeping,
+                interaction_target_sim_id=partner,
+                current_interaction="social_Chat" if partner else "",
+                location=(locations or {}).get(sim_id, "10.0,10.0"),
+            )
         )
-        for sim_id, autonomy, is_player in sims
-    ]
     return AutonomyTickRequest(
         sim=SimRef(player_id="local", save_id="save1", sim_id=sims[0][0]),
         zone=ZoneContext(time_of_day="evening", lot_type="residential"),
@@ -106,6 +123,38 @@ async def test_household_sims_may_pair():
     # v0.3 R5 fix: household Sims are included (and preferred), so a dialogue forms.
     assert len(result["social"]) == 1
     assert result["social_intents"]
+
+
+async def test_no_native_conversation_means_no_dialogue():
+    """v0.3 R5 fix: two seated Sims that are NOT talking natively never converse."""
+    agency = Agency(make_settings(), clock=FakeClock())
+    result = await agency.ingest_tick(
+        tick([(10, "semi", False), (11, "semi", False)], conversation=False)
+    )
+    assert result["social"] == []
+    assert result["social_intents"] == []
+
+
+async def test_far_apart_conversing_sims_do_not_converse():
+    """A mutual native conversation still needs proximity (no telepathy)."""
+    agency = Agency(make_settings(), clock=FakeClock())
+    result = await agency.ingest_tick(
+        tick(
+            [(10, "semi", False), (11, "semi", False)],
+            locations={10: "0.0,0.0", 11: "50.0,50.0"},
+        )
+    )
+    assert result["social"] == []
+
+
+async def test_unilateral_interaction_is_not_a_conversation():
+    """Only a *mutual* target counts: A->B without B->A is not a conversation."""
+    agency = Agency(make_settings(), clock=FakeClock())
+    req = tick([(10, "semi", False), (11, "semi", False)], conversation=False)
+    req.sims[0].interaction_target_sim_id = 11
+    req.sims[0].current_interaction = "social_Chat"
+    result = await agency.ingest_tick(req)
+    assert result["social"] == []
 
 
 async def test_sleeping_and_off_sims_are_excluded():

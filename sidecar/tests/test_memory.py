@@ -247,3 +247,26 @@ async def test_build_embedding_provider_none():
     settings = Settings(memory=MemoryConfig(embedding_provider="none"))
     provider = build_embedding_provider(settings)
     assert isinstance(provider, NoneEmbeddings)
+
+
+@pytest.mark.asyncio
+async def test_upsert_relationship_persists_and_updates(temp_settings):
+    """Phase 2b: census relationship edges are actually persisted (upsert)."""
+    memory = build_memory_store(temp_settings)
+    key = MemKey(player_id="player1", save_id="save1", sim_id=123)
+
+    await memory.upsert_relationship(
+        key, 7, 30.0, {"target_name": "Bella", "track": "Friendship", "known_traits": ["trait_Cheerful"]}
+    )
+    await memory.upsert_relationship(key, 7, 45.0, {"target_name": "Bella", "track": "Friendship"})
+
+    cur = memory._execute(
+        "SELECT sentiment, metadata_json FROM relationships WHERE sim_id=? AND target_sim_id=?",
+        (123, 7),
+    )
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 45.0
+    assert "Bella" in row[1]
+
+    await memory.close()

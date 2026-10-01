@@ -73,6 +73,18 @@ def test_frequency_override_survives_resync_and_reports():
     assert mgr.snapshot()["by_tier"]["household"] == 1
 
 
+def test_snapshot_lists_active_saves():
+    mgr = SeatManager(seats=4)
+    mgr.sync("local", "s1", [{"sim_id": 1, "household_id": 5, "is_player": True}], active_sim_id=1)
+    mgr.sync("local", "s2", [{"sim_id": 9, "household_id": 7, "is_player": False}], active_sim_id=9)
+
+    active = mgr.snapshot()["active"]
+    assert {(a["player_id"], a["save_id"], a["used"]) for a in active} == {
+        ("local", "s1", 1),
+        ("local", "s2", 1),
+    }
+
+
 # ─── intent conversion + bus ──────────────────────────────────────────
 
 

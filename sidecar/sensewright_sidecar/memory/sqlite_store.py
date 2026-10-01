@@ -287,6 +287,40 @@ class SQLiteMemory:
 
         return await asyncio.to_thread(_list)
 
+    async def upsert_relationship(
+        self,
+        key: MemKey,
+        target_sim_id: int,
+        sentiment: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Create or update a Sim's stored relationship edge (census-driven).
+
+        ``sentiment`` prefers the friendship/romance progression when the mod
+        supplied it, falling back to the generic relationship depth.
+        """
+        await asyncio.to_thread(
+            self._execute,
+            """
+            INSERT INTO relationships
+                (player_id, save_id, sim_id, target_sim_id, sentiment, metadata_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_id, save_id, sim_id, target_sim_id) DO UPDATE SET
+                sentiment=excluded.sentiment,
+                metadata_json=excluded.metadata_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                key.player_id,
+                key.save_id,
+                key.sim_id,
+                int(target_sim_id),
+                float(sentiment),
+                json.dumps(metadata or {}),
+                time.time(),
+            ),
+        )
+
     async def add_event(self, key: MemKey, event: dict[str, Any]) -> int:
         embedding = None
         text = _event_text(event)

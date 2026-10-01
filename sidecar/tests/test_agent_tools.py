@@ -9,10 +9,11 @@ import pytest
 
 from sensewright_sidecar.agent import graph
 from sensewright_sidecar.agent.nodes import AgentNodes
+from sensewright_sidecar.agent.prompts import split_thought
 from sensewright_sidecar.config import AgentsConfig, LLMConfig, MemoryConfig, Settings
 from sensewright_sidecar.llm.base import LLMResponse, LLMToolCall
 from sensewright_sidecar.memory.base import MemKey
-from sensewright_sidecar.schemas import EventRecord, SimRef, ToolResultRequest
+from sensewright_sidecar.schemas import ChatRequest, EventRecord, SimRef, ToolResultRequest
 from sensewright_sidecar.tools.rails import DirectiveRails
 
 
@@ -188,6 +189,64 @@ async def test_handle_tool_result_unknown_id_is_tolerated():
     )
     assert result["ok"] is True
     assert result["resolved"] is False
+
+
+def test_split_thought_extracts_private_block():
+    thought, spoken = split_thought("[thought]I am wary of her.[/thought]Oi, tudo bem?")
+    assert thought == "I am wary of her."
+    assert spoken == "Oi, tudo bem?"
+
+
+def test_split_thought_without_block_is_all_spoken():
+    thought, spoken = split_thought("Just a short line.")
+    assert thought == ""
+    assert spoken == "Just a short line."
+
+
+def test_split_thought_only_thought_leaves_empty_reply():
+    thought, spoken = split_thought("[thought]thinking...[/thought]")
+    assert thought == "thinking..."
+    assert spoken == ""
+
+
+def test_split_thought_handles_missing_closing_tag():
+    # A dangling opening tag must never leak the private thought as speech.
+    thought, spoken = split_thought("Oi!\n[thought]private reasoning without a close")
+    assert thought == "private reasoning without a close"
+    assert spoken == "Oi!"
+
+
+def test_split_thought_drops_stray_closing_tag():
+    thought, spoken = split_thought("Oi, tudo bem?[/thought]")
+    assert thought == ""
+    assert spoken == "Oi, tudo bem?"
+
+
+async def test_persist_splits_thought_and_speaks_only_the_reply():
+    # fase-3: the private thought is recorded; only the spoken channel is returned.
+    response = LLMResponse(
+        text="[thought]She seems nice but I will keep it short for now.[/thought]Oi, tudo bem?",
+        provider="fake",
+        model="fake-1",
+        raw={},
+        tool_calls=(),
+    )
+    nodes, memory = make_nodes(response=response)
+    sim_key = "local:save1:123"
+    persist = make_persist_result(nodes, response, sim_key)
+    req = ChatRequest(sim=SimRef(player_id="local", save_id="save1", sim_id=123), message="oi")
+
+    result = await nodes.persist_node(persist, req)
+    out = await nodes.format_response_node(result)
+
+    assert out.reply == "Oi, tudo bem?"
+    assert "[thought]" not in out.reply
+    assert any(e["type"] == "thought" for e in memory.events)
+    assistant = [
+        e for e in memory.events
+        if e["type"] == "chat" and e["content"].get("role") == "assistant"
+    ]
+    assert assistant and assistant[0]["content"]["message"] == "Oi, tudo bem?"
 
 
 async def test_llm_node_forwards_tool_schemas():

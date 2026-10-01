@@ -11,8 +11,11 @@ from ..god.budgeter import BackgroundBudgeter
 from ..god.orchestrator import GodOrchestrator
 from ..god.scheduler import (
     PRIORITY_HOUSEHOLD_ACTIVE,
+    PRIORITY_HOUSEHOLD_PLAYER,
+    PRIORITY_PLAYER,
     PRIORITY_RELATED,
     PRIORITY_SIM_ACTIVE,
+    PRIORITY_SIM_PLAYER,
     BackgroundJob,
     BackgroundScheduler,
 )
@@ -73,6 +76,11 @@ _context_forge: ContextForge | None = None
 # Last census pushed by the mod, keyed by "player_id:save_id". Used to ground
 # zeitgeist suggestions and background writing.
 _census_by_save: dict[str, dict[str, Any]] = {}
+
+# M2 retention: wall-clock of the last physical prune (throttled, see
+# ``maybe_prune_memory``). 0.0 means "never pruned this process".
+_last_prune_at: float = 0.0
+_PRUNE_INTERVAL_SECONDS = 86400.0
 
 
 def _census_key(player_id: str, save_id: str) -> str:
@@ -149,6 +157,8 @@ def configure(settings: Settings) -> None:
             default_autonomy=_autonomy_default,
             default_lang=_current_lang,
             rails=_rails,
+            dejavu_chance=settings.memory.dejavu_chance,
+            memory_enabled=bool(getattr(settings.agents.layers, "memory", True)),
         )
     else:
         _nodes = None
@@ -165,7 +175,13 @@ def configure(settings: Settings) -> None:
 
 
 async def _run_background_job(job: BackgroundJob) -> dict[str, Any]:
-    """Execute one background job by generating (or reusing) its background."""
+    """Execute one scheduled job (background generation or memory consolidation)."""
+    if job.kind == "consolidate":
+        return await consolidate_now(
+            SimRef(player_id=job.player_id, save_id=job.save_id, sim_id=job.sim_id),
+            job.lang,
+        )
+
     if _memory is None:
         return {"ok": False, "error": "memory not initialized"}
 
@@ -491,6 +507,69 @@ def _effective_registry() -> ProviderRegistry | None:
     return None
 
 
+async def maybe_prune_memory(*, force: bool = False, now: float | None = None) -> int:
+    """Physically prune forgotten memories at most once per day (M2).
+
+    ``prune_forgotten`` + ``memory.retention_days`` used to be defined but never
+    called in production, so forgotten events were never removed. This throttled
+    hook is invoked from the zone pulse (and once at startup) so retention is
+    actually enforced without touching the DB on every tick.
+    """
+    global _last_prune_at
+
+    if _memory is None or _settings is None:
+        return 0
+    reference = time.time() if now is None else float(now)
+    if not force and _last_prune_at and (reference - _last_prune_at) < _PRUNE_INTERVAL_SECONDS:
+        return 0
+    _last_prune_at = reference
+    try:
+        deleted = await _memory.prune_forgotten(_settings.memory.retention_days, now=reference)
+    except Exception as exc:
+        logger.warning(f"memory prune failed: {exc}")
+        return 0
+    if deleted:
+        logger.info(
+            "memory pruned=%d retention_days=%s", deleted, _settings.memory.retention_days
+        )
+    return deleted
+
+
+def _enrich_sim_entry(census: dict[str, Any], sim_data: dict[str, Any]) -> dict[str, Any]:
+    """Enrich a census Sim with relationship names and kinship labels.
+
+    A census relationship only carries ``target_id``/``depth``; the census knows
+    every Sim's name, so the target name is resolved here. The Sim's own kinship
+    provides the relation label (mother/father/sibling/...). Without this the
+    background prompt only saw numeric relationship ids and wrote a "lonely" Sim.
+    """
+    entry = dict(sim_data)
+    by_id = {
+        str(sim.get("sim_id")): str(sim.get("full_name") or "").strip()
+        for sim in census.get("sims") or []
+        if isinstance(sim, dict)
+    }
+    relation_by_id: dict[str, str] = {}
+    for rel in sim_data.get("kinship") or []:
+        if isinstance(rel, dict) and rel.get("target_id") is not None:
+            relation_by_id[str(rel.get("target_id"))] = str(rel.get("relation") or "")
+
+    relationships: list[dict[str, Any]] = []
+    for rel in sim_data.get("relationships") or []:
+        if not isinstance(rel, dict):
+            continue
+        enriched = dict(rel)
+        target_id = str(rel.get("target_id"))
+        if not enriched.get("target_name"):
+            enriched["target_name"] = by_id.get(target_id, "")
+        if not enriched.get("relation"):
+            enriched["relation"] = relation_by_id.get(target_id, "")
+        relationships.append(enriched)
+    if relationships:
+        entry["relationships"] = relationships
+    return entry
+
+
 def _census_entry_for_job(census: dict[str, Any], job: BackgroundJob) -> dict[str, Any] | None:
     """Find the census record that grounds a job, enriching household members."""
     if not isinstance(census, dict):
@@ -509,7 +588,7 @@ def _census_entry_for_job(census: dict[str, Any], job: BackgroundJob) -> dict[st
 
     for sim_data in census.get("sims") or []:
         if str(sim_data.get("sim_id")) == str(job.sim_id):
-            entry = dict(sim_data)
+            entry = _enrich_sim_entry(census, sim_data)
             entry.setdefault("lang", job.lang)
             return entry
     return None
@@ -527,6 +606,39 @@ def _member_names(census: dict[str, Any], member_ids: list[Any]) -> list[str]:
         if name and name not in names:
             names.append(name)
     return names
+
+
+def _census_entry_for_sim(player_id: str, save_id: str, sim_id: Any) -> dict[str, Any] | None:
+    """Find a Sim in the last census and enrich its relationships with names.
+
+    Used by the inline background path (no ``req.census``): without it the
+    generator only saw the stored profile, whose relationships may carry bare
+    ids and no kinship, so backgrounds read "lonely" for Sims with families.
+    """
+    census = _census_by_save.get(_census_key(player_id, save_id), {})
+    if not isinstance(census, dict):
+        return None
+    for sim_data in census.get("sims") or []:
+        if str(sim_data.get("sim_id")) == str(sim_id):
+            return _enrich_sim_entry(census, sim_data)
+    return None
+
+
+def _census_entry_for_household(
+    player_id: str, save_id: str, household_id: Any
+) -> dict[str, Any] | None:
+    """Find a household in the last census with its member names resolved."""
+    census = _census_by_save.get(_census_key(player_id, save_id), {})
+    if not isinstance(census, dict):
+        return None
+    for household in census.get("households") or []:
+        if str(household.get("household_id")) == str(household_id):
+            entry = dict(household)
+            names = _member_names(census, entry.get("members") or [])
+            if names:
+                entry["member_names"] = names
+            return entry
+    return None
 
 
 async def start_backgrounds() -> bool:
@@ -621,25 +733,40 @@ def _enqueue_census_backgrounds(req, sims: list[dict], households: list[dict]) -
     save_id = req.sim.save_id
     lang = req.lang
 
-    jobs = [
-        BackgroundJob(
-            priority=PRIORITY_HOUSEHOLD_ACTIVE,
-            seq=0,
-            player_id=player_id,
-            save_id=save_id,
-            scope="household",
-            household_id=int(household.get("household_id", 0)),
-            lang=lang,
-            source="census",
+    def _int_or_none(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    # The player's own household is generated before every other household/Sim
+    # in the zone (a dedicated top-priority tier).
+    active_household = _int_or_none(getattr(req.sim, "household_id", None))
+
+    jobs = []
+    for household in households:
+        household_id = _int_or_none(household.get("household_id")) or 0
+        is_player = active_household is not None and household_id == active_household
+        jobs.append(
+            BackgroundJob(
+                priority=PRIORITY_HOUSEHOLD_PLAYER if is_player else PRIORITY_HOUSEHOLD_ACTIVE,
+                seq=0,
+                player_id=player_id,
+                save_id=save_id,
+                scope="household",
+                household_id=household_id,
+                lang=lang,
+                source="census",
+            )
         )
-        for household in households
-    ]
 
     known_ids = {str(sim.get("sim_id")) for sim in sims}
     for sim_data in sims:
+        sim_household = _int_or_none(sim_data.get("household_id"))
+        is_player = active_household is not None and sim_household == active_household
         jobs.append(
             BackgroundJob(
-                priority=PRIORITY_SIM_ACTIVE,
+                priority=PRIORITY_SIM_PLAYER if is_player else PRIORITY_SIM_ACTIVE,
                 seq=0,
                 player_id=player_id,
                 save_id=save_id,
@@ -678,6 +805,119 @@ def _enqueue_census_backgrounds(req, sims: list[dict], households: list[dict]) -
         )
 
     return _scheduler.submit_many(jobs)
+
+
+async def _cached_background(req: BackgroundRequest) -> dict[str, Any] | None:
+    """Return an existing background for the request, or None (no generation)."""
+    if _memory is None:
+        return None
+    try:
+        if req.scope == "household":
+            from ..memory.base import HouseholdKey
+
+            household_id = req.household_id if req.household_id is not None else req.sim.household_id
+            if household_id is None:
+                return None
+            stored = await _memory.get_household(
+                HouseholdKey(req.sim.player_id, req.sim.save_id, int(household_id))
+            ) or {}
+            background = stored.get("background")
+        else:
+            from ..memory.base import MemKey
+
+            profile = await _memory.get_profile(
+                MemKey(req.sim.player_id, req.sim.save_id, req.sim.sim_id)
+            ) or {}
+            background = profile.get("background")
+    except Exception:
+        return None
+    return background if isinstance(background, dict) and background else None
+
+
+async def enqueue_background(req: BackgroundRequest) -> dict[str, Any]:
+    """Player-requested background: cache hit inline, else enqueue at top priority.
+
+    A player action never blocks the game thread: on a cache miss (or ``force``)
+    the job is submitted at ``PRIORITY_PLAYER`` and the request returns
+    immediately with ``queued=True``. When the background pipeline is disabled it
+    falls back to the synchronous generator.
+    """
+    if _memory is None:
+        return await generate_background(req)
+
+    household_id = req.household_id if req.household_id is not None else req.sim.household_id
+
+    if not req.force:
+        cached = await _cached_background(req)
+        if cached:
+            return {
+                "ok": True,
+                "scope": req.scope,
+                "sim_id": req.sim.sim_id,
+                "household_id": household_id,
+                "background": cached,
+                "cached": True,
+                "queued": False,
+                "provider": cached.get("provider"),
+            }
+
+    if _scheduler is None:
+        # Background pipeline disabled: generate inline (best effort).
+        return await generate_background(req)
+
+    job = BackgroundJob(
+        priority=PRIORITY_PLAYER,
+        seq=0,
+        player_id=req.sim.player_id,
+        save_id=req.sim.save_id,
+        scope=req.scope,
+        sim_id=req.sim.sim_id,
+        household_id=household_id,
+        lang=req.lang,
+        player_hints=req.player_hints,
+        source="player",
+    )
+    submitted = _scheduler.submit(job)
+    logger.info("player background queued scope=%s sim=%s", req.scope, req.sim.sim_id)
+    return {
+        "ok": True,
+        "scope": req.scope,
+        "sim_id": req.sim.sim_id,
+        "household_id": household_id,
+        "background": {},
+        "cached": False,
+        "queued": True,
+        "submitted": submitted,
+    }
+
+
+async def enqueue_consolidate(sim, lang: str) -> dict[str, Any]:
+    """Player-requested memory consolidation: enqueue at top priority.
+
+    Returns immediately with ``queued=True`` when the scheduler is available;
+    otherwise falls back to the synchronous :func:`consolidate_now`.
+    """
+    if _memory is None or _settings is None:
+        return {"ok": False, "consolidated": 0, "message_key": "error.memory_unavailable"}
+    if not _settings.memory.consolidation_enabled:
+        return {"ok": False, "consolidated": 0, "message_key": "notify.consolidate.disabled"}
+    if _scheduler is None:
+        return await consolidate_now(sim, lang)
+
+    job = BackgroundJob(
+        priority=PRIORITY_PLAYER,
+        seq=0,
+        player_id=sim.player_id,
+        save_id=sim.save_id,
+        scope="sim",
+        sim_id=sim.sim_id,
+        lang=lang,
+        source="player",
+        kind="consolidate",
+    )
+    _scheduler.submit(job)
+    logger.info("player consolidate queued sim=%s", sim.sim_id)
+    return {"ok": True, "consolidated": 0, "queued": True, "message_key": "notify.consolidate.queued"}
 
 
 def _sim_key(sim) -> str:
@@ -933,6 +1173,28 @@ def _maybe_enqueue_reaction(
         logger.debug(f"reaction enqueue failed: {exc}")
 
 
+async def _absorb_extreme_event(
+    mem_key, event_type: str, content: dict[str, Any], importance: float
+) -> None:
+    """Absorb one extreme event into the Sim's psyche right away (P1)."""
+    if _memory is None or _settings is None:
+        return
+    config = _settings.agents.personality
+    if not config.absorption_enabled:
+        return
+    event = {"type": event_type, "content": content, "importance": importance}
+    if not personality.is_extreme(event, config.salience_threshold):
+        return
+    try:
+        profile = await _memory.get_profile(mem_key) or {}
+        updated = personality.absorb(profile, event, config, lang=_current_lang)
+        if updated:
+            await _memory.upsert_profile(mem_key, updated)
+            logger.info("immediate absorption sim=%s type=%s", mem_key.sim_id, event_type)
+    except Exception as exc:
+        logger.debug(f"immediate absorption failed: {exc}")
+
+
 async def ingest_events(events) -> dict[str, Any]:
     """Persist game events forwarded by the mod.
 
@@ -970,6 +1232,10 @@ async def ingest_events(events) -> dict[str, Any]:
             count += 1
         except Exception as e:
             logger.warning(f"Failed to persist event {event_type}: {e}")
+
+        # P1: an extreme event (death, betrayal) is absorbed immediately instead
+        # of waiting for the next sleep (PLANO §14.4).
+        await _absorb_extreme_event(mem_key, event_type, content, importance)
 
         # A1/A3: schedule a prioritized reaction to salient events.
         _maybe_enqueue_reaction(sim, event_type, content, importance)
@@ -1167,7 +1433,9 @@ async def generate_background(req) -> dict[str, Any]:
                 "provider": cached.get("provider"),
             }
 
-        household_data = req.census if isinstance(req.census, dict) and req.census else stored
+        household_data = req.census if isinstance(req.census, dict) and req.census else (
+            _census_entry_for_household(player_id, save_id, household_id) or stored
+        )
         result = await bg.generate_household_background(
             household_data, zeitgeist, req.player_hints, req.lang, _effective_registry(), mood_influence
         )
@@ -1208,7 +1476,9 @@ async def generate_background(req) -> dict[str, Any]:
             "provider": cached.get("provider"),
         }
 
-    sim_data = req.census if isinstance(req.census, dict) and req.census else profile
+    sim_data = req.census if isinstance(req.census, dict) and req.census else (
+        _census_entry_for_sim(player_id, save_id, req.sim.sim_id) or profile
+    )
     result = await bg.generate_sim_background(
         sim_data, zeitgeist, req.player_hints, req.lang, _effective_registry(), mood_influence
     )
@@ -1278,6 +1548,47 @@ def _merge_census(
     }
 
 
+def _diff_census(
+    previous: dict[str, Any] | None,
+    scope: str,
+    sims: list[dict],
+    households: list[dict],
+) -> dict[str, Any]:
+    """Previous-vs-current census diff (Phase 2b, no CAS/spawn TestEvent).
+
+    Additions are always reliable (an id we had never seen). Removals are only
+    reported when the incoming scope matches the previous snapshot's scope, so a
+    small active-zone re-send never pretends the missing full-save Sims left.
+    """
+    prev = previous if isinstance(previous, dict) else {}
+
+    def _ids(entries: Any, key: str) -> set[str]:
+        out: set[str] = set()
+        for entry in entries or []:
+            if not isinstance(entry, dict) or entry.get(key) is None:
+                continue
+            out.add(str(entry.get(key)))
+        return out
+
+    def _ints(values: set[str]) -> list[int]:
+        return sorted(int(v) for v in values if str(v).lstrip("-").isdigit())
+
+    prev_sims = _ids(prev.get("sims"), "sim_id")
+    cur_sims = _ids(sims, "sim_id")
+    prev_households = _ids(prev.get("households"), "household_id")
+    cur_households = _ids(households, "household_id")
+
+    same_scope = bool(prev) and prev.get("scope") == scope
+
+    return {
+        "scope": scope,
+        "sims_added": _ints(cur_sims - prev_sims),
+        "sims_removed": _ints(prev_sims - cur_sims) if same_scope else [],
+        "households_added": _ints(cur_households - prev_households),
+        "households_removed": _ints(prev_households - cur_households) if same_scope else [],
+    }
+
+
 async def ingest_census(req) -> dict[str, Any]:
     """Store a census snapshot; it grounds zeitgeist suggestions and backgrounds."""
     from ..memory.base import HouseholdKey, MemKey
@@ -1288,8 +1599,10 @@ async def ingest_census(req) -> dict[str, Any]:
     households = [h.model_dump() for h in req.households]
 
     census_key = _census_key(player_id, save_id)
+    previous = _census_by_save.get(census_key)
+    diff = _diff_census(previous, req.scope, sims, households)
     _census_by_save[census_key] = _merge_census(
-        _census_by_save.get(census_key), req.scope, req.lang, sims, households
+        previous, req.scope, req.lang, sims, households
     )
 
     if not _memory:
@@ -1326,16 +1639,62 @@ async def ingest_census(req) -> dict[str, Any]:
             "traits": sim_data.get("traits", []),
             "age": sim_data.get("age", ""),
             "gender": sim_data.get("gender", ""),
+            "aspiration": sim_data.get("aspiration", ""),
             "career": sim_data.get("career", ""),
             "skills": sim_data.get("skills", {}),
             "relationships": sim_data.get("relationships", []),
+            "kinship": sim_data.get("kinship", []),
         }
         try:
             await _memory.upsert_profile(key, profile)
         except Exception as e:
             logger.warning(f"census sim upsert failed: {e}")
 
+        # Phase 2b: persist the Sim's relationship edges so they are actually
+        # considered (previously only used to schedule related backgrounds).
+        for rel in sim_data.get("relationships") or []:
+            if not isinstance(rel, dict):
+                continue
+            target = rel.get("target_id") or rel.get("target_sim_id")
+            try:
+                target_id = int(target)
+            except (TypeError, ValueError):
+                continue
+            if not target_id:
+                continue
+            sentiment = rel.get("friendship")
+            if sentiment is None:
+                sentiment = rel.get("depth", 0.0)
+            try:
+                sentiment = float(sentiment or 0.0)
+            except (TypeError, ValueError):
+                sentiment = 0.0
+            metadata = {
+                "target_name": rel.get("target_name", ""),
+                "track": rel.get("track", ""),
+                "friendship": rel.get("friendship"),
+                "romance": rel.get("romance"),
+                "known_traits": rel.get("known_traits", []),
+            }
+            try:
+                await _memory.upsert_relationship(key, target_id, sentiment, metadata)
+            except Exception as e:
+                logger.debug(f"census relationship upsert failed: {e}")
+
     result: dict[str, Any] = {"ok": True, "sims": len(sims), "households": len(households)}
+    if any(
+        diff[key]
+        for key in ("sims_added", "sims_removed", "households_added", "households_removed")
+    ):
+        result["diff"] = diff
+        logger.info(
+            "census diff scope=%s sims+%s -%s households+%s -%s",
+            req.scope,
+            diff["sims_added"],
+            diff["sims_removed"],
+            diff["households_added"],
+            diff["households_removed"],
+        )
     if _scheduler is not None:
         result["queued"] = _enqueue_census_backgrounds(req, sims, households)
     if _agency is not None:
@@ -1690,6 +2049,8 @@ async def ingest_autonomy_tick(req) -> dict[str, Any]:
     """Ingest a zone pulse and schedule per-Sim impulses (v0.2 A1/A2)."""
     if _agency is None:
         return {"ok": False, "scheduled": 0, "sleeping": [], "seats": {}}
+    # M2: enforce memory retention at most once per day, off the critical path.
+    await maybe_prune_memory()
     try:
         result = await _agency.ingest_tick(req)
         if isinstance(result, dict):
@@ -1801,10 +2162,30 @@ async def pull_directives(
     return {"ok": True, "directives": [i for i in intents if i.get("name")]}
 
 
+def _roster_exposed() -> bool:
+    """Honor ``runtime.expose_roster`` (v0.3 R7/§15.11)."""
+    if _settings is None:
+        return True
+    return bool(getattr(_settings.runtime, "expose_roster", True))
+
+
+def _empty_roster(save_id: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "save_id": save_id,
+        "seats": 0,
+        "used": 0,
+        "agents": [],
+        "exposed": False,
+    }
+
+
 def seats_roster(save_id: str, player_id: str = "local") -> dict[str, Any]:
     """Return the live agent-roster (seat occupancy) for a save (v0.3 R2)."""
     if _agency is None:
         return {"ok": False, "save_id": save_id, "seats": 0, "used": 0, "agents": []}
+    if not _roster_exposed():
+        return _empty_roster(save_id)
     roster = _agency.seats.roster(player_id, save_id)
     return {"ok": True, "save_id": save_id, **roster}
 
@@ -1877,10 +2258,69 @@ async def maybe_consolidate(sim, lang: str) -> None:
         logger.warning(f"dialogue consolidation persist failed: {exc}")
 
 
+async def consolidate_now(sim, lang: str) -> dict[str, Any]:
+    """Forcefully fold a Sim's pending dialogue into one memory (manual trigger).
+
+    Unlike :func:`maybe_consolidate` this ignores the idle window, so the pie
+    menu can consolidate on demand. Never raises.
+    """
+    if _memory is None or _settings is None:
+        return {"ok": False, "consolidated": 0, "message_key": "error.memory_unavailable"}
+    if not _settings.memory.consolidation_enabled:
+        return {"ok": False, "consolidated": 0, "message_key": "notify.consolidate.disabled"}
+
+    from ..memory import consolidation as dialogue_consolidation
+    from ..memory.base import MemKey
+
+    key = MemKey(sim.player_id, sim.save_id, sim.sim_id)
+    try:
+        turns = await _memory.unconsolidated_events(key, limit=100)
+    except Exception as exc:
+        logger.warning(f"consolidate_now read failed: {exc}")
+        return {"ok": False, "consolidated": 0, "message_key": "error.memory_unavailable"}
+
+    if len(turns) < 2:
+        return {"ok": True, "consolidated": 0, "message_key": "notify.consolidate.none"}
+
+    try:
+        profile = await _memory.get_profile(key) or {}
+    except Exception:
+        profile = {}
+
+    try:
+        result = await dialogue_consolidation.consolidate_turns(
+            turns, profile, _effective_registry(), lang
+        )
+    except Exception as exc:
+        logger.warning(f"consolidate_now failed: {exc}")
+        return {"ok": False, "consolidated": 0, "message_key": "error.brain_foggy"}
+
+    try:
+        await _memory.add_event(
+            key,
+            {
+                "type": "consolidated_memory",
+                "content": result,
+                "importance": 1.2,
+                "emotion": (result.get("emotional_takeaways") or [None])[0],
+                "salience": 1.2,
+            },
+        )
+        await _memory.mark_consolidated(
+            key, [turn.get("id") for turn in turns if turn.get("id") is not None]
+        )
+    except Exception as exc:
+        logger.warning(f"consolidate_now persist failed: {exc}")
+        return {"ok": False, "consolidated": 0, "message_key": "error.brain_foggy"}
+
+    logger.info("consolidate_now sim=%s turns=%d", sim.sim_id, len(turns))
+    return {"ok": True, "consolidated": len(turns), "message_key": "notify.consolidate.done"}
+
+
 async def shutdown() -> None:
     """Clean up resources."""
     global _registry, _memory, _nodes, _rails, _audit, _scheduler, _chat_budget, _orchestrator
-    global _agency, _coordinator, _context_forge
+    global _agency, _coordinator, _context_forge, _last_prune_at
     _context_forge = None
     if _scheduler is not None:
         await _scheduler.stop()
@@ -1903,3 +2343,4 @@ async def shutdown() -> None:
     _rails = None
     _audit = None
     _census_by_save.clear()
+    _last_prune_at = 0.0

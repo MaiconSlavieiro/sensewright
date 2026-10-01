@@ -148,6 +148,22 @@ class FallbackMemory:
         result.sort(key=lambda entry: entry["household_id"])
         return result
 
+    async def upsert_relationship(
+        self,
+        key: MemKey,
+        target_sim_id: int,
+        sentiment: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        store = getattr(self, "_relationships", None)
+        if store is None:
+            store = {}
+            self._relationships = store
+        store[(key.player_id, key.save_id, key.sim_id, int(target_sim_id))] = {
+            "sentiment": float(sentiment),
+            "metadata": metadata or {},
+        }
+
     async def reset(self, scope: str, key: MemKey | None) -> dict[str, int]:
         deleted = {
             "sims": 0,

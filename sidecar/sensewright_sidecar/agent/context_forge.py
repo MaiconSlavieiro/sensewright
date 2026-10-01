@@ -18,11 +18,19 @@ class ContextForge:
         self._memory = memory
         self._settings = settings
 
+    def _memory_enabled(self) -> bool:
+        """Honor ``[agents.layers] memory`` (v0.3 §15.11)."""
+        layers = getattr(getattr(self._settings, "agents", None), "layers", None)
+        if layers is None:
+            return True
+        return bool(getattr(layers, "memory", True))
+
     async def build(self, job: Any, *, memories_limit: int = 10) -> dict[str, Any]:
         """Return ``{profile, memories, world, autonomy}`` for an impulse job.
 
         Never raises: a failing memory read yields an empty slice so an impulse
-        can still run in native mode.
+        can still run in native mode. When the memory layer is disabled the
+        recalled slice is empty (the profile still grounds the impulse).
         """
         from ..memory.base import MemKey
 
@@ -35,7 +43,7 @@ class ContextForge:
                 profile = {}
 
         memories: list[Any] = []
-        if self._memory is not None:
+        if self._memory is not None and self._memory_enabled():
             try:
                 memories = await self._memory.recent_events(key, limit=memories_limit)
             except Exception:

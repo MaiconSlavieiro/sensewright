@@ -70,6 +70,7 @@ async def status(
     rails = agent_status.get("rails") or {}
     backgrounds = agent_status.get("backgrounds") or {}
     budget = agent_status.get("budget") or {}
+    agency = agent_status.get("agency") or {}
 
     # God orchestrator status
     god: dict[str, Any] = {}
@@ -92,4 +93,5 @@ async def status(
         rails=rails,
         backgrounds=backgrounds,
         budget=budget,
+        agency=agency,
     )

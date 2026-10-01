@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -19,6 +20,16 @@ from ..schemas import normalize_lang
 from .zeitgeist import clamp01, normalize_zeitgeist, zeitgeist_to_prompt_block
 
 logger = logging.getLogger(__name__)
+
+# Free reasoning models spend part of the completion budget on hidden reasoning;
+# at 500 tokens the JSON answer was routinely truncated mid-object (a live run
+# stored a background that was literally "{"). A larger budget lets the 2-4
+# sentence answer and its JSON envelope finish.
+BACKGROUND_MAX_TOKENS = 900
+
+# Below this many characters a "background" is not real prose (e.g. a stray "{"
+# from a truncated response); the deterministic template is preferable.
+_MIN_BACKGROUND_CHARS = 20
 
 # Canonical shape of a generated background. All generators return exactly
 # these keys so the mod and the memory store can rely on a stable contract.
@@ -53,6 +64,118 @@ def _string_list(value: Any) -> list[str]:
     return []
 
 
+# Native game traits include a large amount of non-personality plumbing (gender
+# options, relationship expectations, species, occult, life stage, likes/dislikes
+# preferences, S4CL markers). Dumped raw into a prompt they bury the handful of
+# traits that actually describe who the Sim is, so the background reads generic.
+# These helpers keep the personality traits and render them readable.
+_LIFE_STAGE_TRAITS = frozenset(
+    (
+        "adult",
+        "youngadult",
+        "yadult",
+        "teen",
+        "child",
+        "toddler",
+        "infant",
+        "baby",
+        "elder",
+    )
+)
+
+_TECHNICAL_TRAIT_PREFIXES = (
+    "gender",
+    "genderoptions",
+    "sexualorientation",
+    "sextrait",
+    "relexpectations",
+    "species",
+    "occult",
+    "walkstyle",
+    "handedness",
+    "umbrella",
+    "civicpolicy",
+    "hidden",
+    "s4cl",
+    "main_trait",
+    "simpreference",
+    "statistic",
+    "commodity",
+    "buff",
+)
+
+# Splits camel-case tuning names into words (``FamilyOriented`` -> ``Family
+# Oriented``).
+_RE_TRAIT_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _strip_trait_prefix(name: str) -> str:
+    """Drop the ``trait_``/``Trait`` tuning prefix from a native trait name."""
+    text = name.strip()
+    lowered = text.lower()
+    for prefix in ("trait_", "trait"):
+        if lowered.startswith(prefix):
+            text = text[len(prefix) :]
+            break
+    return text.strip(" _")
+
+
+def _is_technical_trait(name: str) -> bool:
+    """True when a native trait is plumbing, not personality."""
+    core = _strip_trait_prefix(name).lower().replace(" ", "").replace("_", "")
+    if not core:
+        return True
+    if core in _LIFE_STAGE_TRAITS:
+        return True
+    return core.startswith(_TECHNICAL_TRAIT_PREFIXES)
+
+
+def _pretty_trait(name: str) -> str:
+    """Render a native trait as readable words (``trait_FamilyOriented``)."""
+    text = _strip_trait_prefix(name).replace("_", " ").strip()
+    text = _RE_TRAIT_CAMEL.sub(" ", text)
+    return " ".join(text.split())
+
+
+def clean_traits(traits: Any) -> list[str]:
+    """Filter native traits to personality ones and make them readable.
+
+    Technical traits are dropped, the ``trait_`` prefix is stripped and camel
+    case split into words (``trait_FamilyOriented`` -> ``Family Oriented``).
+    Already-readable names are preserved; duplicates are removed. Never raises.
+    """
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in _string_list(traits):
+        if _is_technical_trait(raw):
+            continue
+        pretty = _pretty_trait(raw)
+        key = pretty.lower()
+        if not pretty or key in seen:
+            continue
+        seen.add(key)
+        result.append(pretty)
+    return result
+
+
+
+def _native_view(data: dict) -> dict:
+    """Merge a profile's nested ``native`` block over the top-level data.
+
+    A stored profile keeps the native facts under ``native`` (traits/age/career/
+    skills/relationships/kinship/aspiration); a census entry keeps them at the
+    top level. This returns one flat view so facts resolve either way.
+    """
+    data = _as_dict(data)
+    native = data.get("native")
+    if isinstance(native, dict):
+        merged = dict(native)
+        for key, value in data.items():
+            merged.setdefault(key, value)
+        return merged
+    return data
+
+
 def _format_skills(skills: Any) -> list[str]:
     if isinstance(skills, dict):
         result: list[str] = []
@@ -72,13 +195,13 @@ def _format_relationships(relationships: Any) -> list[str]:
     for rel in list(relationships)[:8]:
         if isinstance(rel, dict):
             partner = ""
-            for key in ("name", "full_name", "target", "other", "sim", "sim_name"):
+            for key in ("name", "full_name", "target_name", "target", "other", "sim", "sim_name"):
                 value = rel.get(key)
                 if value:
                     partner = str(value)
                     break
             label = ""
-            for key in ("relation", "relationship", "type", "status", "label"):
+            for key in ("relation", "relationship", "type", "status", "label", "track"):
                 value = rel.get(key)
                 if value:
                     label = str(value)
@@ -87,8 +210,9 @@ def _format_relationships(relationships: Any) -> list[str]:
                 result.append(f"{partner} ({label})")
             elif partner:
                 result.append(partner)
-            elif rel:
-                result.append(", ".join(f"{key}={value}" for key, value in rel.items()))
+            elif label:
+                result.append(label)
+            # else: unlabeled numeric-only relationship -> skip (never leak ids)
         else:
             text = str(rel).strip()
             if text:
@@ -192,13 +316,14 @@ def _mood_clause(lang: str, mood_tags: list[str], mood_influence: float) -> str:
 
 
 def _sim_facts(sim_data: dict) -> str:
-    data = _as_dict(sim_data)
+    data = _native_view(sim_data)
     lines = [
         f"Name: {data.get('full_name') or data.get('name') or 'unknown'}",
         f"Age: {data.get('age') or 'unknown'}",
         f"Gender: {data.get('gender') or 'unknown'}",
+        f"Aspiration: {data.get('aspiration') or 'unknown'}",
         f"Career: {data.get('career') or 'none'}",
-        f"Native traits: {', '.join(_string_list(data.get('traits'))) or 'none'}",
+        f"Native traits: {', '.join(clean_traits(data.get('traits'))) or 'none'}",
         f"Skills: {', '.join(_format_skills(data.get('skills'))) or 'none'}",
         f"Relationships: {', '.join(_format_relationships(data.get('relationships'))) or 'none'}",
         f"Family (kinship): {', '.join(_format_kinship(data.get('kinship'))) or 'none'}",
@@ -210,7 +335,7 @@ def fallback_sim_background(
     sim_data: dict, mood_tags: list[str], mood_influence: float = 0.5
 ) -> dict:
     """Deterministic Sim background in the requested language (via ``sim_data``)."""
-    data = _as_dict(sim_data)
+    data = _native_view(sim_data)
     lang = _lang_from_data(data)
     tags = normalize_zeitgeist({"mood_tags": mood_tags})["mood_tags"]
     influence = clamp01(mood_influence)
@@ -218,7 +343,8 @@ def fallback_sim_background(
     name = str(data.get("full_name") or data.get("name") or "This Sim").strip() or "This Sim"
     age = str(data.get("age") or "").strip()
     career = str(data.get("career") or "").strip()
-    traits = _string_list(data.get("traits"))[:6]
+    aspiration = str(data.get("aspiration") or "").strip()
+    traits = clean_traits(data.get("traits"))[:6]
     skills = _format_skills(data.get("skills"))[:6]
     relationships = _format_relationships(data.get("relationships"))[:8]
     kinship = _format_kinship(data.get("kinship"))[:8]
@@ -235,6 +361,8 @@ def fallback_sim_background(
         parts.append(content_i18n.t(lang, "background.sim.no_traits"))
     if career:
         parts.append(content_i18n.t(lang, "background.sim.career", career=career))
+    if aspiration:
+        parts.append(content_i18n.t(lang, "background.sim.aspiration", aspiration=aspiration))
     if skills:
         parts.append(content_i18n.t(lang, "background.sim.skills", skills=", ".join(skills)))
     if relationships:
@@ -321,6 +449,49 @@ def _extract_json_object(text: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _looks_like_json(text: str) -> bool:
+    """True when a string is (part of) a JSON object rather than prose."""
+    stripped = text.lstrip()
+    if stripped.startswith(("{", "[")):
+        return True
+    return '"text"' in text or "'text'" in text
+
+
+def _extract_json_text_field(raw: str) -> str:
+    """Pull the ``"text"`` value out of a possibly *truncated* JSON answer.
+
+    ``json.loads`` fails on a truncated object, which used to leak the raw JSON
+    (or a lone ``{``) into the Sim's stored background. This scans the ``"text"``
+    string value to its closing quote â€” or to the end of the text when the
+    response was cut off â€” and unescapes the common JSON escapes. Never raises.
+    """
+    key = raw.find('"text"')
+    if key == -1:
+        return ""
+    colon = raw.find(":", key + len('"text"'))
+    if colon == -1:
+        return ""
+    start = raw.find('"', colon + 1)
+    if start == -1:
+        return ""
+
+    escapes = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
+    chars: list[str] = []
+    index = start + 1
+    while index < len(raw):
+        char = raw[index]
+        if char == "\\" and index + 1 < len(raw):
+            nxt = raw[index + 1]
+            chars.append(escapes.get(nxt, nxt))
+            index += 2
+            continue
+        if char == '"':
+            break
+        chars.append(char)
+        index += 1
+    return "".join(chars).strip()
+
+
 def _background_from_response(
     text: str,
     native_traits: list[str],
@@ -335,14 +506,18 @@ def _background_from_response(
     if parsed is not None:
         body = str(parsed.get("text") or parsed.get("background") or parsed.get("description") or "")
         summary = str(parsed.get("summary") or parsed.get("short_summary") or "")
-        traits = _string_list(parsed.get("traits")) or native_traits
+        traits = clean_traits(parsed.get("traits")) or native_traits
     else:
-        body = raw
+        # Invalid/truncated JSON: salvage the prose field, never the raw object.
+        salvaged = _extract_json_text_field(raw)
+        if not salvaged and _looks_like_json(raw):
+            return None
+        body = salvaged or raw
         summary = ""
         traits = native_traits
 
     body = body.strip()
-    if not body:
+    if not body or _looks_like_json(body) or len(body) < _MIN_BACKGROUND_CHARS:
         return None
     if not summary.strip():
         summary = _summarize(body)
@@ -356,11 +531,12 @@ def _build_sim_messages(
     lang: str,
     mood_influence: float,
 ) -> list[dict[str, str]]:
-    name = str(sim_data.get("full_name") or sim_data.get("name") or "the Sim").strip()
+    data = _native_view(sim_data)
+    name = str(data.get("full_name") or data.get("name") or "the Sim").strip()
     system = (
         "You are the God agent's biographer for a Sims 4 save. You write backgrounds "
         "that fit the neighborhood zeitgeist. The native Sim data is ground truth: "
-        "never contradict traits, age, career, skills or kinship."
+        "never contradict aspiration, traits, age, career, skills, relationships or kinship."
     )
     user = (
         f"Native Sim data (ground truth):\n{_sim_facts(sim_data)}\n\n"
@@ -370,7 +546,12 @@ def _build_sim_messages(
         "Instructions:\n"
         f"- Write a 2-4 sentence background for {name}.\n"
         f"- Write only in {content_i18n.language_name(lang)}.\n"
-        "- Never contradict the native traits, age, career, skills or relationships.\n"
+        "- Ground the story in the native facts: the aspiration should drive the "
+        "Sim's goals, and the personality traits should shape their behavior.\n"
+        "- Name concrete people from the relationships/family data. If the Sim has "
+        "family or relationships, do NOT describe them as lonely, isolated or alone.\n"
+        "- Never contradict the native aspiration, traits, age, career, skills, "
+        "relationships or kinship.\n"
         '- Return ONLY a JSON object with keys "text" (string), "summary" '
         '(one sentence) and "traits" (array of native trait strings).'
     )
@@ -448,11 +629,11 @@ async def generate_sim_background(
             messages,
             lang=target_lang,
             temperature=0.8,
-            max_tokens=500,
+            max_tokens=BACKGROUND_MAX_TOKENS,
         )
         background = _background_from_response(
             getattr(response, "text", ""),
-            _string_list(data.get("traits")),
+            clean_traits(_native_view(data).get("traits")),
             tags,
             influence,
         )
@@ -462,7 +643,6 @@ async def generate_sim_background(
     except Exception as exc:
         logger.warning("sim background generation failed: %s", exc)
         return {"background": fallback, "provider": None}
-
 
 async def generate_household_background(
     household_data: dict,
@@ -494,11 +674,11 @@ async def generate_household_background(
             messages,
             lang=target_lang,
             temperature=0.8,
-            max_tokens=500,
+            max_tokens=BACKGROUND_MAX_TOKENS,
         )
         background = _background_from_response(
             getattr(response, "text", ""),
-            _string_list(data.get("traits")),
+            clean_traits(data.get("traits")),
             tags,
             influence,
         )

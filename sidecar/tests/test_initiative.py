@@ -202,9 +202,12 @@ def test_build_impulse_prompt_forbids_meta_narration():
     )
 
     assert "first person" in messages[0]["content"]
-    assert "no preamble" in messages[0]["content"].lower()
-    assert "first person" in messages[1]["content"]
+    assert "call exactly one tool" in messages[0]["content"]
+    assert "thinking process" in messages[0]["content"].lower()
+    assert "first-person" in messages[1]["content"]
     assert "no preamble" in messages[1]["content"].lower()
+    # The kind task must be formatted: no raw ``{name}`` placeholder leaks.
+    assert "{name}" not in messages[1]["content"]
 
 
 async def test_build_impulse_falls_back_when_registry_raises():
@@ -359,3 +362,64 @@ async def test_build_impulse_forwards_reasoning_effort():
     )
 
     assert registry.calls[0]["reasoning_effort"] == "minimal"
+
+
+async def test_build_impulse_parses_text_tool_call():
+    # A free model that cannot emit native tool calls prints the call as JSON.
+    response = FakeResponse(
+        text='[[{"name": "say_to", "parameters": {"message": "oi", "target_sim_id": 11}}]]',
+    )
+
+    result = await build_impulse(
+        job=job("idle"),
+        profile={"name": "Ana"},
+        world={},
+        memories=[],
+        registry=FakeRegistry(response),
+        lang="pt-BR",
+        autonomy="semi",
+    )
+
+    assert result["used_llm"] is True
+    assert result["thought"] == ""
+    assert len(result["directives"]) == 1
+    assert result["directives"][0]["name"] == "say_to"
+    assert result["directives"][0]["args"]["target_sim_id"] == 11
+
+
+async def test_build_impulse_ignores_text_tool_call_for_disallowed_tool():
+    response = FakeResponse(text='[{"name": "add_trait", "parameters": {"trait": "X"}}]')
+
+    result = await build_impulse(
+        job=job("idle"),
+        profile={"name": "Ana"},
+        world={},
+        memories=[],
+        registry=FakeRegistry(response),
+        lang="en",
+        autonomy="suggest",
+    )
+
+    assert result["directives"] == []
+
+
+def test_build_impulse_prompt_lists_nearby_sim_ids():
+    messages = build_impulse_prompt(
+        job=job("idle", sim_id=10),
+        profile={"name": "Ana"},
+        world={
+            "zone": {"time_of_day": "morning"},
+            "sims": {
+                "10": {"sim_id": 10, "full_name": "Ana", "mood": "happy"},
+                "11": {"sim_id": 11, "full_name": "Beto", "mood": "fine"},
+            },
+        },
+        memories=[],
+        lang="en",
+    )
+
+    user = messages[1]["content"]
+    assert "Beto (id=11" in user
+    assert "exact id values" in user
+    # The acting Sim must not be listed as a nearby target of itself.
+    assert "Ana (id=10" not in user

@@ -42,6 +42,9 @@ class LLMResponse:
     model: str
     raw: dict[str, Any]
     tool_calls: tuple[LLMToolCall, ...] = ()
+    # Provider stop reason (e.g. "stop", "length", "tool_calls"). ``length``
+    # means the output was cut off before it finished.
+    finish_reason: str | None = None
 
 
 class LLMError(Exception):

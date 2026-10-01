@@ -133,3 +133,56 @@ async def test_consolidate_normalizes_string_lists_from_llm():
     assert out["topics"] == ["festival", "friendship"]
     # Empty values keep the deterministic fallback instead of being wiped.
     assert out["facts"] == ["Bella Goth took part in this conversation."]
+
+
+# ─── all native event types reach the consolidation (fix) ────────────────
+
+
+def test_messages_render_every_event_type():
+    from sensewright_sidecar.memory.consolidation import _messages
+
+    events = [
+        {"type": "thought", "content": {"text": "wants a coffee"}},
+        {"type": "social", "content": {"topic": "gardening", "with": "Mortimer",
+                                       "lines": [{"text": "The roses bloomed!"}]}},
+        {"type": "buff_add", "content": {"buff": "Happy"}},
+        {"type": "relationship_change", "content": {"target": "Mortimer", "depth": 12.0}},
+        {"type": "skill_level_up", "content": {"skill": "Gardening"}},
+        {"type": "career_change", "content": {"career": "Chef"}},
+        {"type": "trait_change", "content": {"trait": "Creative"}},
+        {"type": "sim_death", "content": {"sim_id": 9}},
+        {"type": "snapshot", "content": {"mood": "fine"}},  # skipped
+    ]
+    lines = _messages(events, "en")
+    joined = " | ".join(lines)
+    assert "wants a coffee" in joined
+    assert "gardening" in joined and "The roses bloomed!" in joined
+    assert "felt Happy" in joined
+    assert "relationship with Mortimer" in joined
+    assert "improved Gardening" in joined
+    assert "career changed to Chef" in joined
+    assert "trait changed: Creative" in joined
+    assert "passed away" in joined
+    assert "snapshot" not in joined and "fine" not in joined
+
+
+def test_messages_prefer_player_choice_and_consequence():
+    from sensewright_sidecar.memory.consolidation import _messages
+
+    events = [
+        {"type": "player_choice", "content": {"choice": "Defended the stranger",
+                                              "consequence": "gained a friend"}},
+    ]
+    lines = _messages(events, "en")
+    assert lines == ["Defended the stranger"]
+
+
+def test_deterministic_consolidation_summarizes_day_events():
+    events = [
+        {"type": "thought", "content": {"text": "eager to start the day"}},
+        {"type": "buff_add", "content": {"buff": "Energized"}},
+        {"type": "social", "content": {"topic": "the festival", "with": "Mortimer",
+                                       "lines": [{"text": "See you at the festival!"}]}},
+    ]
+    result = deterministic_consolidation(events, PROFILE, "en")
+    assert "festival" in result["summary"].lower()

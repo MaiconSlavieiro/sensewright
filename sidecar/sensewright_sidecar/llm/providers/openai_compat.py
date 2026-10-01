@@ -192,9 +192,28 @@ class OpenAICompatProvider:
             text = message.get("content", "") or ""
 
             tool_calls = self._parse_tool_calls(message.get("tool_calls"))
+            finish_reason = choices[0].get("finish_reason")
+
+            # A reasoning model can burn the whole output budget on hidden
+            # reasoning and return ``finish_reason=length`` with no tool call.
+            # That leaves an acting agent silent, so treat it as a model-level
+            # failure and let the provider try the next model in its list.
+            if tools and not tool_calls and finish_reason == "length":
+                raise LLMError(
+                    f"Model {model} truncated before emitting a tool call",
+                    self.name,
+                    retryable=True,
+                )
 
             self._mark_success()
-            return LLMResponse(text=text, provider=self.name, model=model, raw=data, tool_calls=tool_calls)
+            return LLMResponse(
+                text=text,
+                provider=self.name,
+                model=model,
+                raw=data,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+            )
 
         except LLMError:
             raise

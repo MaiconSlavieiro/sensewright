@@ -14,6 +14,7 @@ the richer shape.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -140,12 +141,29 @@ class IntentBus:
 
     def __init__(self) -> None:
         self._pending: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        # Last sleep-consolidation wall-clock per Sim; "next_sleep" intents stored
+        # before it are considered expired (v0.3 R3 lifecycle enforcement).
+        self._sleep_at: dict[tuple[str, str, int], float] = {}
         self._stored = 0
         self._pulled = 0
+        self._expired = 0
 
     def store(self, player_id: str, save_id: str, intent: dict[str, Any]) -> None:
-        self._pending.setdefault((player_id, save_id), []).append(intent)
+        # Copy so the caller's mapping is never mutated, and stamp the lifecycle
+        # clock used to expire "next_sleep" intents.
+        stored = dict(intent)
+        stored.setdefault("expires_at", DEFAULT_EXPIRES_AT)
+        stored.setdefault("stored_at", time.time())
+        self._pending.setdefault((player_id, save_id), []).append(stored)
         self._stored += 1
+
+    def note_sleep(self, player_id: str, save_id: str, sim_id: int, ts: float | None = None) -> None:
+        """Mark that a Sim slept: invalidates its pending ``next_sleep`` intents."""
+        try:
+            key = (player_id, save_id, int(sim_id))
+        except (TypeError, ValueError):
+            return
+        self._sleep_at[key] = time.time() if ts is None else float(ts)
 
     def extend(self, player_id: str, save_id: str, intents: list[dict[str, Any]]) -> int:
         count = 0
@@ -162,16 +180,21 @@ class IntentBus:
         *,
         sim_id: int | None = None,
         limit: int = 20,
+        now: float | None = None,
     ) -> list[dict[str, Any]]:
         key = (player_id, save_id)
         bucket = self._pending.get(key)
         if not bucket:
             return []
         limit = max(0, int(limit))
+        reference = time.time() if now is None else float(now)
 
         taken: list[dict[str, Any]] = []
         remaining: list[dict[str, Any]] = []
         for intent in bucket:
+            if self._is_expired(player_id, save_id, intent, reference):
+                self._expired += 1
+                continue
             if len(taken) >= limit:
                 remaining.append(intent)
                 continue
@@ -187,6 +210,36 @@ class IntentBus:
         self._pulled += len(taken)
         return taken
 
+    def _is_expired(
+        self, player_id: str, save_id: str, intent: dict[str, Any], now: float
+    ) -> bool:
+        """Evaluate an intent's ``expires_at`` lifecycle (v0.3 R3).
+
+        A numeric value is an absolute wall-clock deadline. ``"next_sleep"``
+        expires once the owning Sim has slept since the intent was stored.
+        Unknown values never expire.
+        """
+        expires = intent.get("expires_at")
+        if isinstance(expires, (int, float)) and not isinstance(expires, bool):
+            try:
+                return float(expires) <= now
+            except (TypeError, ValueError):
+                return False
+        if isinstance(expires, str) and expires.strip().lower() == "next_sleep":
+            try:
+                sim_id = int(intent.get("sim_id", 0))
+            except (TypeError, ValueError):
+                return False
+            sleep_at = self._sleep_at.get((player_id, save_id, sim_id))
+            if sleep_at is None:
+                return False
+            try:
+                stored = float(intent.get("stored_at", 0.0))
+            except (TypeError, ValueError):
+                return False
+            return stored < float(sleep_at)
+        return False
+
     def pending_count(self, player_id: str | None = None, save_id: str | None = None) -> int:
         if player_id is not None and save_id is not None:
             return len(self._pending.get((player_id, save_id), []))
@@ -195,6 +248,7 @@ class IntentBus:
     def clear(self, player_id: str | None = None, save_id: str | None = None) -> None:
         if player_id is None or save_id is None:
             self._pending.clear()
+            self._sleep_at.clear()
             return
         self._pending.pop((player_id, save_id), None)
 
@@ -209,4 +263,5 @@ class IntentBus:
             "by_kind": by_kind,
             "stored": self._stored,
             "pulled": self._pulled,
+            "expired": self._expired,
         }

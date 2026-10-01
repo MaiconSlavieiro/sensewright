@@ -60,8 +60,16 @@ class TestAutonomyTickEndpoint:
             "sim": {"player_id": "local", "save_id": "save9", "sim_id": 130},
             "zone": {"time_of_day": "day", "lot_type": "residential"},
             "sims": [
-                {"sim_id": 130, "full_name": "Ana", "autonomy": "full"},
-                {"sim_id": 131, "full_name": "Bia", "autonomy": "full"},
+                {
+                    "sim_id": 130, "full_name": "Ana", "autonomy": "full",
+                    "current_interaction": "social_Chat",
+                    "interaction_target_sim_id": 131, "location": "10.0,10.0",
+                },
+                {
+                    "sim_id": 131, "full_name": "Bia", "autonomy": "full",
+                    "current_interaction": "social_Chat",
+                    "interaction_target_sim_id": 130, "location": "10.0,10.0",
+                },
             ],
             "lang": "en",
         }

@@ -118,6 +118,16 @@ class MemoryStore(Protocol):
         """List every household record for a save."""
         ...
 
+    async def upsert_relationship(
+        self,
+        key: MemKey,
+        target_sim_id: int,
+        sentiment: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Create or update a Sim's stored relationship edge to a target Sim."""
+        ...
+
     async def reset(self, scope: str, key: MemKey | None) -> dict[str, int]:
         """Clear memory by scope. Returns counts of deleted rows."""
         ...

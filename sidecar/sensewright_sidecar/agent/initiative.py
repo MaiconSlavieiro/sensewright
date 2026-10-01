@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import namedtuple
 from typing import Any
 from uuid import uuid4
 
@@ -24,8 +25,9 @@ logger = logging.getLogger(__name__)
 
 # Output budget: impulses are one short line plus at most one tool call, but
 # reasoning models spend part of the budget on hidden reasoning before the
-# visible answer, so this must leave headroom (250 truncated the line).
-IMPULSE_MAX_TOKENS = 600
+# visible answer, so this must leave headroom (250/600 truncated the line and
+# silenced the agent; several hundred reasoning tokens are not unusual).
+IMPULSE_MAX_TOKENS = 900
 
 # Tools the initiative loop may emit (beyond plain read tools). Filtered by the
 # per-Sim autonomy mapping so minimal Sims can never act.
@@ -48,19 +50,25 @@ _IDLE_LIMIT = 1
 _SYSTEM = (
     "You are {name}, a Sim in The Sims 4. Everything you write is {name}'s own "
     "inner voice, in {lang}, in the first person.\n"
-    "Write ONLY the sentence itself: no preamble, no headings, no labels, and "
-    "never explain or restate these instructions or the scene.\n"
-    "You may also call at most one tool if {name} would genuinely act right now."
+    "Decide what {name} does RIGHT NOW and express it with a tool call:\n"
+    "- If {name} speaks to someone, changes mood, goes somewhere, or takes any "
+    "action, call exactly one tool to do it.\n"
+    "- Only if {name} would do nothing at all, reply with one short in-character "
+    "thought as plain text (no tool).\n"
+    "Never explain your reasoning, never restate these instructions, and never "
+    "output a thinking process."
 )
 
 _KIND_TASK = {
     "reaction": (
-        "Something just happened around you. React as {name} right now: speak to "
-        "the other Sim, shift your mood, take one action, or simply think."
+        "Something just happened around you. React as {name} right now: if "
+        "{name} would speak, move, change mood or act, call exactly one tool; "
+        "otherwise write one short thought as {name}."
     ),
     "idle": (
-        "This is an ordinary moment in your day. Share one passing thought as "
-        "{name}."
+        "This is an ordinary moment in your day. If {name} would act (speak, "
+        "socialize, move, do something), call exactly one tool now; otherwise "
+        "share one passing thought as {name}."
     ),
     "sleep": "You are drifting off to sleep. Do not call any tool.",
 }
@@ -132,12 +140,12 @@ def build_impulse_prompt(
     memory_text = _describe_memories(memories)
     if memory_text:
         lines.append(f"Recent memories: {memory_text}")
-    lines.append(_KIND_TASK.get(job.kind, _KIND_TASK["idle"]))
+    lines.append(_KIND_TASK.get(job.kind, _KIND_TASK["idle"]).format(name=name))
     if job.kind == "reaction" and job.event:
         lines.append(f"What just happened: {json.dumps(job.event, ensure_ascii=False)}")
     lines.append(
-        f"Now write only {name}'s thought itself (first person, 1-2 sentences). "
-        "No preamble, no headings, no labels."
+        f"Now choose: call one tool if {name} acts right now, or reply with one "
+        f"short first-person thought as {name} (no preamble, no labels)."
     )
     return [
         {"role": "system", "content": _SYSTEM.format(name=name, lang=lang)},
@@ -185,17 +193,106 @@ def _with_intents(result: dict[str, Any], job: Any) -> dict[str, Any]:
 _MAX_LLM_ATTEMPTS = 2
 
 
+# A tool call recovered from free text (models that cannot emit native
+# ``tool_calls``). Shaped like ``LLMToolCall`` so ``_directive_from_call`` reads
+# it identically via ``getattr``.
+_TextCall = namedtuple("_TextCall", "id name arguments")
+
+
+def _iter_balanced_json(text: str):
+    """Yield substrings of ``text`` that parse as JSON (arrays or objects)."""
+    for start, ch in enumerate(text):
+        if ch not in "[{":
+            continue
+        depth = 0
+        in_string = False
+        escaped = False
+        for end in range(start, len(text)):
+            current = text[end]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == '"':
+                    in_string = False
+                continue
+            if current == '"':
+                in_string = True
+            elif current in "[{":
+                depth += 1
+            elif current in "]}":
+                depth -= 1
+                if depth == 0:
+                    yield text[start : end + 1]
+                    break
+
+
+def _json_tool_dicts(value: Any):
+    """Recursively yield tool-call dicts (those carrying a ``name``)."""
+    if isinstance(value, dict):
+        if value.get("name") and not isinstance(value.get("name"), dict):
+            yield value
+            return
+        for item in value.values():
+            yield from _json_tool_dicts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _json_tool_dicts(item)
+
+
+def _text_tool_calls(text: Any, allowed: set) -> list[Any]:
+    """Best-effort tool calls embedded in an LLM text response."""
+    raw = str(text or "")
+    if not raw or "name" not in raw:
+        return []
+    calls: list[Any] = []
+    for span in _iter_balanced_json(raw):
+        try:
+            parsed = json.loads(span)
+        except (TypeError, ValueError):
+            continue
+        for item in _json_tool_dicts(parsed):
+            name = str(item.get("name") or "")
+            if name not in allowed:
+                continue
+            arguments = (
+                item.get("arguments")
+                or item.get("parameters")
+                or item.get("args")
+                or item.get("input")
+                or {}
+            )
+            calls.append(_TextCall(str(item.get("id") or uuid4().hex), name, arguments))
+            break
+    return calls
+
+
 def _parse_impulse_response(job: Any, response: Any, allowed: set, limit: int):
-    """Extract ``(directives, thought)`` from one LLM response."""
+    """Extract ``(directives, thought)`` from one LLM response.
+
+    Native OpenAI ``tool_calls`` are preferred. Some free models cannot emit
+    them and instead print a JSON call inside ``content`` (e.g.
+    ``[[{"name": "say_to", "parameters": {...}}]]``); that text is parsed as a
+    best-effort fallback so an acting Sim is never silenced by a provider
+    limitation. When a call is recovered from the text it is not stored as a
+    thought.
+    """
+    calls = list(getattr(response, "tool_calls", ()) or ())
+    from_text = False
+    if not calls:
+        calls = _text_tool_calls(getattr(response, "text", ""), allowed)
+        from_text = bool(calls)
+
     directives: list[dict[str, Any]] = []
-    for call in getattr(response, "tool_calls", ()) or ():
+    for call in calls:
         name = str(getattr(call, "name", "") or "")
         if name not in allowed:
             continue
         directives.append(_directive_from_call(job, call))
         if len(directives) >= limit:
             break
-    thought = _clean_thought(getattr(response, "text", ""))
+    thought = "" if directives and from_text else _clean_thought(getattr(response, "text", ""))
     return directives, thought
 
 
@@ -394,11 +491,12 @@ def _describe_world(world: dict[str, Any] | None, job: Any) -> str:
 
     others: list[str] = []
     for key, state in sims.items():
-        if _as_int(state.get("sim_id", key)) == _as_int(job.sim_id):
+        other_id = _as_int(state.get("sim_id", key))
+        if other_id == _as_int(job.sim_id):
             continue
         label = state.get("full_name") or str(key)
         mood = state.get("mood") or "neutral"
-        others.append(f"{label} ({mood})")
+        others.append(f"{label} (id={other_id}, mood={mood})")
 
     parts: list[str] = []
     if zone.get("time_of_day"):
@@ -410,6 +508,7 @@ def _describe_world(world: dict[str, Any] | None, job: Any) -> str:
     text = ", ".join(parts) if parts else "unknown place"
     if others:
         text += "; nearby: " + ", ".join(others[:6])
+        text += ". Use only these exact id values when acting on another Sim."
     return text
 
 

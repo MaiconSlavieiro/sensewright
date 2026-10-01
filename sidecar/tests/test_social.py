@@ -58,6 +58,12 @@ def test_clean_line_rejects_meta_commentary():
     assert clean_line("I'm sorry, but...") == ""
 
 
+def test_clean_line_never_speaks_a_private_thought():
+    # fase-3: a [thought] block is internal only; only the spoken part is said.
+    assert clean_line("[thought]I do not trust him yet.[/thought]Oi, tudo bem?") == "Oi, tudo bem?"
+    assert clean_line("[thought]just thinking, nothing to say[/thought]") == ""
+
+
 # ─── template_dialogue ───────────────────────────────────────────────────
 
 
@@ -254,7 +260,7 @@ async def test_render_dialogue_english_does_not_forbid_english():
     assert "do NOT use English" not in system
 
 
-async def test_render_dialogue_uses_extra_context_and_sim_ids():
+async def test_render_dialogue_uses_extra_context_and_never_leaks_ids():
     registry = FakeRegistry(
         '{"topic": "x", "lines": [{"speaker": "a", "text": "Hi", "tone": "warm"}, '
         '{"speaker": "b", "text": "Hey", "tone": "warm"}]}'
@@ -274,8 +280,37 @@ async def test_render_dialogue_uses_extra_context_and_sim_ids():
     user = registry.messages[0][1]["content"]
     assert "Background: baker" in user
     assert "Background: doctor" in user
-    assert "sim_id 1" in user
-    assert "sim_id 2" in user
+    # The prompt must never reference numeric Sim ids (they used to leak into
+    # the dialogue content).
+    assert "sim_id" not in user
+    assert "Ana" in user and "Bob" in user
+
+
+async def test_render_dialogue_name_override_replaces_sim_id_fallback():
+    """A Sim with no profile still speaks under its full_name, never 'Sim <id>'."""
+    registry = FakeRegistry(
+        '{"topic": "x", "lines": [{"speaker": "a", "text": "Hi", "tone": "warm"}]}'
+    )
+    await render_dialogue(
+        {}, {}, None, registry, "en", 589152665625761828, 2,
+        name_a="Olivia", name_b="Carolina",
+    )
+    user = registry.messages[0][1]["content"]
+    assert "Olivia" in user and "Carolina" in user
+    assert "589152665625761828" not in user
+
+
+async def test_render_dialogue_interaction_shapes_the_prompt():
+    registry = FakeRegistry(
+        '{"topic": "x", "lines": [{"speaker": "a", "text": "Hi", "tone": "warm"}]}'
+    )
+    await render_dialogue(
+        {"name": "Ana"}, {"name": "Bob"}, None, registry, "en", 1, 2,
+        interaction="social_Flirt",
+    )
+    user = registry.messages[0][1]["content"]
+    assert "social_Flirt" in user
+    assert "flirty" in user
 
 
 # ─── sim_brief ───────────────────────────────────────────────────────────
@@ -296,6 +331,72 @@ def test_sim_brief_includes_background_personality_memory_and_partner():
 def test_sim_brief_empty_when_no_context():
     assert sim_brief(None) == ""
     assert sim_brief({}) == ""
+
+
+def test_sim_brief_reads_nested_event_content():
+    """Memories are stored as {'content': {'text': ...}}; the text must surface."""
+    entry = {
+        "profile": {"backstory": "baker"},
+        "memories": [
+            {"type": "thought", "content": {"text": "slept badly"}},
+            {"type": "chat", "content": {"message": "hello there"}},
+        ],
+    }
+    brief = sim_brief(entry)
+    assert "slept badly" in brief
+    assert "hello there" in brief
+
+
+def test_sim_brief_renders_social_event_with_topic():
+    entry = {
+        "profile": {},
+        "memories": [
+            {
+                "type": "social",
+                "content": {
+                    "topic": "gardening",
+                    "lines": [{"speaker": "a", "text": "As rosas floresceram!", "tone": "warm"}],
+                    "with": 22,
+                },
+            }
+        ],
+    }
+    brief = sim_brief(entry)
+    assert "gardening" in brief
+    assert "As rosas floresceram!" in brief
+
+
+def test_sim_brief_unwraps_background_dict_and_repr():
+    assert "padeiro" in sim_brief({"profile": {"background": {"text": "padeiro"}}})
+    assert "padeiro" in sim_brief({"profile": {"background": "{'text': 'padeiro'}"}})
+    # Double-encoded legacy background.
+    double = "{\"text\": \"{\\\"text\\\": \\\"padeiro\\\"}\"}"
+    assert "padeiro" in sim_brief({"profile": {"background": double}})
+
+
+def test_sim_brief_splits_partner_memories():
+    entry = {
+        "profile": {"backstory": "baker"},
+        "memories": [
+            {"type": "thought", "content": {"text": "wants coffee"}},
+            {"type": "social", "content": {"topic": "the park", "with": 22}},
+            {"type": "social", "content": {"topic": "the market", "with": 33}},
+        ],
+    }
+    brief = sim_brief(entry, other_name="Bea", partner_id=22)
+    assert "What you remember about Bea" in brief
+    assert "the park" in brief
+    # A memory about a different Sim stays in the general list, not Bea's.
+    assert "the market" in brief
+
+
+def test_sim_brief_partner_facts_absent_without_partner_id():
+    entry = {
+        "profile": {},
+        "memories": [{"type": "social", "content": {"topic": "the park", "with": 22}}],
+    }
+    brief = sim_brief(entry, other_name="Bea")
+    assert "What you remember about Bea" not in brief
 
 
 # ─── SocialLayer.configure ───────────────────────────────────────────────
@@ -667,4 +768,88 @@ def test_template_dialogue_localizes_pt_br():
     dlg = template_dialogue({}, {}, a_id=1, b_id=2, lang="pt-BR")
     assert "Oi" in dlg.lines[0]["text"]
     assert "Oi" in dlg.lines[1]["text"]
+
+
+# ─── template_dialogue: names + interaction shaping (v0.3 R5 fix) ─────────
+
+
+def test_template_dialogue_uses_name_override_not_sim_id():
+    dlg = template_dialogue({}, {}, a_id=111, b_id=222, name_a="Olivia", name_b="Carolina")
+    joined = " ".join(line["text"] for line in dlg.lines)
+    assert "Olivia" in joined and "Carolina" in joined
+    assert "111" not in joined and "222" not in joined
+
+
+def test_template_dialogue_flirty_interaction_sets_topic_and_tone():
+    dlg = template_dialogue({}, {}, a_id=1, b_id=2, interaction="social_Flirt")
+    assert dlg.topic == "a flirty exchange"
+    assert all(line["tone"] == "flirty" for line in dlg.lines)
+
+
+def test_template_dialogue_tense_interaction_sets_tense_tone():
+    dlg = template_dialogue({}, {}, a_id=1, b_id=2, interaction="social_Insult")
+    assert dlg.topic == "a tense exchange"
+    assert all(line["tone"] == "tense" for line in dlg.lines)
+
+
+# ─── SocialLayer.filter_conversing (the anti-telepathy gate) ──────────────
+
+
+def _talker(sim_id, *, target=None, location="10.0,10.0", autonomy="full"):
+    return {
+        "sim_id": sim_id,
+        "sleeping": False,
+        "autonomy": autonomy,
+        "is_player": False,
+        "current_interaction": "social_Chat" if target else "",
+        "interaction_target_sim_id": target,
+        "location": location,
+    }
+
+
+def test_filter_conversing_keeps_mutual_pair():
+    layer = SocialLayer()
+    sims = [_talker(1, target=2), _talker(2, target=1)]
+    kept = layer.filter_conversing(sims)
+    assert {s["sim_id"] for s in kept} == {1, 2}
+
+
+def test_filter_conversing_drops_sims_not_talking_to_each_other():
+    layer = SocialLayer()
+    sims = [_talker(1), _talker(2)]
+    assert layer.filter_conversing(sims) == []
+
+
+def test_filter_conversing_drops_unilateral_target():
+    layer = SocialLayer()
+    sims = [_talker(1, target=2), _talker(2)]
+    assert layer.filter_conversing(sims) == []
+
+
+def test_filter_conversing_drops_far_apart_conversing_pair():
+    layer = SocialLayer()
+    sims = [
+        _talker(1, target=2, location="0.0,0.0"),
+        _talker(2, target=1, location="50.0,50.0"),
+    ]
+    assert layer.filter_conversing(sims) == []
+
+
+def test_filter_conversing_allows_unknown_location():
+    """A missing location cannot be measured, so proximity does not block."""
+    layer = SocialLayer()
+    sims = [_talker(1, target=2, location=""), _talker(2, target=1, location="")]
+    assert {s["sim_id"] for s in layer.filter_conversing(sims)} == {1, 2}
+
+
+def test_filter_conversing_passthrough_when_disabled():
+    layer = SocialLayer(require_conversation=False)
+    sims = [_talker(1), _talker(2)]
+    assert len(layer.filter_conversing(sims)) == 2
+
+
+def test_snapshot_exposes_conversation_gate():
+    snap = SocialLayer().snapshot()
+    assert snap["require_conversation"] is True
+    assert snap["max_pair_distance"] == 4.0
 

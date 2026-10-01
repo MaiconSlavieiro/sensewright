@@ -26,8 +26,12 @@ logger = logging.getLogger(__name__)
 
 Runner = Callable[["BackgroundJob"], Awaitable[dict[str, Any]]]
 
-# Lower numbers run first: active-zone households, then active-zone Sims,
-# then related NPCs discovered through census relationships.
+# Lower numbers run first: the player's own *request* (pie-menu action), then the
+# player's own household, then the other active-zone households/Sims, then
+# related NPCs discovered through census relationships.
+PRIORITY_PLAYER = -3
+PRIORITY_HOUSEHOLD_PLAYER = -2
+PRIORITY_SIM_PLAYER = -1
 PRIORITY_HOUSEHOLD_ACTIVE = 0
 PRIORITY_SIM_ACTIVE = 1
 PRIORITY_RELATED = 2
@@ -47,14 +51,19 @@ class BackgroundJob:
     lang: str = field(compare=False, default="en")
     player_hints: str = field(compare=False, default="")
     source: str = field(compare=False, default="batch")
+    # "background" (default) or "consolidate" (a player memory action run by the
+    # same worker loop). Non-background kinds get a distinct dedup key.
+    kind: str = field(compare=False, default="background")
     attempts: int = field(compare=False, default=0)
     enqueued_at: float = field(compare=False, default=0.0)
 
     @property
     def key(self) -> str:
         if self.scope == "household":
-            return f"{self.player_id}:{self.save_id}:household:{self.household_id}"
-        return f"{self.player_id}:{self.save_id}:sim:{self.sim_id}"
+            base = f"{self.player_id}:{self.save_id}:household:{self.household_id}"
+        else:
+            base = f"{self.player_id}:{self.save_id}:sim:{self.sim_id}"
+        return base if self.kind == "background" else f"{base}:{self.kind}"
 
 
 def _used_llm(result: dict[str, Any]) -> bool:

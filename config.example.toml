@@ -8,6 +8,10 @@
 # falls back to the default. The set of languages is data-driven: adding one is a
 # JSON file + a manifest entry, never a code change (see the mod's locales/).
 language = "auto"
+# Serve the built-in browser panel at http://<host>:<port>/ so you can watch and
+# configure the sidecar from a browser in parallel with the game. Set to false to
+# hide it (recommended when host = "0.0.0.0").
+web_panel = true
 
 [network]
 host = "127.0.0.1"
@@ -38,7 +42,10 @@ reasoning_effort = "none"
 # provider also tries its own `model`/`models` in order before the chain moves on.
 [llm.providers.openrouter]
 enabled = true
-models = ["nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free", "google/gemma-4-31b-it:free"]
+# Order matters: the first model that answers is used. The two below emit native
+# tool calls reliably; `nemotron-3.5-lightning` often spends its whole budget on
+# hidden reasoning and is skipped automatically when it truncates.
+models = ["nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free", "nvidia/nemotron-3.5-lightning:free", "google/gemma-4-31b-it:free"]
 api_key = "${OPENROUTER_API_KEY}"
 base_url = "https://openrouter.ai/api/v1"
 # Hard billing guard: only ids containing ":free" are ever called, so a
@@ -136,7 +143,9 @@ max_impulses_per_tick = 1
 # v0.3 §15.6: impulse/thought frequency dials. 0 = sleep-only. The agent-roster
 # panel (`sw.agents`) adjusts these live; a per-Sim override wins.
 impulse_frequency = 0.2
-player_sim_impulse_frequency = 0.0
+# The player's own household Sims are inhabited too (nonzero by default); the
+# mod's player-priority lock still keeps the player in control.
+player_sim_impulse_frequency = 0.2
 # Salient event reactions stay on independently of the impulse dial.
 reactions_enabled = true
 # Per-agent hidden-reasoning budget for impulses: none|minimal|low|medium|high.
@@ -166,6 +175,13 @@ social = true
 [agents.social]
 max_pairs_per_tick = 1
 pair_cooldown_seconds = 180.0
+# v0.3 R5 fix: a dialogue only happens while the two Sims are in a *real*
+# native conversation with each other (mutually targeting) and physically
+# close, so agents never talk "telepathically" across the lot. Set
+# `require_conversation = false` to restore the old distance-agnostic behavior.
+require_conversation = true
+# Max lot-space distance between the pair (from the pulse `location` "x,y").
+max_pair_distance = 4.0
 line_max_tokens = 200
 
 # ─── RUNTIME ──────────────────────────────────────────────────────────

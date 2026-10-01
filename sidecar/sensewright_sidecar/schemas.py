@@ -211,6 +211,9 @@ class BackgroundRequest(BaseModel):
     player_hints: str = ""
     census: dict[str, Any] | None = None
     force: bool = False
+    # Player action: enqueue at top priority and return immediately instead of
+    # generating inline (a cache hit is still returned inline).
+    queue: bool = False
     lang: str = DEFAULT_LANG
 
 
@@ -221,14 +224,34 @@ class BackgroundResponse(BaseModel):
     household_id: int | None = None
     background: dict[str, Any] = Field(default_factory=dict)
     cached: bool = False
+    queued: bool = False
     provider: str | None = None
     message_key: str | None = None
+
+
+class MemoryConsolidateRequest(BaseModel):
+    """Manually fold a Sim's pending dialogue into one memory (pie-menu action)."""
+
+    sim: SimRef
+    # Player action: enqueue at top priority instead of consolidating inline.
+    queue: bool = False
+    lang: str = DEFAULT_LANG
+
+
+class MemoryConsolidateResponse(BaseModel):
+    ok: bool = True
+    consolidated: int = 0
+    queued: bool = False
+    provider: str | None = None
+    message_key: str | None = None
+    message_args: dict[str, Any] = Field(default_factory=dict)
 
 
 class CensusSim(BaseModel):
     sim_id: int
     full_name: str = ""
     household_id: int | None = None
+    aspiration: str = ""
     traits: list[str] = Field(default_factory=list)
     age: str = ""
     gender: str = ""
@@ -260,6 +283,8 @@ class CensusResponse(BaseModel):
     sims: int = 0
     households: int = 0
     queued: int = 0
+    # Phase 2b: previous-vs-current zone-load diff (new/removed Sims & households).
+    diff: dict[str, Any] | None = None
     message_key: str | None = None
 
 
@@ -383,10 +408,15 @@ class AutonomySimState(BaseModel):
     sim_id: int
     full_name: str = ""
     household_id: int | None = None
+    aspiration: str = ""
     mood: str = "neutral"
     needs: dict[str, Any] = Field(default_factory=dict)
     location: str = ""
     current_interaction: str = ""
+    # Sim id the Sim is currently in a native social interaction with (or None).
+    # The sim<->sim dialogue channel only pairs Sims who are mutually in such a
+    # conversation, so agents never "talk" at a distance (v0.3 R5 fix).
+    interaction_target_sim_id: int | None = None
     sleeping: bool = False
     is_player: bool = False
     autonomy: str = "semi"

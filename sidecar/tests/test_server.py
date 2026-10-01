@@ -115,6 +115,7 @@ class TestStatusEndpoint:
         assert isinstance(status_resp.memory, dict)
         assert isinstance(status_resp.god, dict)
         assert isinstance(status_resp.backgrounds, dict)
+        assert isinstance(status_resp.agency, dict)
 
 
 class TestChatEndpoint:

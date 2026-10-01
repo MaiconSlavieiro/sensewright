@@ -175,6 +175,64 @@ async def test_openai_includes_tools_in_payload():
     assert captured["payload"]["tool_choice"] == "auto"
 
 
+async def test_openai_skips_truncated_model_when_tools_expected():
+    # A reasoning model that spends its budget thinking returns finish_reason
+    # "length" with no tool call; the provider must try the next model so an
+    # acting agent is not silenced.
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model == "truncating":
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"finish_reason": "length", "message": {"content": "1. Analyze User Input"}}
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {"name": "get_weather", "arguments": '{"city":"Rome"}'},
+                                }
+                            ],
+                        },
+                    }
+                ]
+            },
+        )
+
+    config = ProviderConfig(
+        enabled=True,
+        api_key="test-key",
+        models=["truncating", "working"],
+        base_url=OPENAI_BASE_URL,
+    )
+    provider = OpenAICompatProvider(config)
+    provider._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=OPENAI_BASE_URL
+    )
+
+    response = await provider.complete([{"role": "user", "content": "hi"}], tools=TOOL_SCHEMA)
+
+    assert seen == ["truncating", "working"]
+    assert response.model == "working"
+    assert response.finish_reason == "tool_calls"
+    assert response.tool_calls[0].name == "get_weather"
+
+
 async def test_gemini_parses_function_call_and_text():
     captured: dict[str, Any] = {}
 
