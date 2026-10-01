@@ -42,13 +42,28 @@ class ProviderChain:
                 logger.debug(f"Provider {name} in chain but not configured, skipping")
                 continue
 
-            provider_class = PROVIDER_CLASSES.get(name)
+            # v0.5 follow-up A5: an explicit ``type`` lets a block use a generic
+            # OpenAI-compatible endpoint (Groq/Cerebras/Ollama/...) without a
+            # dedicated name. Falls back to the block name.
+            provider_type = provider_config.type or name
+            provider_class = PROVIDER_CLASSES.get(provider_type)
             if not provider_class:
-                logger.warning(f"Unknown provider type: {name}")
+                logger.warning(f"Unknown provider type: {provider_type} (block: {name})")
                 continue
 
             provider = provider_class(provider_config)
+            # v0.5 follow-up A5: a generic provider shares one class across block
+            # names; key it (limiter/config/status) by its configured block name
+            # instead of the class default.
+            provider.name = name
             if provider.available:
+                # v0.5 R2: purpose routing + auto-swap are provider-level knobs
+                # fed from the shared ``[llm]`` config.
+                try:
+                    provider.task_models = dict(llm_config.task_models or {})
+                    provider.auto_swap_models = bool(llm_config.auto_swap_models)
+                except Exception:
+                    pass
                 self._providers.append(provider)
                 self._provider_map[name] = provider
                 self._chain_order.append(name)
@@ -84,6 +99,51 @@ class ProviderChain:
             return provider._is_cold()
         return False
 
+    def health(self) -> dict[str, Any]:
+        """Chain health snapshot used by the scheduler backpressure (v0.5 R3)."""
+        total = len(self._providers)
+        warm = [p for p in self._providers if p.available and not self._is_cold(p)]
+        return {
+            "providers_total": total,
+            "providers_warm": len(warm),
+            "ratio": (len(warm) / total) if total else 0.0,
+        }
+
+    def backpressure_factor(self) -> float:
+        """Idle-impulse throttle: ``1.0`` healthy, lower as providers cool.
+
+        Returns ``0.0`` when no provider is warm, so the agency loop stops
+        spending idle calls while the free tier is down (social keeps its
+        reserve and is not throttled by this factor).
+        """
+        health = self.health()
+        if health["providers_total"] == 0:
+            return 1.0
+        return float(health["ratio"])
+
+    def set_discovered_models(self, name: str, models: list[str]) -> None:
+        provider = self._provider_map.get(name)
+        if provider is not None and hasattr(provider, "set_discovered_models"):
+            provider.set_discovered_models(models)
+
+    def model_pool(self) -> dict[str, list[str]]:
+        """Configured + discovered model ids per provider (v0.5 R2 status)."""
+        pool: dict[str, list[str]] = {}
+        for name, provider in self._provider_map.items():
+            config = self.settings.llm.providers.get(name)
+            models: list[str] = []
+            if config:
+                if config.model:
+                    models.append(config.model)
+                for model in config.models:
+                    if model and model not in models:
+                        models.append(model)
+            for model in getattr(provider, "discovered_models", []) or []:
+                if model and model not in models:
+                    models.append(model)
+            pool[name] = models
+        return pool
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -94,6 +154,7 @@ class ProviderChain:
         prefer: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         reasoning_effort: str | None = None,
+        purpose: str | None = None,
     ) -> LLMResponse:
         """Complete using the provider chain with fallback.
 
@@ -106,6 +167,8 @@ class ProviderChain:
             tools: Optional OpenAI-style tool schemas to expose to the model.
             reasoning_effort: Optional hidden-reasoning budget hint
                 (none|minimal|low|medium|high).
+            purpose: Task kind (``social``/``summary``/``chat``/...) used by the
+                provider for model routing (v0.5 R2) and attempt logs (R1).
 
         Returns:
             LLMResponse from the first successful provider.
@@ -133,7 +196,11 @@ class ProviderChain:
 
         for provider in providers_to_try:
             limiter = self._limiters.get(provider.name)
-            if limiter is not None and not limiter.try_acquire():
+            # v0.5 follow-up A2: peek (do not consume) before the call, then
+            # record the number of *real* requests the provider made (it may try
+            # several models per call). Keeps the local meter in step with the
+            # provider's own quota.
+            if limiter is not None and not limiter.has_capacity():
                 last_error = LLMError(
                     f"Provider {provider.name} hit its RPM/RPD limit",
                     provider.name,
@@ -152,6 +219,8 @@ class ProviderChain:
                     kwargs["tools"] = tools
                 if reasoning_effort is not None:
                     kwargs["reasoning_effort"] = reasoning_effort
+                if purpose is not None:
+                    kwargs["purpose"] = purpose
                 response = await provider.complete(messages, **kwargs)
                 logger.info(f"Provider {provider.name} succeeded")
                 return response
@@ -168,6 +237,11 @@ class ProviderChain:
                 failed.append(provider.name)
                 logger.error(f"Provider {provider.name} unexpected error: {e}")
                 continue
+            finally:
+                if limiter is not None:
+                    used = getattr(provider, "requests_last_call", None)
+                    count = used if isinstance(used, int) and used > 0 else 1
+                    limiter.record(count)
 
         raise AllProvidersFailed(
             f"All providers failed: {last_error}",
@@ -191,6 +265,8 @@ class ProviderChain:
             "chain_order": self._chain_order,
             "providers": {name: provider.status() for name, provider in self._provider_map.items()},
             "limits": {name: limiter.snapshot() for name, limiter in self._limiters.items()},
+            "health": self.health(),
+            "pool": self.model_pool(),
         }
 
     async def close(self) -> None:

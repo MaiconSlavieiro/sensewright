@@ -157,6 +157,12 @@ def test_clean_thought_keeps_valid_line():
     assert _clean_thought(line) == line
 
 
+def test_clean_thought_strips_stage_directions():
+    # v0.4 P5: *actions* are narrated role-play, not a first-person inner line.
+    assert _clean_thought("*she smiles* I wonder about Beto.") == "I wonder about Beto."
+    assert _clean_thought("*just smiles to herself*") == ""
+
+
 async def test_build_impulse_discards_meta_thought():
     # A reasoning model narrating the task instead of role-playing.
     response = FakeResponse(text="The user gives a situation with time and nearby Sims.")
@@ -234,7 +240,7 @@ async def test_build_impulse_parses_tool_calls():
     registry = FakeRegistry(response)
 
     result = await build_impulse(
-        job=job("idle"),
+        job=job("reaction", event={"type": "social", "target_sim_id": 11}),
         profile={"name": "Ana"},
         world={},
         memories=[{"text": "saw a fire"}],
@@ -274,10 +280,11 @@ async def test_build_impulse_drops_disallowed_tools():
 
 
 async def test_build_impulse_limits_idle_to_one_action():
+    # v0.4 P1: idle impulses cannot speak; use a non-speech action to test the cap.
     response = FakeResponse(
         tool_calls=(
-            FakeCall("c1", "spontaneous_line", {"text": "a"}),
-            FakeCall("c2", "spontaneous_line", {"text": "b"}),
+            FakeCall("c1", "set_mood", {"mood": "happy", "reason": "sun"}),
+            FakeCall("c2", "set_mood", {"mood": "sad", "reason": "rain"}),
         ),
     )
 
@@ -292,6 +299,27 @@ async def test_build_impulse_limits_idle_to_one_action():
     )
 
     assert len(result["directives"]) == 1
+    assert result["directives"][0]["name"] == "set_mood"
+
+
+async def test_build_impulse_drops_wrong_language_thought():
+    """v0.4 P2: an inner thought becomes a memory; wrong-language is dropped."""
+    registry = FakeRegistry(FakeResponse(text="This is an English thought about the day."))
+
+    result = await build_impulse(
+        job=job("idle"),
+        profile={"name": "Ana"},
+        world={},
+        memories=[],
+        registry=registry,
+        lang="pt-BR",
+        autonomy="semi",
+    )
+
+    # Retried once, then fell back to the deterministic (localized) impulse.
+    assert len(registry.calls) == 2
+    assert result["used_llm"] is False
+    assert "English" not in result["thought"]
 
 
 async def test_build_impulse_sleep_skips_llm():
@@ -371,7 +399,7 @@ async def test_build_impulse_parses_text_tool_call():
     )
 
     result = await build_impulse(
-        job=job("idle"),
+        job=job("reaction", event={"type": "social", "target_sim_id": 11}),
         profile={"name": "Ana"},
         world={},
         memories=[],

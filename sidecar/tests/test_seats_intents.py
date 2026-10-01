@@ -167,7 +167,7 @@ class TestSeatsEndpoint:
         assert resp.status_code == 200
         body = RosterResponse(**resp.json())
         assert body.ok is True
-        assert body.seats == 12
+        assert body.seats == 6
 
         resp = await client.post(
             "/v1/agency/seats",

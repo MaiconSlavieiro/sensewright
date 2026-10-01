@@ -177,7 +177,7 @@ async def test_render_dialogue_parses_valid_llm_json():
     registry = FakeRegistry(
         '{"topic": "coffee", "lines": [{"speaker": "a", "text": "Want coffee?", "tone": "casual"}, {"speaker": "b", "text": "Yes please!", "tone": "warm"}]}'
     )
-    dlg = await render_dialogue({"name": "Ana"}, {"name": "Bob"}, None, registry, "pt-BR", 1, 2)
+    dlg = await render_dialogue({"name": "Ana"}, {"name": "Bob"}, None, registry, "en", 1, 2)
     assert dlg.source == "llm"
     assert dlg.topic == "coffee"
     assert len(dlg.lines) == 2
@@ -207,12 +207,15 @@ async def test_render_dialogue_falls_back_on_empty_lines():
     assert dlg.source == "template"
 
 
-async def test_render_dialogue_falls_back_on_invalid_speaker():
+async def test_render_dialogue_tolerates_an_unlabeled_speaker():
+    # v0.5 R4: a model may label the speaker with a name or a stray value; the
+    # line is kept and mapped into the a/b slots (never silently dropped).
     registry = FakeRegistry(
         '{"topic": "test", "lines": [{"speaker": "c", "text": "Hi", "tone": "friendly"}]}'
     )
     dlg = await render_dialogue({}, {}, None, registry, "en", 1, 2)
-    assert dlg.source == "template"
+    assert dlg.source == "llm"
+    assert [line["speaker"] for line in dlg.lines] == ["a"]
 
 
 async def test_render_dialogue_falls_back_on_clean_line_rejection():
@@ -245,8 +248,8 @@ async def test_render_dialogue_enforces_pt_br_prompt():
     system = registry.messages[0][0]["content"]
     user = registry.messages[0][1]["content"]
     assert "Português (Brasil)" in system
-    assert "do NOT use English" in system
-    assert "Português (Brasil)" in user
+    assert "Never use any other language" in system
+    assert "Português (Brasil)" not in user
 
 
 async def test_render_dialogue_english_does_not_forbid_english():
@@ -787,15 +790,22 @@ def test_template_dialogue_flirty_interaction_sets_topic_and_tone():
 
 
 def test_template_dialogue_tense_interaction_sets_tense_tone():
-    dlg = template_dialogue({}, {}, a_id=1, b_id=2, interaction="social_Insult")
+    # v0.5 R4: argue/fight/yell are the "tense" category...
+    dlg = template_dialogue({}, {}, a_id=1, b_id=2, interaction="social_Argue")
     assert dlg.topic == "a tense exchange"
+    assert all(line["tone"] == "tense" for line in dlg.lines)
+
+    # ...while insult/mock/gossip are the distinct "mean" category.
+    dlg = template_dialogue({}, {}, a_id=1, b_id=2, interaction="social_Insult")
+    assert dlg.topic == "a mean exchange"
     assert all(line["tone"] == "tense" for line in dlg.lines)
 
 
 # ─── SocialLayer.filter_conversing (the anti-telepathy gate) ──────────────
 
 
-def _talker(sim_id, *, target=None, location="10.0,10.0", autonomy="full"):
+def _talker(sim_id, *, target=None, location="10.0,10.0", autonomy="full",
+            room_id=None, queued=None):
     return {
         "sim_id": sim_id,
         "sleeping": False,
@@ -804,6 +814,8 @@ def _talker(sim_id, *, target=None, location="10.0,10.0", autonomy="full"):
         "current_interaction": "social_Chat" if target else "",
         "interaction_target_sim_id": target,
         "location": location,
+        "room_id": room_id,
+        "queued_interactions": list(queued or []),
     }
 
 
@@ -852,4 +864,118 @@ def test_snapshot_exposes_conversation_gate():
     snap = SocialLayer().snapshot()
     assert snap["require_conversation"] is True
     assert snap["max_pair_distance"] == 4.0
+
+
+# ─── SocialLayer.candidate_pairs (v0.4 P4 live fix) ──────────────────────
+
+
+def test_candidate_pairs_accepts_a_unilateral_target():
+    """A player-initiated social is usually unilateral in the pulse."""
+    layer = SocialLayer()
+    sims = [_talker(1, target=2), _talker(2)]
+    pairs = layer.candidate_pairs(sims)
+    assert len(pairs) == 1
+    assert {pairs[0][0]["sim_id"], pairs[0][1]["sim_id"]} == {1, 2}
+
+
+def test_candidate_pairs_dedups_a_mutual_pair():
+    layer = SocialLayer()
+    sims = [_talker(1, target=2), _talker(2, target=1)]
+    assert len(layer.candidate_pairs(sims)) == 1
+
+
+def test_candidate_pairs_drops_far_apart_pairs():
+    layer = SocialLayer()
+    sims = [
+        _talker(1, target=2, location="0.0,0.0"),
+        _talker(2, location="50.0,50.0"),
+    ]
+    assert layer.candidate_pairs(sims) == []
+
+
+def test_candidate_pairs_ignores_sims_without_a_target():
+    layer = SocialLayer()
+    sims = [_talker(1), _talker(2)]
+    assert layer.candidate_pairs(sims) == []
+
+
+# ─── v0.4 P6: same-room gate + queued continuation ───────────────────────
+
+
+def test_candidate_pairs_drops_pair_in_different_rooms():
+    layer = SocialLayer()
+    sims = [_talker(1, target=2, room_id=1), _talker(2, room_id=2)]
+    assert layer.candidate_pairs(sims) == []
+
+
+def test_candidate_pairs_keeps_pair_in_same_room():
+    layer = SocialLayer()
+    sims = [_talker(1, target=2, room_id=3), _talker(2, room_id=3)]
+    assert len(layer.candidate_pairs(sims)) == 1
+
+
+def test_candidate_pairs_ignores_room_when_unknown():
+    """A missing room id cannot be compared, so the distance gate still applies."""
+    layer = SocialLayer()
+    sims = [_talker(1, target=2, room_id=None), _talker(2, room_id=2)]
+    assert len(layer.candidate_pairs(sims)) == 1
+
+
+def test_candidate_pairs_rooms_ok_is_passthrough_when_disabled():
+    layer = SocialLayer(require_same_room=False)
+    sims = [_talker(1, target=2, room_id=1), _talker(2, room_id=2)]
+    assert len(layer.candidate_pairs(sims)) == 1
+
+
+def test_filter_conversing_drops_pair_in_different_rooms():
+    layer = SocialLayer()
+    sims = [
+        _talker(1, target=2, room_id=1),
+        _talker(2, target=1, room_id=2),
+    ]
+    assert layer.filter_conversing(sims) == []
+
+
+def test_candidate_pairs_uses_queued_target_to_continue():
+    """No current target, but the queue still continues with the same Sim."""
+    layer = SocialLayer()
+    sims = [
+        _talker(1, queued=[{"name": "social_Chat", "target_sim_id": 2}]),
+        _talker(2),
+    ]
+    pairs = layer.candidate_pairs(sims)
+    assert len(pairs) == 1
+    assert {pairs[0][0]["sim_id"], pairs[0][1]["sim_id"]} == {1, 2}
+
+
+def test_candidate_pairs_ignores_queued_target_when_disabled():
+    layer = SocialLayer(keep_open_on_queued=False)
+    sims = [
+        _talker(1, queued=[{"name": "social_Chat", "target_sim_id": 2}]),
+        _talker(2),
+    ]
+    assert layer.candidate_pairs(sims) == []
+
+
+def test_snapshot_exposes_room_and_queue_gates():
+    snap = SocialLayer().snapshot()
+    assert snap["require_same_room"] is True
+    assert snap["keep_open_on_queued"] is True
+
+
+async def test_dialogue_for_pair_feeds_interaction_sequence_and_continuing():
+    registry = FakeRegistry(
+        '{"topic": "queued", "lines": [{"speaker": "a", "text": "Before you go...", "tone": "casual"}, '
+        '{"speaker": "b", "text": "Yes?", "tone": "warm"}]}'
+    )
+    layer = SocialLayer(registry=registry)
+    a = _talker(1, queued=[{"name": "social_Joke", "target_sim_id": 2}])
+    b = _talker(2)
+    dlg = await layer._dialogue_for_pair(
+        a, b, player_id="local", save_id="save1", lang="en", forge=None
+    )
+    assert dlg is not None
+    user = registry.messages[0][-1]["content"]
+    assert "social_Joke" in user
+    assert "do NOT end with a farewell" in user
 

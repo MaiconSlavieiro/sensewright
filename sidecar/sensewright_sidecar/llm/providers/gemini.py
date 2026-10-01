@@ -14,11 +14,6 @@ from ..base import LLMError, LLMResponse, LLMToolCall
 logger = logging.getLogger(__name__)
 
 
-def _supports_thinking(model: str) -> bool:
-    """True for Gemini models that accept a thinkingConfig budget."""
-    return any(tag in model for tag in ("2.5", "3.", "3-", "latest"))
-
-
 class GeminiProvider:
     """Gemini provider using the Google Generative Language REST API.
 
@@ -26,6 +21,12 @@ class GeminiProvider:
 
     The API key is sent in the ``x-goog-api-key`` header (not the query
     string) so it never appears in request logs.
+
+    v0.5 follow-up: tries the configured ``model``/``models`` in order (so a
+    retired model or a per-model 404/429 falls through to the next one), counts
+    every real request (A2), treats empty content with no tool call as a
+    retryable failure, and only sends ``thinkingConfig`` when the config asks
+    for it (Gemini 3.x rejects ``thinkingBudget=0`` with a 400).
     """
 
     name = "gemini"
@@ -35,10 +36,19 @@ class GeminiProvider:
         self._client: httpx.AsyncClient | None = None
         self._failure_count = 0
         self._cold_until: float = 0.0
+        self._requests_last_call = 0
 
     @property
     def available(self) -> bool:
-        return self.config.enabled and bool(self.config.api_key)
+        # v0.5 follow-up A6: honour ``api_key_optional`` for consistency (Gemini
+        # itself needs a key, but a generic/local config may not).
+        if not self.config.enabled:
+            return False
+        return bool(self.config.api_key) or bool(self.config.api_key_optional)
+
+    @property
+    def requests_last_call(self) -> int:
+        return self._requests_last_call
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -65,6 +75,15 @@ class GeminiProvider:
     def _mark_success(self) -> None:
         self._failure_count = 0
         self._cold_until = 0.0
+
+    def _candidate_models(self) -> list[str]:
+        models: list[str] = []
+        if self.config.model:
+            models.append(self.config.model)
+        for model in self.config.models:
+            if model and model not in models:
+                models.append(model)
+        return models or ["gemini-2.5-flash"]
 
     def _messages_to_contents(self, messages: list[dict[str, str]]) -> list[dict[str, Any]]:
         """Convert OpenAI-style messages to Gemini contents format."""
@@ -104,15 +123,54 @@ class GeminiProvider:
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         reasoning_effort: str | None = None,
+        purpose: str | None = None,
     ) -> LLMResponse:
+        self._requests_last_call = 0
         if not self.available:
             raise LLMError(f"Provider {self.name} not available (disabled or no API key)", self.name, retryable=False)
 
         if self._is_cold():
             raise LLMError(f"Provider {self.name} is in cool-down", self.name, retryable=True)
 
-        model = self.config.model or "gemini-1.5-flash-latest"
+        models = self._candidate_models()
+        last_error: LLMError | None = None
 
+        for model in models:
+            try:
+                response = await self._generate_with_model(
+                    model,
+                    messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    tools=tools,
+                    purpose=purpose,
+                )
+                self._mark_success()
+                return response
+            except LLMError as e:
+                last_error = e
+                if not e.retryable:
+                    # Bad key / forbidden: another model on the same key cannot
+                    # fix it, abort the whole provider.
+                    self._mark_failure()
+                    raise
+                logger.warning(f"Provider {self.name} model {model} failed: {e}; trying next model")
+
+        self._mark_failure()
+        if last_error is not None:
+            raise last_error
+        raise LLMError(f"Provider {self.name} produced no response", self.name)
+
+    async def _generate_with_model(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        purpose: str | None = None,
+    ) -> LLMResponse:
         contents = self._messages_to_contents(messages)
 
         payload: dict[str, Any] = {
@@ -123,11 +181,13 @@ class GeminiProvider:
             payload["generationConfig"]["temperature"] = temperature
         if max_tokens is not None:
             payload["generationConfig"]["maxOutputTokens"] = max_tokens
-        # Gemini 2.5+ models spend part of the output budget on internal
-        # "thinking", which truncates short structured answers. Disable it so
-        # JSON/tool responses fit within maxOutputTokens.
-        if _supports_thinking(model):
-            payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
+        # Only send a thinking budget when explicitly configured. Gemini 3.x
+        # rejects ``thinkingBudget=0`` with HTTP 400, so the old automatic
+        # "disable thinking" is gone (v0.5 follow-up).
+        if self.config.thinking_budget is not None:
+            payload["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": int(self.config.thinking_budget)
+            }
         if tools:
             payload["tools"] = self._tools_to_gemini(tools)
 
@@ -139,7 +199,9 @@ class GeminiProvider:
         url = f"/v1beta/models/{model}:generateContent"
         headers = {"x-goog-api-key": self.config.api_key}
 
+        started = time.monotonic()
         try:
+            self._requests_last_call += 1
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -166,27 +228,45 @@ class GeminiProvider:
                     )
                 )
 
-            self._mark_success()
+            finish_reason = candidates[0].get("finishReason")
+            # v0.5 R1 parity: empty content with no tool call is a retryable
+            # failure, so a reasoning model that burns its budget (MAX_TOKENS)
+            # or a silent answer does not fall through to a template.
+            if not text.strip() and not tool_calls:
+                logger.info(
+                    "llm.attempt purpose=%s provider=%s model=%s attempt=1/1 outcome=empty latency_ms=%.0f finish=%s",
+                    purpose or "-",
+                    self.name,
+                    model,
+                    (time.monotonic() - started) * 1000.0,
+                    finish_reason or "-",
+                )
+                raise LLMError(f"Model {model} returned empty content", self.name, retryable=True)
+
             return LLMResponse(
                 text=text,
                 provider=self.name,
                 model=model,
                 raw=data,
                 tool_calls=tuple(tool_calls),
+                finish_reason=finish_reason,
             )
 
         except httpx.HTTPStatusError as e:
-            self._mark_failure()
-            if e.response.status_code == 429:
-                raise LLMError(f"Rate limited: {e.response.text}", self.name, retryable=True)
-            if 400 <= e.response.status_code < 500:
-                raise LLMError(f"Bad request: {e.response.text}", self.name, retryable=False)
-            raise LLMError(f"HTTP {e.response.status_code}: {e.response.text}", self.name, retryable=True)
+            status = e.response.status_code
+            if status in (401, 403):
+                raise LLMError(f"Auth error: {e.response.text}", self.name, retryable=False, status=status)
+            if status == 429:
+                raise LLMError(f"Rate limited: {e.response.text}", self.name, retryable=True, status=status)
+            if 400 <= status < 500:
+                # Model-specific (e.g. a retired model -> 404): try the next one.
+                raise LLMError(f"Bad request: {e.response.text}", self.name, retryable=True, status=status)
+            raise LLMError(f"HTTP {status}: {e.response.text}", self.name, retryable=True, status=status)
         except httpx.RequestError as e:
-            self._mark_failure()
             raise LLMError(f"Request failed: {e}", self.name, retryable=True)
+        except LLMError:
+            raise
         except Exception as e:
-            self._mark_failure()
             raise LLMError(f"Unexpected error: {e}", self.name, retryable=True)
 
     def status(self) -> dict[str, Any]:

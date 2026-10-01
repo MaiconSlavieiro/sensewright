@@ -440,6 +440,12 @@ def s4cl_age_utils() -> Optional[Any]:
                       "CommonAgeUtils")
 
 
+def s4cl_sim_location_utils() -> Optional[Any]:
+    """``CommonSimLocationUtils`` (read a Sim's room id / position)."""
+    return s4cl_utils("sims4communitylib.utils.sims.common_sim_location_utils",
+                      "CommonSimLocationUtils")
+
+
 def s4cl_gender_utils() -> Optional[Any]:
     """``CommonGenderUtils`` (read a Sim's gender)."""
     return s4cl_utils("sims4communitylib.utils.sims.common_gender_utils",

@@ -62,6 +62,40 @@ def test_detect_game_language_outside_game():
     assert result == "en"
 
 
+def test_init_locale_auto_defers_detection(monkeypatch):
+    """auto must NOT probe at import (services absent -> would lock English)."""
+    monkeypatch.setattr(i18n, "_locale_override", None)
+    monkeypatch.setattr(i18n, "_auto_detected", True)
+    result = i18n.init_locale("auto")
+    assert result == i18n._default_locale()
+    assert i18n._auto_detected is False
+    assert i18n._last_detection == "init:deferred"
+
+
+def test_non_matching_locale_never_locks_the_default(monkeypatch):
+    """A source that answers but does not match must not lock the fallback."""
+    import sys
+    import types
+
+    class FakeLocale:
+        def __init__(self, name):
+            self.name = name
+
+    monkeypatch.setattr(i18n, "_locale_override", None)
+    monkeypatch.setattr(i18n, "_auto_detected", False)
+    monkeypatch.setattr(i18n, "_current_locale", "en")
+    monkeypatch.setitem(
+        sys.modules, "services",
+        types.SimpleNamespace(get_locale=lambda: FakeLocale("KLINGON")),
+    )
+    # detect_game_language falls back to the manifest default...
+    assert i18n.detect_game_language() == "en"
+    # ...but ensure_locale does not lock it (still retrying).
+    assert i18n.ensure_locale() == "en"
+    assert i18n._auto_detected is False
+    assert "nomatch" in i18n.detection_report()
+
+
 def test_normalize_locale():
     """Test locale normalization."""
     assert i18n._normalize_locale("en") == "en"

@@ -70,7 +70,10 @@ def _ui_language_options() -> list[ControlOption]:
 # ``target`` is not in one of these groups are applied directly to the live
 # ``Settings`` object by :func:`apply_values_to_settings`.
 _GOD_PATCH_TARGETS = frozenset({"god", "god.settings", "god.powers"})
-_AGENT_PATCH_TARGETS = frozenset({"agents", "agents.initiative", "agents.layers"})
+_AGENT_PATCH_TARGETS = frozenset(
+    {"agents", "agents.initiative", "agents.layers", "agents.speech", "agents.presence"}
+)
+_AGENT_MAP_TARGETS = frozenset({"agents.speech", "agents.presence"})
 
 
 class ControlOption(BaseModel):
@@ -267,7 +270,7 @@ CONTROL_SPECS: list[ControlSpec] = [
     _power("relationship_shift", True),
     _power("extreme_events", False),
     # v0.3 §15.6: agent-roster dials (advanced; routed to ``settings.agents``).
-    _agent_slider("agent_seats", 12, minimum=1, maximum=24, step=1, target="agents"),
+    _agent_slider("agent_seats", 6, minimum=1, maximum=24, step=1, target="agents"),
     _agent_slider(
         "impulse_frequency", 0.2, minimum=0.0, maximum=1.0, step=0.05,
         target="agents.initiative",
@@ -375,6 +378,18 @@ CONTROL_SPECS: list[ControlSpec] = [
     _promoted("agents.social.pair_cooldown_seconds", "slider", 180,
               target="agents.social", path="pair_cooldown_seconds",
               minimum=30, maximum=600, step=30),
+    # ── v0.4 P1/P3: speech + presence dials ──
+    _promoted("agents.presence.visitor_agency", "select", "reactive",
+              target="agents.presence", path="visitor",
+              options=("reactive", "full", "off"), option_prefix="god.visitor"),
+    _promoted("agents.speech.hearing_radius", "slider", 20.0,
+              target="agents.speech", path="hearing_radius",
+              minimum=0.0, maximum=80.0, step=5.0),
+    _promoted("agents.speech.ambient_talk_chance", "slider", 0.08,
+              target="agents.speech", path="ambient_talk_chance",
+              minimum=0.0, maximum=0.5, step=0.01),
+    _promoted("agents.speech.notify_thoughts", "toggle", True,
+              target="agents.speech", path="notify_thoughts"),
     _promoted("god.backgrounds.enabled", "toggle", True,
               target="god.backgrounds", path="enabled"),
     _promoted("god.backgrounds.batch_size", "slider", 2,
@@ -545,6 +560,22 @@ def values_from_settings(settings: Any) -> dict[str, Any]:
             values[key] = (
                 bool(getattr(layers, attr, True)) if layers is not None else True
             )
+        speech = getattr(agents, "speech", None)
+        if speech is not None:
+            values["agents.speech.hearing_radius"] = float(
+                getattr(speech, "hearing_radius", 20.0)
+            )
+            values["agents.speech.ambient_talk_chance"] = float(
+                getattr(speech, "ambient_talk_chance", 0.08)
+            )
+            values["agents.speech.notify_thoughts"] = bool(
+                getattr(speech, "notify_thoughts", True)
+            )
+        presence = getattr(agents, "presence", None)
+        if presence is not None:
+            values["agents.presence.visitor_agency"] = str(
+                getattr(presence, "visitor", "reactive")
+            )
     # Promoted §1.4 specs: read directly from their target/path.
     for spec in CONTROL_SPECS:
         if spec.target in _GOD_PATCH_TARGETS or spec.target in _AGENT_PATCH_TARGETS:
@@ -565,6 +596,7 @@ def apply_values_to_agents_config(values: dict[str, Any] | None) -> dict[str, An
     patch: dict[str, Any] = {}
     initiative: dict[str, Any] = {}
     layers: dict[str, Any] = {}
+    maps: dict[str, dict[str, Any]] = {}
     for key, value in validated.items():
         spec = CONTROL_SPEC_BY_KEY.get(key)
         target = spec.target if spec else None
@@ -582,10 +614,14 @@ def apply_values_to_agents_config(values: dict[str, Any] | None) -> dict[str, An
                 initiative[field] = str(value)
         elif target == "agents.layers":
             layers[field] = bool(value)
+        elif target in _AGENT_MAP_TARGETS:
+            group = target.split(".")[-1]
+            maps.setdefault(group, {})[field] = value
     if initiative:
         patch["initiative"] = initiative
     if layers:
         patch["layers"] = layers
+    patch.update(maps)
     return patch
 
 
@@ -603,6 +639,13 @@ def apply_agents_patch(agents: Any, patch: dict[str, Any]) -> None:
     for key, value in layers.items():
         if hasattr(agents.layers, key):
             setattr(agents.layers, key, value)
+    for group in ("speech", "presence"):
+        section = getattr(agents, group, None)
+        if section is None:
+            continue
+        for key, value in (patch.get(group) or {}).items():
+            if hasattr(section, key):
+                setattr(section, key, value)
 
 
 def apply_values_to_settings(

@@ -16,6 +16,7 @@ from collections import Counter
 from typing import Any
 
 from .. import content_i18n
+from ..llm import langguard
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,9 @@ async def consolidate_turns(
 
     try:
         messages = _build_messages(turns, profile, target)
-        response = await registry.complete(messages, lang=target, max_tokens=_MAX_TOKENS)
+        response = await registry.complete(
+            messages, lang=target, max_tokens=_MAX_TOKENS, purpose="consolidation"
+        )
         raw_text = getattr(response, "text", "") or ""
         parsed = _extract_json_object(raw_text)
         if not isinstance(parsed, dict):
@@ -303,7 +306,7 @@ def _build_messages(
     )
     user = (
         f"Sim: {name}\n"
-        f"Write in {content_i18n.language_name(lang)}.\n"
+        f"{langguard.language_directive(lang)}\n"
         f"The Sim's day (chronological events):\n{transcript}"
     )
     return [

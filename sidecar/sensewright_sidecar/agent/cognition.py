@@ -113,7 +113,7 @@ async def make_daily_plan(
         },
     ]
     try:
-        response = await registry.complete(messages, lang=lang, max_tokens=200)
+        response = await registry.complete(messages, lang=lang, max_tokens=200, purpose="cognition")
     except Exception:
         return template_plan(profile, events)
 

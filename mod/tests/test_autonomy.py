@@ -117,7 +117,8 @@ def test_sample_zone_shapes(monkeypatch):
     state = sims[0]
     assert set(state.keys()) == {
         "sim_id", "full_name", "household_id", "aspiration", "mood", "needs",
-        "location", "current_interaction", "interaction_target_sim_id",
+        "location", "room_id", "current_interaction", "current_interaction_text",
+        "current_object", "interaction_target_sim_id", "queued_interactions",
         "sleeping", "is_player", "autonomy", "relationships",
     }
     assert state["sim_id"] == 1
@@ -345,6 +346,58 @@ def test_pull_and_execute_translates_intents(monkeypatch):
     assert any("Ana hums a tune." in message for message in shown)
     assert any("I feel good" in message for message in shown)
     assert any("Hello there" in message for message in shown)
+
+
+def test_pull_and_execute_gates_speech_on_surfaced_flag(monkeypatch):
+    """v0.4 P1: the sidecar marks lines surfaced=false; the mod must stay quiet."""
+    responses = {
+        "ok": True,
+        "intents": [
+            {"id": "c1", "sim_id": 1, "kind": "speak", "name": "",
+             "args": {}, "params": {"text": "murmur", "surfaced": False},
+             "thought": "private", "narration": ""},
+        ],
+    }
+    monkeypatch.setattr(http_client, "get_intents", lambda *a, **k: responses)
+    monkeypatch.setattr(sim_context, "_get_save_id", lambda: "save-1")
+    monkeypatch.setattr(
+        state_collector.tool_executor, "execute_intent",
+        lambda intent: {"ok": True, "text": "murmur"},
+    )
+    shown = []
+    monkeypatch.setattr(
+        state_collector.chat_ui, "show_simple_notification",
+        lambda message, sim_info=None: shown.append(message) or True,
+    )
+    state_collector.pull_and_execute_directives()
+    assert shown == []
+
+
+def test_pull_and_execute_surfaces_conversation_summary(monkeypatch):
+    """v0.4 P4b: a notify intent surfaces the narrator summary (not executed)."""
+    responses = {
+        "ok": True,
+        "intents": [
+            {"id": "n1", "sim_id": 1, "kind": "notify", "name": "",
+             "args": {}, "params": {"surfaced": True},
+             "thought": "", "narration": "Ana and Bob chatted."},
+        ],
+    }
+    monkeypatch.setattr(http_client, "get_intents", lambda *a, **k: responses)
+    monkeypatch.setattr(sim_context, "_get_save_id", lambda: "save-1")
+    executed = []
+    monkeypatch.setattr(
+        state_collector.tool_executor, "execute_intent",
+        lambda intent: executed.append(intent) or {"ok": True},
+    )
+    shown = []
+    monkeypatch.setattr(
+        state_collector.chat_ui, "show_simple_notification",
+        lambda message, sim_info=None: shown.append(message) or True,
+    )
+    state_collector.pull_and_execute_directives()
+    assert executed == []
+    assert any("Ana and Bob chatted." in message for message in shown)
 
 
 def test_pull_and_execute_tolerates_sidecar_failure(monkeypatch):
@@ -647,6 +700,98 @@ def test_interaction_target_id_of_none_without_queue_or_target():
         1, "Ana", instance=FakeSimInstance(FakeQueue(object_target))
     )
     assert state_collector._interaction_target_id_of(with_object) is None
+
+
+class FakeLocalized(object):
+    """Stand-in for a TS4 LocalizedString (v0.4 P4c)."""
+
+    def __init__(self, text):
+        self._text = text
+
+    def get_display_name(self):
+        return self._text
+
+
+class FakeInteractionWithDisplay(FakeInteraction):
+    def __init__(self, display_name=None, name="social_Flirt", target=None):
+        FakeInteraction.__init__(self, target=target, name=name)
+        self.display_name = display_name
+
+
+def test_current_interaction_text_prefers_localized_display_name():
+    interaction = FakeInteractionWithDisplay(display_name=FakeLocalized("Flertar"))
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._current_interaction_text_of(sim_info) == "Flertar"
+
+
+def test_current_interaction_text_falls_back_to_raw_name():
+    # No display_name -> the raw interaction name (never a numeric hash).
+    interaction = FakeInteractionWithDisplay(display_name=None)
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._current_interaction_text_of(sim_info) == "social_Flirt"
+
+
+def test_current_interaction_text_rejects_numeric_display_name():
+    interaction = FakeInteractionWithDisplay(display_name=FakeLocalized("1234567890"))
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._current_interaction_text_of(sim_info) == "social_Flirt"
+
+
+def test_current_interaction_text_empty_without_interaction():
+    sim_info = FakeSimInfoWithInstance(1, "Ana", instance=FakeSimInstance(FakeQueue(None)))
+    assert state_collector._current_interaction_text_of(sim_info) == ""
+
+
+# --- Current object signal (v0.5 R4 object-aware intimate templates) ---
+
+
+class FakeObjectTarget(object):
+    def __init__(self, display_name=None):
+        self.display_name = display_name
+
+
+def test_current_object_of_reads_localized_target():
+    interaction = FakeInteraction(target=FakeObjectTarget(FakeLocalized("Bed")))
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._current_object_of(sim_info) == "Bed"
+
+
+def test_current_object_of_falls_back_to_aop_target():
+    class _Aop(object):
+        def __init__(self, target):
+            self.target = target
+
+    class FakeInteractionWithAop(FakeInteraction):
+        def __init__(self, aop_target):
+            FakeInteraction.__init__(self, target=None)
+            self.aop = _Aop(aop_target)
+
+    interaction = FakeInteractionWithAop(FakeObjectTarget(FakeLocalized("Bathtub")))
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._current_object_of(sim_info) == "Bathtub"
+
+
+def test_current_object_of_rejects_sim_target():
+    interaction = FakeInteraction(target=FakeSimInfo(42, "Bea"))
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._current_object_of(sim_info) == ""
+
+
+def test_current_object_of_empty_without_interaction():
+    sim_info = FakeSimInfoWithInstance(1, "Ana", instance=FakeSimInstance(FakeQueue(None)))
+    assert state_collector._current_object_of(sim_info) == ""
 
 
 if __name__ == "__main__":

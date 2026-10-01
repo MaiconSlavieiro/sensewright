@@ -89,6 +89,7 @@ class LLMProvider(Protocol):
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         reasoning_effort: str | None = None,
+        purpose: str | None = None,
     ) -> LLMResponse:
         """Complete a chat conversation.
 
@@ -100,11 +101,14 @@ class LLMProvider(Protocol):
             reasoning_effort: Optional hidden-reasoning budget hint
                 (none|minimal|low|medium|high); ignored by providers that do not
                 support it.
+            purpose: Optional task kind (e.g. ``social``/``summary``/``chat``)
+                used for model routing (v0.5 R2) and attempt logs (v0.5 R1).
 
         Returns:
             LLMResponse with the generated text and metadata.
 
         Raises:
-            LLMError: On provider-specific errors.
+            LLMError: On provider-specific errors. Empty content with no tool
+                call is treated as a retryable error (v0.5 R1).
         """
         ...

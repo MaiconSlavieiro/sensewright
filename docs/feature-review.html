@@ -66,6 +66,7 @@
   .badge.not_started { color: #8b949e; }
   .badge.live_pending { color: #79c0ff; border-color: #6ea8fe55; }
   .badge.pending_fix { color: #ff9492; border-color: #e5534b55; }
+.badge.planned { color: #d2a8ff; border-color: #a371f755; }
   .kind { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .kind.live { color: #79c0ff; border-color: #6ea8fe44; }
   .kind.offline { color: #d2a8ff; border-color: #8957e544; }
@@ -153,8 +154,8 @@
   <div class="hint">
     <b>Fonte única da verdade</b>, organizada em <b>Início · Arquitetura ·
     Desenvolvimento · Validação · Referência · Internals · Roadmap · Changelog ·
-    Review</b>. Cada assunto aparece em um só lugar. Build in-game <b>.26</b> ·
-    branch <b>migrate-s4cl-lot51</b> · testes <b>sidecar 546 / mod 412</b>.
+    Review</b>. Cada assunto aparece em um só lugar. Build in-game <b>.32</b> ·
+    branch <b>migrate-s4cl-lot51</b> · testes <b>sidecar 655 / mod 437</b>.
   </div>
 </header>
 
@@ -241,14 +242,17 @@ jogador continua no controle.
 
 | | |
 |---|---|
-| Build in-game | **`2026-09-29.26`** (`mod/sensewright_mod/main.py` → `_BUILD`) |
+| Build in-game | **`2026-10-01.32`** (`mod/sensewright_mod/main.py` → `_BUILD`) |
 | Branch | **`migrate-s4cl-lot51`** (pré-migração: `main` / tag `pre-migracao`) |
 | Mod | `mod/sensewright_mod/` — Python **3.7** (stdlib + S4CL + Lot 51 Core) |
 | Sidecar | `sidecar/sensewright_sidecar/` — Python **3.12+** (FastAPI, Pydantic v2, SQLite) |
 | Artefatos | `Sensewright.ts4script` + `Sensewright.package` (tuning) em `Mods\Sensewright\` |
 | Libs de stack | `sims4communitylib*.ts4script` + `lot51_core*.ts4script` no **root** do `Mods` |
-| Testes | sidecar **546** · mod **412** · `ruff` limpo · `py -3.7 mod/build.py` ok |
+| Testes | sidecar **655** · mod **437** · `ruff` limpo · `py -3.7 mod/build.py` ok |
 | Migração de stack | **offline-completa**, validação live **pendente** |
+| v0.4 (§7) | Voz, Idioma e Presença **implementados offline**; validação live **pendente** |
+| v0.5 (§7.11) | Resiliência de LLM, roteamento dinâmico, conversas contextualizadas + observabilidade — **implementado offline**; validação live **pendente** (ver [Validação](#validacao)) |
+| v0.5 follow-up (§7.12) | A1–A10 (quota, contagem por requisição, throttle, descoberta, providers genéricos, Ollama/DeepSeek, volume) **implementados offline**; A11 (reinstalar/reiniciar) **pendente** |
 
 ## Quick start
 
@@ -362,13 +366,15 @@ auth.py                    token (X-Sensewright-Token)
 lifecycle.py               watchdog do processo do jogo
 panel_store.py             overlay data/panel.toml (valores de ControlSpec)
 content_i18n.py/locales*   localização de conteúdo data-driven
+                           (+ lexicon.<code>.json por idioma: stopwords/hints)
 routers/                   health, admin, autonomy, chat, events, god, memory,
                            profiles, lifecycle
 agent/                     graph, nodes, prompts, profiler, evolution,
                            personality, agency, seats, intents, cognition,
-                           social, context_forge, coordinator, initiative
+                           social, conversations, speech, presence,
+                           context_forge, coordinator, initiative
 llm/                       base, chain (fallback + circuit breaker), limits,
-                           budgeter, registry, providers/*
+                           budgeter, registry, langguard, providers/*
 memory/                    base, sqlite_store, embeddings, consolidation, decay
 god/                       orchestrator, interventions, world_model, zeitgeist,
                            controls, backgrounder, scheduler, budgeter
@@ -531,7 +537,7 @@ IDs. Padrão validado: `state_collector._is_sleeping`.
 
 - **Sidecar:** `cd sidecar; .\.venv\Scripts\python.exe -m pytest tests -q`
 - **Mod:** `python -m pytest mod\tests -q` (Python do sistema; não precisa da 3.7)
-- Contagens atuais: **sidecar 546 · mod 412** (atualize neste doc ao adicionar testes).
+- Contagens atuais: **sidecar 655 · mod 437** (atualize neste doc ao adicionar testes).
 - Toda feature nova vem com teste; wire/endpoint merece teste de integração.
 
 ## 9. Gotchas (validação live)
@@ -695,11 +701,72 @@ Faça um clique/interação e confirme o player-priority lock armando nos dois l
 | P1 | `.22` player-activity + `cancel_current` preciso | validação |
 | P1 | `.23`–`.26` (God loop, Fase E, serviço Lot 51, God UI pela seam) | validação |
 | P1 | Remover a rede de alarmes nativa quando o `GAME_TICK` provar-se live | cleanup |
+| P1 | §7.12 A11 — reinstalar sidecar + reiniciar o jogo (A1–A10 no sidecar/`config.example.toml`) | validação |
 | P2 | Submenu God (computador) + submenu agente (Sim) + categoria própria + ícones | feature |
 | P2 | Catálogo de levers (`runtime`-validated) — ver **Internals** | docs |
 | P3 | Fase 6 — packaging do sidecar (PyInstaller/Nuitka), README, modo 0-key | feature |
 
-## 5. Smoke script
+## 5. Validação v0.4 — Voz, Idioma e Presença (live pendente)
+
+Implementado offline (ver **Changelog**); falta provar em jogo. Ordem: P1+P2 →
+P3 → P4+P4b+P4c. Logs a observar: mod `[validate] speech: sim= kind= surfaced=
+lang= dist=`; sidecar `langguard rejected=… retry=…`, `pulse … social=… conversations=…`,
+`impulse … tier=`.
+
+- **P1 — fim do monólogo aleatório:** com o jogo em pt-BR, o impulso idle **não**
+  deve emitir fala; confirme que o idle só produz `thought` interno (sem
+  `notify.social.speech`) e que `surfaced=false` nunca notifica.
+- **P2 — idioma (raiz do bug live):** procure `[validate] locale: pt-BR (…)` no
+  `sensewright_output.log`; se vier `en`, a detecção falhou. Force um background
+  social com o jogo em pt-BR e confirme prosa em português (sem `{`/JSON cru);
+  procure `langguard rejected` antes do fallback.
+- **P3 — presença:** um passante/visitante **não** comenta a casa da família ativa;
+  com `hearing_radius` baixo, falas longe não notificam (`dist` acima do raio).
+- **P4/P4b — conversas:** inicie uma interação social sua com outro Sim e confirme
+  a sessão (`social: N dialogue pair(s)` > 0) e o resumo narrador ao fim (ou a
+  "despedida" quando o par se separa). O pareamento aceita alvo unilateral (A
+  mira B), que é como a interação do jogador aparece no pulse.
+- **P4c — pie menu:** escolha uma interação específica no pie e confirme o texto
+  (display name localizado) no prompt; fallback ao `__name__` quando ausente.
+- **P5 — observabilidade:** `[validate] speech` e `langguard` aparecem; os controles
+  novos (`visitor_agency`, `hearing_radius`, `ambient_talk_chance`, `notify_thoughts`)
+  aparecem no painel e persistem.
+
+## 5b. Validação v0.5 — Resiliência/roteamento/conversas (implementado offline; validação live pendente)
+
+Implementado offline (ver **Roadmap §7.11**). Para provar em jogo, rebuild o mod
+(`py -3.7 mod\build.py`) + `scripts\install-mod.ps1` + **reiniciar o jogo**:
+
+> **Achado da 1ª sessão live (builds .31/.32).** O jogador mandou o Eric **contar uma
+> piada** para a Olivia, mas a fala veio do template `casual` ("só na correria de
+> sempre"): o hook do mod capturou o nome bruto **genérico** (`sim_Chat`) e o
+> sidecar classificava só pelo nome bruto. Correção: o mod agora manda o
+> **label localizado** (`interaction_text`, ex. "Contar piada") e o sidecar
+> classifica o label **primeiro** (tokens multilíngues em `lexicon.json` →
+> `interaction_tokens`). Ao validar, procure no `sensewright_output.log`
+> `[validate] player-interaction sim= name= label= class= target=` — o `label`
+> deve trazer o texto do pie (ex. "Contar piada") e o diálogo deve cair em
+> `social.line.funny`/topic "joking around".
+
+- **R1 — resiliência:** com um modelo instável na frente da chain, o diálogo **não**
+  cai no template: aparece `llm.attempt … outcome=empty` e a chamada seguinte
+  `outcome=ok`; `source=llm`. Nenhum fallback sem linha de log (`fallback reason=`).
+- **R2 — roteamento/pool:** para `social`/`summary` os modelos rápidos são tentados
+  primeiro (`flash|lightning|mimo`); quando um modelo entra em cooldown, aparece
+  `llm.model_swap provider= from= to=` com um `:free`/`-free` descoberto; o
+  `/v1/status` lista o pool e os cooldowns por modelo.
+- **R3 — pacing/budget:** em 30 s de conversa ativa, **~1 turno** (não 5–7); pausa
+  entre beats sem fechar a sessão; `social skip reason=interval` quando aplicável;
+  nenhum diálogo social derruba os impulses (reserva de 40%).
+- **R4 — templates/objeto/sono:** oba-oba na cama/banheira produz fala íntima
+  coerente com o objeto (ou murmúrios); `GetToKnow`/`TellJoke`/`Insult` caem na
+  categoria certa; com um Sim dormindo, **nenhuma** fala e
+  `social skip reason=sleeping`.
+- **R5 — observabilidade:** `social render a= b= source= model= lines= object=
+  interaction=` aparece por diálogo; o evento `social` no `memory.sqlite3` carrega
+  `source`/`model`; dá para reconstruir a sessão só por grep.
+
+## 6. Smoke script
 
 ```powershell
 $root = "$env:USERPROFILE\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\Sensewright"
@@ -755,8 +822,21 @@ o token não está armado (`runtime.json` / `token`).
 Fonte da verdade do arquivo: **`config.example.toml`**. Com **nenhuma chave**, o mod
 já roda em "modo nativo". Blocos: `[ui]`, `[network]`, `[logging]`, `[llm]` (+
 `[llm.providers.*]`), `[memory]`, `[agents]` (+ `.evolution`, `.initiative`,
-`.personality`, `.layers`, `.social`), `[runtime]`, `[god]` (+ `.settings`,
-`.backgrounds`).
+`.personality`, `.layers`, `.social`, `.speech`, `.presence`, `.conversations`),
+`[runtime]`, `[god]` (+ `.settings`, `.backgrounds`).
+
+v0.4 (§7): `[llm] language_policy = "strict"` e `provider.extra_body` (passthrough
+documentado); o pool `agent_seats`/`max_active` cai de 12 para **6** (visitantes
+são `reactive`, não habitados).
+
+v0.5 follow-up (§7.12): `[llm] refresh_on_failure_min_seconds` (throttle do
+refresh-on-failure, default 60 s); por provider, `type` seleciona a
+implementação (`type = "openai_compat"` para Groq/Cerebras/Ollama sem código),
+`api_key_optional` permite chave vazia (local) e `discover_models` liga/desliga a
+descoberta dinâmica (off para `opencode`). Gemini aceita uma lista `models`
+(tenta em ordem; 2.5 foi retirada para contas novas) e `thinking_budget`
+(omisso por padrão — 3.x rejeita `0`). `config.example.toml` traz exemplos de
+`gemini` (flash-lite), `groq`/`ollama` e `deepseek` no fim da chain.
 
 Os ajustes expostos ao painel são os **ControlSpec** (`god/controls.py`); o
 `POST /v1/config/god?persist` grava overrides em `data/panel.toml` (sem tocar no
@@ -788,7 +868,7 @@ Presets (`god.preset`): `novela`, `sitcom`, `drama`, `caos`, `terror`, `romance`
 
 | Key | Kind | Range / step | Default |
 |---|---|---|---|
-| `agent_seats` | slider | 1..24 / 1 | 12 |
+| `agent_seats` | slider | 1..24 / 1 | 6 |
 | `impulse_frequency` | slider | 0..1 / 0.05 | 0.2 |
 | `player_sim_impulse_frequency` | slider | 0..1 / 0.05 | 0.2 |
 | `reactions_enabled` | toggle | on/off | on |
@@ -824,6 +904,10 @@ Presets (`god.preset`): `novela`, `sitcom`, `drama`, `caos`, `terror`, `romance`
 | `agents.evolution.drift_strength` | slider | 0..1 / 0.05 | 0.2 |
 | `agents.social.max_pairs_per_tick` | slider | 0..4 / 1 | 1 |
 | `agents.social.pair_cooldown_seconds` | slider | 30..600 / 30 | 180 |
+| `agents.presence.visitor_agency` | select | reactive / full / off | reactive |
+| `agents.speech.hearing_radius` | slider | 0..80 / 5 | 20 |
+| `agents.speech.ambient_talk_chance` | slider | 0..0.5 / 0.01 | 0.08 |
+| `agents.speech.notify_thoughts` | toggle | on/off | on |
 | `god.backgrounds.enabled` | toggle | on/off | on |
 | `god.backgrounds.batch_size` | slider | 1..10 / 1 | 2 |
 | `runtime.expose_roster` | toggle | on/off | on |
@@ -839,8 +923,9 @@ sempre o protege.
 
 Dois locales: **`en`** (default) e **`pt-BR`**. Adicionar um idioma = copiar
 `locales/en.json` → `<code>.json` (traduzir valores, manter chaves/placeholders) +
-entrada nos **dois** manifests (`mod/locales/manifest.json` e
-`sidecar/locales_content/manifest.json`). `sw.lang` e o painel o detectam sozinhos.
+`locales_content/lexicon.en.json` → `lexicon.<code>.json` (stopwords/markers/chars
+para detecção de idioma) + entrada nos **dois** manifests (`mod/locales/manifest.json`
+e `sidecar/locales_content/manifest.json`). `sw.lang` e o painel o detectam sozinhos.
 Detalhes em [Desenvolvimento §4](#desenvolvimento).
 
 ## 6. Providers de LLM
@@ -1083,7 +1168,7 @@ Fases: **R1** lever spike → **R2** seats → **R3** intents → **R4** cogniti
 
 ---
 
-## 7. Plano de ajuste — Voz, Idioma e Presença (v0.4 — **a implementar**)
+## 7. Plano de ajuste — Voz, Idioma e Presença (v0.4 — **implementado offline; validação live pendente**)
 
 > Origem: três problemas observados nos logs live (2026-09-30) — (1) mensagens
 > em inglês com o jogo em pt-BR, (2) "falas" aleatórias que na verdade eram
@@ -1238,12 +1323,217 @@ language_policy = "strict"    # strict (retry + fallback localizado)
 
 > Ao implementar: renomear para os blocos reais no `config.example.toml`, adicionar
 > os `ControlSpec` correspondentes e movê-los para a aba **Referência**.
+>
+> **Status:** implementado offline em v0.4 — os blocos reais são `[agents.speech]`,
+> `[agents.presence]`, `[agents.conversations]` e `[llm] language_policy` (ver
+> `config.example.toml` e **Referência**); os `ControlSpec` novos são
+> `agents.presence.visitor_agency`, `agents.speech.hearing_radius`,
+> `agents.speech.ambient_talk_chance` e `agents.speech.notify_thoughts`. A
+> validação live (aba **Validação**) segue pendente.
 
 ### 7.10 Ordem de implementação
 
 **P0 → P1+P2 → P3 → P4+P4b+P4c → P5.** Cada fase fecha com testes verdes +
 `py -3.7 mod\build.py` + entrada no Changelog; P3/P4 exigem rebuild + reiniciar o
 jogo para validação live (aba Validação).
+
+### 7.11 Plano v0.5 — Resiliência de LLM, roteamento dinâmico, conversas contextualizadas e observabilidade (implementado offline; validação live pendente)
+
+> **Status:** R1–R5 implementados + correção pós-validação (build `.32`, branch `migrate-s4cl-lot51`).
+> Sidecar **655** / mod **437** testes verdes + `ruff` limpo. Falta apenas a
+> validação live (aba **Validação** §5b), que exige rebuild + reiniciar o jogo.
+> Código: `llm/providers/openai_compat.py`, `llm/chain.py`, `llm/registry.py`,
+> `agent/social.py`, `agent/conversations.py`, `agent/agency.py`,
+> `god/budgeter.py`, `schemas.py` + `mod/state_collector.py`.
+
+> **Motivação (sessão live Eric/Alice, 2026-10-01).** Os diálogos caíram
+> repetidamente no template fixo (`"Oi {a}! Bem, só na correria de sempre."`),
+> houve fala durante o sono e falas desconexas com a interação em curso (ex.:
+> "oba-oba" no meio de um papo genérico). Causas-raiz confirmadas no
+> `memory.sqlite3` + `sidecar.log` da instalação:
+> 1. **Resposta vazia silenciosa** — `llm/providers/openai_compat.py` devolvia
+>    `choices` com `content` vazio/`None` e `render_dialogue` caía no template
+>    **sem nenhum log** (único caminho mudo).
+> 2. **Modelo errado na frente** — o 1º modelo da chain era um *reasoning model*
+>    instável para JSON curto (`nvidia/nemotron-3-ultra-550b-a55b:free`; 45×
+>    `No choices in response`), queimando o `max_tokens=200` do diálogo.
+> 3. **Social fora do orçamento** — `_plan_social` chama a LLM a cada pulse
+>    (~2–8 s), fora do `BackgroundBudgeter` (7 falas idênticas em 11 s).
+> 4. **Bug do sono** — a fusão de seeds em `agency._plan_social` monta `by_id` com
+>    **todos** os Sims (sem filtrar `sleeping`) e `_dialogue_for_pair` não tem gate.
+> 5. **Fallback cego** — sem categoria por tipo de interação nem contexto do objeto.
+
+**Escopo:** sidecar (R1–R3, R5) + 1 ajuste de wire/mod (R4, `current_object`).
+Sem quebra de compatibilidade: configs existentes continuam válidas.
+
+#### R1 — Resiliência do provider/chain (`llm/providers/openai_compat.py`, `llm/chain.py`, `llm/base.py`)
+- **Conteúdo vazio = falha**: se há `choices` mas `text` é vazio e não há
+  `tool_calls`, levantar `LLMError` retryable (`empty content`) → o provider tenta
+  o próximo modelo e a chain o próximo provider. Fim do fallback silencioso.
+- **`finish_reason="length"` sem conteúdo** também é falha (hoje só quando há tools).
+- **Cooldown por modelo** (`llm.providers.*.model_cooldown_seconds`, default 120 s):
+  N falhas consecutivas aposentam o modelo temporariamente; sucesso reseta.
+- **Log por tentativa**: `llm.attempt purpose= provider= model= attempt=k/n outcome=ok|empty|error latency_ms= finish=`.
+- Cooldowns por modelo expostos em `chain.status()` / `/v1/status`.
+
+#### R2 — Roteamento híbrido + pool dinâmico de modelos free (`llm/registry.py`, `llm/chain.py`, `config.py`)
+- Novo `purpose` em `complete(...)`: `social`, `summary`, `impulse`, `chat`,
+  `sleep`, `profile`, `background`, `consolidation`, `cognition`.
+- **Heurística "rápidos primeiro"** para tarefas curtas (`social`/`summary`):
+  reordena os modelos (`flash|lightning|mimo|mini|8b` antes de `ultra|super|550b`);
+  nunca remove modelos; `free_only` segue valendo.
+- **Override opcional** `[llm.task_models]` por propósito (se presente, vence a
+  heurística).
+- **Descoberta dinâmica** (ativa o `auto_discover` hoje morto):
+  - Zen: `GET /models` → filtrar sufixo `-free` (**verificado live**).
+  - OpenRouter: `GET /models/:free` → filtrar `:free`.
+  - Refresh a cada `llm.model_refresh_minutes` (default 30; 0=off) e sob demanda
+    quando todas as tentativas de uma chamada falham.
+  - **Swap automático**: modelo configurado em cooldown é substituído por um free
+    descoberto do mesmo provider (respeitando `free_only`/rpm/rpd; **nunca** em
+    erro de auth), com log `llm.model_swap provider= from= to=`.
+
+#### R3 — Pacing, budget e gestão de agentes (`agent/agency.py`, `agent/social.py`, `agent/conversations.py`)
+- **Turn pacing ideal**: novo turno só quando (a) a interação/fila do par **mudou**
+  desde o último turno, ou (b) passou `agents.social.turn_min_interval_seconds`
+  (default 25 s) com a conversa ativa. A sessão fica aberta em silêncio entre beats.
+- **Budget compartilhado com reserva social**: `agents.initiative.social_reserve_fraction`
+  (default 0.4). Social/conversa é prioritário (usa a reserva); idle só usa o
+  restante; social sem budget → template imediato (nunca morre a interação).
+- **Backpressure**: `_schedule_idle` reduz impulses conforme a saúde da chain
+  (providers frios / pressão de rate-limit).
+
+#### R4 — Templates por interação, objeto e gate de sono (`agent/social.py`, `state_collector.py`, `schemas.py`, `locales_content/*.json`, `locales/*.json`)
+- **Categorias** (tokens do nome bruto da interação): `friendly` (`sim_Chat`),
+  `intro` (`GetToKnow`), `funny` (`joke`), `flirty` (`flirt`/`romance`),
+  `intimate` (`woohoo`/`kiss`/`make_out`), `affectionate` (`hug`/`affection`),
+  `tense` (`argue`/`fight`/`yell`), `mean` (`insult`/`mock`/`gossip`),
+  `casual` (default neutro, sem supor trabalho/dia).
+- **`intimate` contextualizada por objeto**: chaves
+  `social.line.intimate.<object>.N` (cama/banheira/chuveiro/hot tub) + genérica;
+  tom íntimo/romântico/divertido, incluindo **barulhos/murmúrios** ("Mmm…",
+  suspiros, risadinhas). Rotação de variantes por hash do par (sem repetir a
+  mesma linha). Cada objeto tem frase própria (evita erro de gênero em pt-BR).
+- **Label traduzido**: placeholder `{interaction}` = `current_interaction_text`
+  (label localizado do jogo, **nunca** o id bruto); guard contra valor
+  numérico/hash.
+- **Novo wire `current_object`** (string localizada): `state_collector._current_object_of`
+  resolve `current.target` (quando objeto) senão `current.aop.target`; entra no
+  `AutonomySimState`, no prompt do LLM e nos templates (`{object}`).
+- **Gate de sono (bug real)**: filtrar `sleeping` na fusão de seeds
+  (`agency._plan_social`) + gate defensivo em `_dialogue_for_pair`; log
+  `social skip reason=sleeping`.
+
+#### R5 — Observabilidade (`agent/social.py`, `agent/conversations.py`, `agent/graph.py`)
+- `render_dialogue`: logar **motivo do fallback** (registry None / exception /
+  vazio / JSON inválido / langguard) + último `provider`/`model`.
+- `social render a= b= source= model= lines= object= interaction=`;
+  `social skip reason=…`; `conversation close reason=…`.
+- Persistir `source` (`template`|`llm`) + `model`/`provider` no evento `social`
+  (hoje `graph._store_social` grava `"source": "agent"` fixo).
+- Health por modelo/pool no `/v1/status`.
+
+#### Config nova (implementada — ver `config.example.toml`)
+
+```toml
+[agents.social]
+turn_min_interval_seconds = 25.0
+
+[agents.initiative]
+social_reserve_fraction = 0.4
+
+[llm]
+model_refresh_minutes = 30      # 0 = desliga a descoberta dinâmica
+auto_swap_models = true
+
+# Opcional: fixa modelos por propósito (vence a heurística).
+# [llm.task_models]
+# social  = ["nvidia/nemotron-3.5-lightning:free", "mimo-v2.6-flash-free"]
+# summary = ["nvidia/nemotron-3.5-lightning:free"]
+
+[llm.providers.openrouter]
+model_cooldown_seconds = 120
+```
+
+#### Ordem de implementação e critérios de aceite
+
+**R1 → R2 → R4 → R3 → R5.** Cada fase fecha com testes verdes (sidecar + mod) +
+`ruff` + `py -3.7 mod\build.py`; ao final `scripts\install-mod.ps1` + **reiniciar
+o jogo** (aba **Validação**).
+
+**Aceite live:**
+- Nenhuma fala durante o sono; fala íntima coerente com cama/banheira.
+- Sem repetição da mesma linha a cada pulse (pacing/dedupe).
+- Nenhum fallback silencioso: todo fallback aparece no log com motivo.
+- O diálogo sobrevive a um modelo que devolve vazio (cai para outro modelo/provider).
+- `source=llm` sempre que houver provider saudável; `source=template` só no último recurso.
+
+#### Arquivos afetados (resumo)
+
+| Área | Arquivos |
+|---|---|
+| Resiliência | `llm/providers/openai_compat.py`, `llm/chain.py`, `llm/base.py` |
+| Roteamento/pool | `llm/registry.py`, `llm/chain.py`, `config.py` |
+| Pacing/budget | `agent/agency.py`, `agent/social.py`, `agent/conversations.py` |
+| Templates/objeto/sono | `agent/social.py`, `mod/.../state_collector.py`, `schemas.py`, `locales_content/{en,pt-BR}.json`, `mod/.../locales/{en,pt-BR}.json` |
+| Logs | `agent/social.py`, `agent/conversations.py`, `agent/graph.py` |
+| Config/docs/testes | `config.example.toml`, `docs/feature-review.html`, `sidecar/tests`, `mod/tests`, `SKILL.md §10` |
+
+### 7.12 Ajustes v0.5 pós-validação — backlog (implementado offline 2026-10-01; A11 live pendente)
+
+Itens levantados na sessão live (builds `.31`/`.32`) e na análise de providers.
+Não são regressões do v0.5 — são robustez, cota e config. **A1–A10 + A12
+implementados offline** (testes sidecar **655** / mod **437**, `ruff` limpo);
+falta apenas **A11** (reinstalar o sidecar + reiniciar o jogo).
+
+| # | Ajuste | Área | Motivo | Status |
+|---|---|---|---|---|
+| **A1** | `[llm.providers.openrouter] rpd` de **50 → 1000** | `config.example.toml` | o sidecar se autobloqueava após 50 chamadas/dia; a conta OpenRouter já está no tier de **1000/dia** (`GET /api/v1/key` → `free_model_daily_requests`) | ✅ |
+| **A2** | Contar o rate limit **por requisição real** (limiter por tentativa de modelo) | `llm/limits.py`, `llm/chain.py`, `llm/providers/openai_compat.py` | hoje conta 1×/chamada da chain, mas o provider tenta vários modelos (cada um = 1 request) → o contador local não batia com a cota do OpenRouter. Agora a chain faz *peek* (`has_capacity`) e registra o nº real de requests (`record`). | ✅ |
+| **A3** | Conter o `refresh-on-failure` (no máximo 1 a cada ~60 s) | `llm/registry.py`, `config.py` | hoje disparava a cada falha, martelando `GET /models` e re-tentando a chain. Novo `[llm] refresh_on_failure_min_seconds` (default 60). | ✅ |
+| **A4** | Zen/OpenCode: desligar/restringir a descoberta dinâmica | `config.py`, `llm/registry.py` | o free tier devolve `403 "só dentro do OpenCode"`; só `space-bunny-free` responde às vezes. Novo `discover_models` por provider (off para `opencode`). | ✅ |
+| **A5** | Provider **genérico** OpenAI-compat config-driven (`type = "openai_compat"` + `base_url`) | `config.py`, `llm/chain.py` | plugar Groq/Cerebras/Ollama etc. sem tocar em código | ✅ |
+| **A6** | Permitir `api_key` **vazio** para providers locais | `config.py`, `llm/providers/openai_compat.py`, `gemini.py` | Ollama não usa chave; `available` exigia chave não-vazia. Novo `api_key_optional` (sem header `Authorization`). | ✅ |
+| **A7** | **Ollama** como último recurso local (`granite4.1:8b` + `extra_body = { reasoning_effort = "none" }`) | `config.example.toml` | grátis/offline/privado; nos testes: **18/18** social, ~2,5 s, respeita o idioma e tool calls | ✅ (config) |
+| **A8** | **DeepSeek Flash (pago)** como último recurso final | `config.example.toml` (`[llm.providers.deepseek]`) | garante disponibilidade quando os free tiers caírem; provider já codado — `model = "deepseek-flash"` no fim da `chain` | ✅ (config) |
+| **A9** | (Opcional) acrescentar **Gemini** e/ou **Groq/Cerebras** à chain | `config.example.toml` | resiliência gratuita extra; Gemini já codado; bloco `groq` genérico adicionado | ✅ (config) |
+| **A10** | (Opcional) reduzir volume (`impulse_frequency`/`backgrounds`) | `config.example.toml` | esticar a cota diária free (`impulse_frequency=0.1`, `per_minute=3`, `daily_limit=60`) | ✅ (config) |
+| **A11** | Reinstalar o sidecar + reiniciar o jogo (correção do `speaker` + providers) | `scripts/install-mod.ps1` | a normalização `_normalize_speakers` (build `.32`+) ainda **não** está na instalação | ⏳ |
+| **A12** | Fechar docs (contagens e Changelog do follow-up) | `docs`, `SKILL.md §10` | manter a fonte única honesta | ✅ |
+
+Config-alvo do **A7/A8** (como entregue no `config.example.toml`, chain em ordem de fallback):
+
+```toml
+chain = ["openrouter", "opencode", "ollama", "groq", "gemini", "deepseek"]
+
+[llm.providers.groq]          # A5/A9: genérico OpenAI-compat, free rápido
+enabled = false
+type = "openai_compat"
+model = "llama-3.3-70b-versatile"
+api_key = "${GROQ_API_KEY}"
+base_url = "https://api.groq.com/openai/v1"
+
+[llm.providers.ollama]        # A7: local, grátis, último recurso offline
+enabled = false               # ligue após instalar o Ollama + o modelo
+type = "openai_compat"
+model = "granite4.1:8b"
+api_key = ""                  # A6: permitir vazio
+api_key_optional = true
+base_url = "http://localhost:11434/v1"
+extra_body = { reasoning_effort = "none" }
+
+[llm.providers.deepseek]      # A8: pago, último recurso final
+enabled = false               # ligue quando os free tiers não bastarem
+model = "deepseek-flash"
+api_key = "${DEEPSEEK_API_KEY}"
+base_url = "https://api.deepseek.com/v1"
+```
+
+> **Já feito no v0.5** (não confundir com o backlog): R1–R5; classificação por
+> label localizado + `lexicon.json` → `interaction_tokens`; `_extract_json_object`
+> tolerante; captura de `interaction_parameters`; seed raw+label; e
+> **`_normalize_speakers`** (nomes → `a/b`, destrava granite/qwen2.5). Testes
+> **sidecar 655 / mod 437**.
 
 </script>
 
@@ -1261,6 +1551,266 @@ All notable changes to **Sensewright** are documented in this file.
 ---
 
 ## [Unreleased] — Phases 2, 2b, 3, 4, 5a, 5b, 5c + v0.2 §14: Directives, Census, Agents, Evolution, God foundation, backgrounds, orchestration & autonomous Sim agents
+
+### Added - v0.5 R1-R5: LLM resilience, dynamic routing, contextual conversations and observability (offline 2026-10-01; live validation pending)
+
+Implements the [Roadmap](#roadmap) §7.11 plan. Root causes from the live
+Eric/Alice session: silent empty responses, a reasoning model in front of the
+chain, social calls outside the budget, a sleeping-Sim dialog, and blind
+fallbacks. Sidecar tests **611 → 640**, mod **437** (adds 4 `_current_object_of`
+tests over 433); `ruff` clean, `py -3.7 mod/build.py` ok.
+
+- **R1 — provider/chain resilience (`llm/providers/openai_compat.py`,
+  `llm/chain.py`, `llm/base.py`):** `choices` with empty/`None` content and no
+  tool call is now a **retryable `LLMError`** (also `finish_reason=length` with
+  no content, and truncation before a tool call), so the provider tries its next
+  model and the chain the next provider instead of silently using the template.
+  Per-model **cool-down** (`model_failure_threshold`, `model_cooldown_seconds`)
+  retires a model after N consecutive failures and resets on success; exposed via
+  `provider.model_status()`/`chain.status()`. Every attempt logs
+  `llm.attempt purpose= provider= model= attempt=k/n outcome=ok|empty|error
+  latency_ms= finish=`.
+- **R2 — hybrid routing + dynamic free pool (`llm/registry.py`, `llm/chain.py`,
+  `config.py`):** a new `purpose` on `complete()` routes short tasks
+  (`social`/`summary`) to fast models first (`flash|lightning|mimo|mini|8b`
+  before `ultra|super|550b`), with an optional `[llm.task_models]` override.
+  Dynamic discovery (previously-dead `auto_discover`) refreshes each provider's
+  free pool (`model_refresh_minutes`, `GET /models`: Zen `-free`, OpenRouter
+  `:free`), on a timer and on demand after an all-providers failure. A cooled
+  model is **swapped** for a discovered free model of the same provider
+  (`auto_swap_models`, never on auth) with a `llm.model_swap` log.
+- **R3 — pacing + budget + backpressure (`agent/agency.py`,
+  `agent/conversations.py`, `agent/social.py`, `god/budgeter.py`):** a new turn
+  only when the pair's interaction/queue **changed** or
+  `agents.social.turn_min_interval_seconds` (default 25 s) elapsed — the session
+  stays open and silent between beats (`social skip reason=interval`). Social
+  turns draw on the shared budget **with a reserve**
+  (`agents.initiative.social_reserve_fraction`, default 0.4) while idle impulses
+  may only use the remainder; no budget → immediate template (the interaction
+  never dies). `_schedule_idle` throttles idle impulses by chain health
+  (`ProviderChain.backpressure_factor`).
+- **R4 — interaction/object templates + sleep gate (`agent/social.py`,
+  `mod/sensewright_mod/state_collector.py`, `schemas.py`,
+  `locales_content/*.json`, `lexicon.json`):** categories expanded to
+  `friendly`/`intro`/`funny`/`flirty`/`intimate`/`affectionate`/`tense`/`mean`/
+  `casual`, with object-aware `intimate` lines
+  (`social.line.intimate.<bed|bathtub|shower|hot_tub>.<n>`, murmurs included),
+  variant rotation by pair hash, and a data-driven
+  `lexicon.json` → `object_tokens` map. The `{interaction}` placeholder is the
+  **localized** label (`_clean_interaction_label` rejects numeric/hash values).
+  New wire `current_object` (`state_collector._current_object_of`, resolving
+  `current.target` then `current.aop.target`) feeds the prompt and `{object}`.
+  A sleeping Sim is filtered in the seed merge and gated in
+  `_dialogue_for_pair` (`social skip reason=sleeping`).
+- **R5 — observability (`agent/social.py`, `agent/conversations.py`,
+  `agent/graph.py`):** `render_dialogue` logs every fallback with its reason
+  (`registry_none`/`exception`/`empty`/`invalid_json`/`langguard`) plus the last
+  provider/model; each rendered dialogue logs `social render a= b= source=
+  provider= model= lines= object= interaction=`; sessions close with
+  `conversation close reason=left|idle`. The `social` memory event now stores
+  `source` (template/llm), `provider`, `model`, `object` and `interaction`
+  instead of a fixed `"source": "agent"`. `/v1/status` exposes the per-model
+  pool/cooldowns and chain health.
+
+### Fixed - v0.5 live follow-up (2026-10-01, builds .31/.32): real interaction + robust JSON
+
+The first live session after R1–R5 showed the split: the player told a **joke**
+but the surfaced dialogue was the `casual`/`friendly` template. Root causes
+found in the logs: (a) the mod's player hook captured the *generic base* tuning
+name (`sim_Chat`) and the sidecar classified on the raw name only; (b) with
+`label=''` the specific interaction was invisible; (c) the LLM call often
+returned prose-wrapped JSON (`social.fallback reason=invalid_json`) or failed
+outright because OpenRouter was rate-limited (rpd=50) and Zen's free tier
+returned `403 FreeTierError`.
+
+- **Mod (`player_activity.py`, `state_collector.py`):** the player hook captures
+  the localized pie label (`_interaction_label_of`) **and** the push's
+  `interaction_parameters` token (the only specific signal when the affordance
+  is a generic base), sends them as `interaction_text`, and logs
+  `[validate] player-interaction sim= name= label= params= display= class=
+  target=`.
+- **Sidecar (`agent/social.py`, `agent/agency.py`, `locales_content/lexicon.json`):**
+  `classify_interaction(interaction, label)` tries the **localized label/params
+  first**, then the raw name, using data-driven multilingual `lexicon.json` →
+  `interaction_tokens`. `_extract_json_object` recovers the first balanced JSON
+  object from prose/`[thought]`/fence-wrapped output, and every fallback now logs
+  the (truncated) raw reply (`social.fallback … raw='…'`). The player seed
+  carries the raw interaction + label into the conversation. Tests: sidecar
+  **611 → 640**, mod **437**; `ruff` clean, `py -3.7 mod/build.py` ok.
+
+### Changed - v0.5 follow-up §7.12: quota, per-request metering, provider discovery & config-driven providers (offline 2026-10-01; live validation pending)
+
+Implements the [Roadmap](#roadmap) §7.12 backlog (A1–A10 + A12). Config-only
+items (A1, A7–A10) ship in `config.example.toml`; the rest are sidecar code.
+
+- **A2 — per-request rate metering (`llm/limits.py`, `llm/chain.py`,
+  `llm/providers/openai_compat.py`):** `ProviderRateLimiter` gains
+  `has_capacity()` (peek) and `record(count)`; the chain peeks before a call and
+  records the provider's real request count (`requests_last_call`), so a call
+  that tries several models meters every upstream request instead of one.
+- **A3 — failure-refresh throttle (`llm/registry.py`, `config.py`):** new
+  `[llm] refresh_on_failure_min_seconds` (default 60) rate-limits the on-demand
+  `GET /models` refresh triggered by an all-providers failure.
+- **A4 — per-provider discovery toggle (`config.py`, `llm/registry.py`):** new
+  `discover_models` (default true); `opencode` sets it false (Zen free slugs
+  403 outside the OpenCode client).
+- **A5/A6 — generic/local providers (`config.py`, `llm/chain.py`,
+  `llm/providers/openai_compat.py`, `gemini.py`):** `ProviderConfig.type` selects
+  the implementation (e.g. `type = "openai_compat"` for Groq/Cerebras/Ollama) and
+  `api_key_optional` allows an empty key (no `Authorization` header); discovery
+  resolves the generic `openai_compat` type too.
+- **A1/A7/A8/A9/A10 — config template (`config.example.toml`):** OpenRouter
+  `rpd` 50 → 1000; examples for generic `groq`, local `ollama`
+  (`api_key_optional`, `extra_body.reasoning_effort="none"`) and paid
+  `deepseek-flash` last; chain order updated; volume lowered
+  (`impulse_frequency` 0.2 → 0.1, `backgrounds.per_minute` 6 → 3,
+  `daily_limit` 120 → 60).
+- **Gemini `purpose` kwarg:** `GeminiProvider.complete` accepts (and ignores) the
+  chain's `purpose`, which previously raised `TypeError`.
+
+### Fixed - v0.5 follow-up §7.12
+
+- **`config.example.toml` invalid TOML:** the multi-line `[god] powers = { … }`
+  inline table is now single-line (TOML 1.0 forbids newlines inside inline
+  tables); the example now parses with `tomllib`. Tests: sidecar **640 → 650**
+  (`tests/test_llm_backlog.py`), mod **437**; `ruff` clean.
+
+### Fixed - v0.5 follow-up §7.12: Gemini multi-model + thinking config
+
+- **Gemini provider (`llm/providers/gemini.py`, `config.py`):** `GeminiProvider`
+  now tries the configured `model`/`models` in order (Google retired the 2.5-era
+  models for new accounts, so a model returns HTTP 404), treats empty content
+  with no tool call as a retryable failure, and counts every real request
+  (`requests_last_call`, A2). The automatic `thinkingBudget=0` was removed —
+  Gemini 3.x rejects it with HTTP 400 — and is now opt-in via the new
+  `ProviderConfig.thinking_budget`. Tests: sidecar **650 → 655**
+  (`tests/test_gemini_provider.py`).
+
+### Added - v0.4 P6: same-room gating + queue continuity for sim↔sim dialogue (offline; live validation pending)
+
+The sim↔sim channel now only pairs Sims that share an engine room, keeps a
+conversation open while the interaction queue still continues with the same Sim
+(no premature "goodbye"), and feeds the interaction sequence into the dialogue
+context. Mod + sidecar + wire.
+
+- **Wire (`AutonomySimState`):** new `room_id` (`0` = outside, `None` = unknown)
+  and `queued_interactions` (`[{name, target_sim_id}]`, the running one
+  excluded). The mod collects them in `sim_context._get_room_id` (S4CL
+  `CommonSimLocationUtils.get_current_room_id`, native `build_buy.get_block_id`
+  fallback) and `state_collector._queued_interactions_of`.
+- **Same-room gate (`agents.social.require_same_room`, default true):**
+  `pick_pairs`/`filter_conversing`/`candidate_pairs` drop pairs in different
+  rooms; unknown rooms degrade to the distance gate. Stops agents "talking
+  through walls".
+- **Queue continuity (`agents.social.keep_open_on_queued`, default true):**
+  `candidate_pairs` treats a queued interaction targeting the same Sim as still
+  engaged, so `ConversationManager.sweep` does not close the session with a
+  leaving summary while the queue continues.
+- **Interaction sequence in context:** `render_dialogue` receives
+  `interaction_sequence` + `continuing`; the prompt lists the queued
+  interactions and forbids a farewell while the conversation is ongoing.
+- **Logging:** mod `[validate] interactions/rooms` lines include room id + queue;
+  sidecar logs `social context a= b= rooms= same_room= interaction= sequence=
+  continuing=`. Tests: sidecar **598 → 611**, mod **422 → 433**; `ruff` clean,
+  `py -3.7 mod/build.py` ok.
+
+### Added - v0.4 P0-P5: Voice, Language and Presence (offline; live validation pending)
+
+Implements the [Roadmap](#roadmap) §7 plan. The three live problems (English
+text with the game in pt-BR, random idle "monologues", and passers-by
+commenting on the household home) are fixed by three reusable policies plus
+conversation sessions. All sidecar tests are green (**546 → 598**); mod tests
+(**412 → 422**). Live validation is still pending (see **Validação**).
+
+- **P0 — policies + config:**
+  - `agent/speech.py` (**SpeechPolicy**): classifies every vocal output as
+    `inner_thought` / `murmur` / `directed` / `reaction`, decides `surfaced`
+    (per-Sim minimum interval + global per-minute ceiling + hearing radius +
+    `ambient_talk_chance` / `notify_thoughts`) and logs
+    `[validate] speech: sim= kind= surfaced= lang= dist=`.
+  - `llm/langguard.py` (**LanguagePolicy**): one `language_directive(lang)` +
+    `detect_lang`/`check` with a one-retry → deterministic localized fallback.
+    Lexical hints are **manifest-driven per locale** (`locales_content/
+    lexicon.<code>.json`: `stopwords`/`markers`/`chars`), read through
+    `content_i18n.locale_stopwords`/`locale_lang_hints` — no hardcoded language
+    codes. Adding a language = drop `lexicon.<code>.json` + manifest entry.
+  - `agent/presence.py` (**PresencePolicy**): household `full`, visitors
+    `reactive` by default (config `visitor = reactive|full|off`), per-Sim
+    context line (home vs visiting), `nearby` by real distance, familiarity.
+  - New config: `[agents.speech]`, `[agents.presence]`, `[agents.conversations]`,
+    `[llm] language_policy`, `provider.extra_body`; `agent_seats`/`max_active`
+    default **12 → 6** (visitors are reactive, not inhabited).
+- **P1 — SpeechPolicy wired:** idle impulses no longer get speech tools
+  (`initiative.impulse_tools(autonomy, kind)` blocks `spontaneous_line`/`say_to`/
+  `socialize`, and the unreliable `approach`/`move_to`); `_gate_intents` validates
+  and **repairs** `socialize`/`say_to` without a target (partner-in-conversation
+  or degrade to murmur) so the mod never sees `missing_argument`; speech intents
+  carry `params.surfaced` and the mod only notifies when `surfaced=true`.
+- **P2 — LanguagePolicy wired:** `language_directive` is used by chat, social,
+  profiler, evolution, personality, consolidation and backgrounder; the social
+  dialogue and the backgrounder guard output (`langguard`) with a reinforced
+  retry (backgrounder also retries with a larger budget) then fall back to the
+  localized deterministic text.
+- **P4 — conversation sessions (`agent/conversations.py`):** two Sims already in
+  a native conversation hold a multi-turn session (`max_turns`, 1 LLM call per
+  pulse, topic remembered); the pair cooldown is preserved. A closed session
+  yields a one-line summary (LLM → `conversation.end.<tone>` fallback) and a
+  `relationship_shift` proposal.
+- **P4b — summary/goodbye:** any pair gets a narrator summary at session end;
+  a pair that stops conversing gets a "goodbye" (`conversation.leave`). Delivered
+  as a `notify` intent the mod surfaces (inside the hearing radius).
+- **P4c — pie-menu text as context:** new wire field
+  `AutonomySimState.current_interaction_text` (mod `_current_interaction_text_of`
+  → `display_name`/`get_display_name`/`__name__` fallback); the sidecar feeds it
+  to the dialogue prompt while keeping the raw `current_interaction` for
+  classification.
+- **P5 — controls/observability:** new ControlSpecs
+  `agents.presence.visitor_agency`, `agents.speech.hearing_radius`,
+  `agents.speech.ambient_talk_chance`, `agents.speech.notify_thoughts`; new
+  tests `test_speech.py`, `test_langguard.py`, `test_presence.py`,
+  `test_conversations.py` (sidecar) + mod coverage in `test_autonomy.py`;
+  `content_i18n` per-locale lexicon tests.
+
+### Fixed - v0.4 live validation: game language + player conversations
+
+Diagnosed from the live logs (build `.27`, 2026-10-01): the game runs in **pt-BR**
+but the mod sent `lang=en`, and no conversation ever started (`social=0`).
+
+- **Language detection was silently locking English (mod `i18n`).** At script-mod
+  import the game services are not ready; the old `_detect_game_locale` returned a
+  *non-matching* value coerced to the default `en` **with `available=True`**, so
+  `ensure_locale` locked `en` forever and the sidecar wrote English. Fixed:
+  `init_locale("auto")` no longer probes at import (defers until the game is up),
+  a non-matching source never locks a language (it keeps retrying), and the
+  detector now tries the client account locale (`client.account.locale`) plus a
+  manifest-matched Windows-registry install locale as a last resort (guarded to
+  the real game via `sims4` in `sys.modules`). A `[validate] locale: <code>
+  (<attempts>)` line makes the resolution auditable.
+- **Player-initiated conversations never formed.** `filter_conversing` required a
+  *mutual* target, but a player social is usually unilateral in the pulse (A
+  targets B; B does not target A), so `candidate_pairs`/sessions were always
+  empty. Added `SocialLayer.candidate_pairs` (accepts either direction, dedups,
+  proximity-gated) and used it in `Agency._plan_social`; an **open session
+  continues every pulse** (the pair cooldown only gates *starting* a new one), so
+  a player↔Sim interaction now produces a session and its summary.
+- **Wrong-language speech is dropped.** `_annotate_speech` now marks
+  `speech_lang_rejected` and the intent is removed, so a line in the wrong
+  language can never surface (reinforces P2).
+- **Residual English + no summaries (build `.29`).** The `locale: pt-BR` line
+  proved the mod detection was fixed, but the sidecar kept a **global
+  `_current_lang = en`** that the *reaction/event* paths used, so reactions were
+  still requested in English. The sidecar now **adopts the client language**
+  (`_note_lang`) from every pulse/event/chat, and the impulse **thought** is
+  language-guarded too (a wrong-language memory is dropped and retried with a
+  reinforced directive).
+- **Conversations still `social=0` because the pulse never carried the target.**
+  The player hook (`Sim.push_super_affordance`) now forwards a
+  `player_interaction` event (`interaction` + `target_sim_id`) that seeds a
+  conversation for the pair on the next pulse — reliable even when the pulse has
+  no `interaction_target_sim_id`. Added `Agency.note_interaction_seed`/
+  `interaction_seeds`/`consume_interaction_seed` and a
+  `[validate] interactions: …` diagnostic in the mod.
+- Tests: sidecar **590 → 598**, mod **418 → 422**.
 
 ### Changed - documentation consolidated into a single HTML
 
@@ -3284,7 +3834,8 @@ const STORE_KEY = "sensewright-feature-review-v3";
 
 const STATUS_LABEL = {
   done: "Implementado", partial: "Parcial", not_started: "Não iniciado",
-  live_pending: "Implementado (live pendente)", pending_fix: "Pendência de código"
+  live_pending: "Implementado (live pendente)", pending_fix: "Pendência de código",
+  planned: "Planejado (v0.5)"
 };
 const VALIDATION = [
   { k: "passed", label: "Passou" },
@@ -3497,10 +4048,10 @@ const FEATURES = [
     howto: ["View Background de um Sim com família.", "Confira nomes de relações e ausência de 'lonely' indevido."],
     evidence: "background text; census relationships" },
   { id: "social-config", category: "Transversais e não documentados", title: "Bloco [agents.social]", status: "done", kind: "offline",
-    details: "require_conversation, max_pair_distance, line_max_tokens, cooldowns.",
-    expected: "Controlar quantos/quando dois Sims conversam; sem conversa à distância.",
-    howto: ["Ajuste config.toml e observe o comportamento do canal social.", "Testes offline cobrem o filtro."],
-    evidence: "config.example.toml; agent/social.py; sidecar tests" },
+    details: "require_conversation, max_pair_distance, require_same_room, keep_open_on_queued, line_max_tokens, cooldowns.",
+    expected: "Controlar quantos/quando dois Sims conversam; só no mesmo quarto; sem despedida prematura quando a fila continua com o mesmo Sim.",
+    howto: ["Ajuste config.toml e observe o comportamento do canal social.", "Confira os logs [validate] interactions/rooms (mod) e 'social context ... same_room= sequence= continuing=' (sidecar).", "Testes offline cobrem quarto + continuidade da fila."],
+    evidence: "config.example.toml; agent/social.py; state_collector.py; schemas.py; sidecar/mod tests" },
   { id: "reasoning", category: "Transversais e não documentados", title: "reasoning_effort", status: "done", kind: "offline",
     details: "Orçamento de raciocínio oculto por request/agente; forward como reasoning.effort.",
     expected: "Evitar que o modelo gaste a saída 'pensando' e trunque a resposta.",
@@ -3583,41 +4134,71 @@ const FEATURES = [
     howto: ["Confira se há diff de census ou apenas merge."],
     evidence: "agent/graph.py; state_collector.py" },
 
-  { id: "v04-speech", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P1 — SpeechPolicy + devaneios discretos", status: "not_started", kind: "live",
+  { id: "v04-speech", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P1 — SpeechPolicy + devaneios discretos", status: "live_pending", kind: "live",
     details: "SpeechPolicy (inner_thought/murmur/directed/reaction); idle sem tools de fala; devaneio ocasional (chance baixa + proximidade); gate valida intents contra TOOL_SCHEMAS; socialize sem alvo reparado.",
     expected: "Nada de monólogo aleatório: só fala dirigida/reacao/sessão aparecem; devaneios raros e discretos; sem missing_argument.",
     howto: ["Ver Roadmap §7.2.", "Log '[validate] speech: kind= surfaced= …'; confirme que idle não emite speak dirigido.", "Forçar um socialize sem alvo e ver o reparo/degradacao."],
     evidence: "Roadmap §7.2; agent/speech.py; graph._gate_intents" },
-  { id: "v04-lang", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P2 — LanguagePolicy (retry + fallback localizado)", status: "not_started", kind: "offline",
-    details: "Diretiva única language_directive(lang) em todos os prompts; detect_lang via lexicon; retry reforcado → fallback determinístico localizado; modelos com má aderência rebaixados; backgrounder rejeita JSON/incompleto.",
+  { id: "v04-lang", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P2 — LanguagePolicy (retry + fallback localizado)", status: "done", kind: "offline",
+    details: "Diretiva única language_directive(lang) em todos os prompts; detect_lang via lexicon; retry reforcado → fallback determinístico localizado; backgrounder rejeita JSON/incompleto.",
     expected: "Falas/notificações/backgrounds no idioma do jogo (pt-BR); nunca inglês em produção; modelos ruins de idioma saem da frente.",
     howto: ["Ver Roadmap §7.3.", "Sidecar log 'langguard rejected= retry= fallback='.", "Gere um background e confirme prosa no idioma (sem '{')."],
-    evidence: "Roadmap §7.3; llm/langguard.py; locales_content/lexicon.json" },
-  { id: "v04-presence", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P3 — PresencePolicy + raio de audição", status: "not_started", kind: "live",
+    evidence: "Roadmap §7.3; llm/langguard.py; locales_content/lexicon.<code>.json" },
+  { id: "v04-presence", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P3 — PresencePolicy + raio de audição", status: "live_pending", kind: "live",
     details: "Visitantes 'reactive' por padrão; contexto por Sim (casa vs lote atual, nearby por distância, tiers por relacionamento); 'você ouve quem está perto' via hearing_radius; agent_seats 12→6.",
     expected: "Passantes não falam nem pensam sobre a casa da família ativa; só se ouve quem está perto.",
     howto: ["Ver Roadmap §7.4.", "Log '[validate] speech: … dist='; confirme que linhas longe não notificam.", "Confirme seats com visitors reagindo só a eventos."],
     evidence: "Roadmap §7.4; agent/presence.py; state_collector (distância)" },
-  { id: "v04-conv", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P4 — Sessões de conversa (multi-turno)", status: "not_started", kind: "live",
+  { id: "v04-conv", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P4 — Sessões de conversa (multi-turno)", status: "live_pending", kind: "live",
     details: "conversations.py: conversa nativa mútua → sessão 2–4 falas com tópico memorizado, fim natural; consequência relationship_shift; God power_force_social injeta sessão; zeitgeist = tópicos; sw.debug social.",
     expected: "Dois Sims realmente conversam (social>0), com troca fluida e efeito na relação — não telepatia nem monólogo.",
     howto: ["Ver Roadmap §7.5.", "Faça dois Sims conversarem; confirme 'social: N dialogue pair(s)' > 0.", "sw.debug social força um par."],
     evidence: "Roadmap §7.5; agent/conversations.py; [validate] social" },
-  { id: "v04-summary", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P4b — Resumo/despedida estilo nativo", status: "not_started", kind: "live",
+  { id: "v04-room-queue", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P6 — Mesmo quarto + continuidade da fila", status: "live_pending", kind: "live",
+    details: "Wire room_id + queued_interactions; SocialLayer.require_same_room (S4CL get_current_room_id + fallback nativo build_buy.get_block_id) e keep_open_on_queued; render_dialogue recebe interaction_sequence + continuing (sem despedida se a fila continua com o mesmo Sim).",
+    expected: "Agentes só conversam no mesmo quarto; a conversa segue enquanto a fila tiver interação com o mesmo Sim, sem 'goodbye' prematuro.",
+    howto: ["Confirme nos logs do mod '[validate] rooms: ...' / '[validate] interactions: ...' e no sidecar 'social context ... same_room= sequence= continuing='.", "Ponha dois Sims conversando e enfileire outra interação com o mesmo Sim; a sessão não deve fechar com despedida."],
+    evidence: "agent/social.py; agent/conversations.py; state_collector.py; schemas.py; test_social*.py; test_sim_context.py; test_state_collector.py" },
+  { id: "v04-summary", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P4b — Resumo/despedida estilo nativo", status: "live_pending", kind: "live",
     details: "Ao fim de qualquer par: resumo de 1 frase (fala + reação) tomado do classify_interaction e do relationship_shift; 'despedida' quando um sai do lote; retrato do Sim + texto narrador; fallback content_i18n.",
     expected: "Fim de conversa gera um resumo visível estilo notificação nativa ('X gostou da companhia de Y'); só dentro do raio.",
     howto: ["Ver Roadmap §7.6.", "Converse dois Sims e encerre; veja o resumo no idioma.", "Faça um visitante ir embora e confirme a despedida."],
     evidence: "Roadmap §7.6; content_i18n conversation.end.*; notify.conversation.*" },
-  { id: "v04-pietext", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P4c — Texto do pie menu como contexto", status: "not_started", kind: "live",
+  { id: "v04-pietext", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P4c — Texto do pie menu como contexto", status: "live_pending", kind: "live",
     details: "Novo campo de wire current_interaction_text (display name localizado do pie); social/sessão/resumo usam o texto para casar a fala com a interação real; classificação continua no nome bruto.",
     expected: "A conversa reflete a interação escolhida pelo jogador (Flertar, Contar Piada…), não um 'chat' genérico.",
     howto: ["Ver Roadmap §7.7.", "Escolha uma interação específica no pie e confira o texto no pulso/prompt.", "Confirme o fallback ao __name__ quando o display name falha."],
     evidence: "Roadmap §7.7; schemas.AutonomySimState.current_interaction_text" },
-  { id: "v04-quality", category: "v0.4 — Voz, Idioma e Presença (planejado)", title: "P5 — Sanitização + observabilidade", status: "not_started", kind: "offline",
+  { id: "v04-quality", category: "v0.4 — Voz, Idioma e Presença (offline 2026-10-01)", title: "P5 — Sanitização + observabilidade", status: "done", kind: "offline",
     details: "Strip de *ações*/stage-directions/meta nos thoughts do impulso; logs de fala/idioma; testes (speech/langguard/presence/conversations) + contagens SKILL; mover implementado para Arquitetura/Referência + Changelog.",
     expected: "Sem asteriscos/narração em pensamentos; a sessão inteira auditável por grep; doc e testes atualizados.",
     howto: ["Ver Roadmap §7.8.", "Rode as suítes sidecar/mod e confira as contagens.", "Grep '[validate] speech' e 'langguard' nos logs."],
-    evidence: "Roadmap §7.8; testes novos; SKILL §10" }
+    evidence: "Roadmap §7.8; testes novos; SKILL §10" },
+  { id: "v05-resilience", category: "v0.5 — Resiliência de LLM e conversas contextualizadas (offline 2026-10-01)", title: "R1 — Conteúdo vazio = falha + cooldown por modelo", status: "done", kind: "offline",
+    details: "openai_compat: choices com content vazio/None e sem tool_calls → LLMError retryable (próximo modelo/provider); finish_reason=length sem conteúdo também falha; cooldown por modelo (default 120 s); log llm.attempt purpose= provider= model= outcome= latency_ms= finish=.",
+    expected: "Nenhum fallback silencioso; um modelo que devolve vazio deixa de matar o diálogo (cai para outro modelo/provider).",
+    howto: ["Ver Roadmap §7.11 R1.", "Grep 'llm.attempt' e confira outcome=ok|empty|error.", "Force um modelo instável e veja o diálogo continuar em source=llm."],
+    evidence: "Roadmap §7.11 R1; llm/providers/openai_compat.py; llm/chain.py" },
+  { id: "v05-routing", category: "v0.5 — Resiliência de LLM e conversas contextualizadas (offline 2026-10-01)", title: "R2 — Roteamento híbrido + pool free dinâmico", status: "done", kind: "offline",
+    details: "purpose no complete; heurística 'rápidos primeiro' (flash/lightning/mimo/mini antes de ultra/super) para social/summary; override [llm.task_models]; descoberta dinâmica (Zen /models → -free; OpenRouter /models/:free) com refresh e swap automático de modelo em cooldown.",
+    expected: "Tarefas curtas usam modelos rápidos; quando um modelo para de responder, outro free é promovido automaticamente.",
+    howto: ["Ver Roadmap §7.11 R2.", "Grep 'llm.model_swap' e 'llm.pool'.", "Confira os free descobertos no /v1/status."],
+    evidence: "Roadmap §7.11 R2; llm/registry.py; llm/chain.py" },
+  { id: "v05-pacing", category: "v0.5 — Resiliência de LLM e conversas contextualizadas (offline 2026-10-01)", title: "R3 — Pacing + budget com prioridade social", status: "done", kind: "live",
+    details: "Novo turno só na mudança de interação/fila ou após turn_min_interval_seconds (25 s); reserva de 40% do budget para social; idle com backpressure conforme saúde da chain.",
+    expected: "Sem falas repetidas a cada pulse; conversa ritmada; free tier preservado; social nunca morre (cai para template).",
+    howto: ["Ver Roadmap §7.11 R3.", "Conte as falas do par em 30 s (deve ser ~1 turno).", "Confira 'social skip reason=interval' e o snapshot do budget no status."],
+    evidence: "Roadmap §7.11 R3; agent/agency.py; agent/social.py" },
+  { id: "v05-templates", category: "v0.5 — Resiliência de LLM e conversas contextualizadas (offline 2026-10-01)", title: "R4 — Templates por interação/objeto + gate de sono", status: "done", kind: "live",
+    details: "Categorias friendly/intro/funny/flirty/intimate/affectionate/tense/mean/casual; intimate por objeto (cama/banheira/chuveiro/hot tub) com barulhos/murmúrios; placeholder {interaction} = label localizado; novo wire current_object; gate de sono na fusão de seeds + _dialogue_for_pair.",
+    expected: "Fallback cai no tipo certo de interação; fala íntima coerente com o objeto; nunca há diálogo com Sim dormindo.",
+    howto: ["Ver Roadmap §7.11 R4.", "Simule oba-oba na cama e confira a fala íntima.", "Faça um dos Sims dormir e confirme 'social skip reason=sleeping'."],
+    evidence: "Roadmap §7.11 R4; agent/social.py; state_collector.py; locales_content/*.json" },
+  { id: "v05-observability", category: "v0.5 — Resiliência de LLM e conversas contextualizadas (offline 2026-10-01)", title: "R5 — Fallback auditável + observabilidade", status: "done", kind: "offline",
+    details: "render_dialogue loga motivo do fallback + provider/model; 'social render source= model= lines= object= interaction='; source/model persistidos no evento social; health por modelo/pool no status.",
+    expected: "Todo diálogo auditável por grep e pelo banco; dá para saber por que caiu no template.",
+    howto: ["Ver Roadmap §7.11 R5.", "Grep 'social render' e 'fallback reason='.", "Consulte o evento social no memory.sqlite3 (source/model)."],
+    evidence: "Roadmap §7.11 R5; agent/social.py; agent/graph.py" }
 ];
 
 let state = loadState();

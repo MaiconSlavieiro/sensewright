@@ -100,18 +100,25 @@ async def test_two_non_player_sims_start_a_dialogue():
     assert {intent["sim_id"] for intent in intents} == {10, 11}
 
 
-async def test_pair_cooldown_blocks_a_repeat_pulse():
+async def test_open_session_continues_each_pulse_then_closes():
+    """v0.4 P4: an open session advances every pulse (no inter-turn cooldown)."""
     clock = FakeClock()
     agency = Agency(make_settings(pair_cooldown=180.0), clock=clock)
     request = tick([(10, "semi", False), (11, "semi", False)])
 
     first = await agency.ingest_tick(request)
     assert len(first["social"]) == 1
+    assert first["conversations"] == []
 
+    # 30 s later the pair is still interacting: the session continues (the pair
+    # cooldown only gates *starting* a session, not its turns) and closes at
+    # max_turns=4 with a summary.
     clock.advance(30.0)
     second = await agency.ingest_tick(request)
-    assert second["social"] == []
+    assert len(second["social"]) == 1
+    assert len(second["conversations"]) == 1
 
+    # After the inter-session cooldown a fresh session may start.
     clock.advance(200.0)
     third = await agency.ingest_tick(request)
     assert len(third["social"]) == 1
@@ -147,14 +154,98 @@ async def test_far_apart_conversing_sims_do_not_converse():
     assert result["social"] == []
 
 
-async def test_unilateral_interaction_is_not_a_conversation():
-    """Only a *mutual* target counts: A->B without B->A is not a conversation."""
+async def test_same_room_required_for_dialogue():
+    """v0.4 P6: Sims in different rooms never converse (no talking through walls)."""
+    agency = Agency(make_settings(), clock=FakeClock())
+    req = tick([(10, "semi", False), (11, "semi", False)])
+    for state in req.sims:
+        state.room_id = 1 if state.sim_id == 10 else 2
+    result = await agency.ingest_tick(req)
+    assert result["social"] == []
+
+
+async def test_same_room_allows_dialogue():
+    agency = Agency(make_settings(), clock=FakeClock())
+    req = tick([(10, "semi", False), (11, "semi", False)])
+    for state in req.sims:
+        state.room_id = 7
+    result = await agency.ingest_tick(req)
+    assert len(result["social"]) == 1
+
+
+async def test_queued_same_sim_keeps_session_open_without_farewell():
+    """v0.4 P6: a queued interaction with the same Sim must not be a "goodbye"."""
+    clock = FakeClock()
+    agency = Agency(make_settings(pair_cooldown=180.0), clock=clock)
+    opened = await agency.ingest_tick(tick([(10, "semi", False), (11, "semi", False)]))
+    assert len(opened["social"]) == 1
+
+    clock.advance(30.0)
+    # The current interaction is momentarily gone, but the queue still continues
+    # with the same Sim: the session continues (no leaving summary).
+    req = tick([(10, "semi", False), (11, "semi", False)], conversation=False)
+    req.sims[0].queued_interactions = [{"name": "social_Chat", "target_sim_id": 11}]
+    result = await agency.ingest_tick(req)
+    assert len(result["social"]) == 1
+    assert all(not summary.get("leaving") for summary in result["conversations"])
+
+
+async def test_queued_continuation_gated_when_disabled():
+    clock = FakeClock()
+    settings = Settings(
+        agents=AgentsConfig(
+            initiative=InitiativeConfig(max_impulses_per_tick=0),
+            layers=LayersConfig(social=True),
+            social=SocialConfig(pair_cooldown_seconds=180.0, keep_open_on_queued=False),
+        )
+    )
+    agency = Agency(settings, clock=clock)
+    await agency.ingest_tick(tick([(10, "semi", False), (11, "semi", False)]))
+    clock.advance(30.0)
+    req = tick([(10, "semi", False), (11, "semi", False)], conversation=False)
+    req.sims[0].queued_interactions = [{"name": "social_Chat", "target_sim_id": 11}]
+    result = await agency.ingest_tick(req)
+    assert result["social"] == []
+    assert len(result["conversations"]) == 1
+    assert result["conversations"][0]["leaving"] is True
+
+
+async def test_unilateral_player_initiated_interaction_forms_a_session():
+    """v0.4 P4 live fix: A->B (player social) is enough to open a session."""
     agency = Agency(make_settings(), clock=FakeClock())
     req = tick([(10, "semi", False), (11, "semi", False)], conversation=False)
     req.sims[0].interaction_target_sim_id = 11
     req.sims[0].current_interaction = "social_Chat"
     result = await agency.ingest_tick(req)
-    assert result["social"] == []
+    assert len(result["social"]) == 1
+    assert {result["social"][0]["a"], result["social"][0]["b"]} == {10, 11}
+
+
+async def test_player_interaction_seed_opens_a_session_without_pulse_targets():
+    """A seed from the player hook starts a conversation even if the pulse has
+    no interaction target (the common live case)."""
+    clock = FakeClock()
+    agency = Agency(make_settings(), clock=clock)
+    req = tick([(10, "semi", False), (11, "semi", False)], conversation=False)
+
+    agency.note_interaction_seed(
+        "local", "save1", 10, 11, interaction="sim_Flirt", interaction_text="Flertar"
+    )
+    assert agency.interaction_seeds("local", "save1") == [(10, 11, "sim_Flirt", "Flertar")]
+
+    result = await agency.ingest_tick(req)
+    assert len(result["social"]) == 1
+    assert {result["social"][0]["a"], result["social"][0]["b"]} == {10, 11}
+    # The seed is consumed once the session starts.
+    assert agency.interaction_seeds("local", "save1") == []
+
+
+def test_interaction_seeds_expire():
+    clock = FakeClock()
+    agency = Agency(make_settings(), clock=clock)
+    agency.note_interaction_seed("local", "save1", 10, 11, interaction="Chat")
+    clock.advance(1000.0)
+    assert agency.interaction_seeds("local", "save1") == []
 
 
 async def test_sleeping_and_off_sims_are_excluded():

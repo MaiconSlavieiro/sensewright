@@ -22,6 +22,7 @@ _MANIFEST_PATH = os.path.join(_CONTENT_DIR, "manifest.json")
 _manifest_cache: dict[str, Any] | None = None
 _table_cache: dict[str, dict[str, str]] = {}
 _lexicon_cache: dict[str, Any] | None = None
+_locale_lexicon_cache: dict[str, dict[str, Any]] = {}
 
 
 def _read_json(path: str) -> Any:
@@ -139,16 +140,53 @@ def normalize_lang(value: str | None) -> str:
 
 
 def lexicon() -> dict[str, Any]:
-    """Return the multilingual lexical data (stopwords/emotions/names), cached.
+    """Return the cross-locale lexical data (emotions/names/shared stopwords).
 
-    Data lives in ``locales_content/lexicon.json`` so no language word list is
-    hardcoded in code. Never raises (an empty dict when the file is missing).
+    Data lives in ``locales_content/lexicon.json``. Per-locale stopwords and
+    language-detection hints live in ``lexicon.<code>.json`` and are reached
+    through :func:`locale_lexicon` (manifest-driven, so adding a language needs
+    no code change). Never raises (an empty dict when the file is missing).
     """
     global _lexicon_cache
     if _lexicon_cache is None:
         data = _read_json(os.path.join(_CONTENT_DIR, "lexicon.json"))
         _lexicon_cache = data if isinstance(data, dict) else {}
     return _lexicon_cache
+
+
+def locale_lexicon(lang: str) -> dict[str, Any]:
+    """Return the per-locale lexical hints (``lexicon.<code>.json``).
+
+    The file name is derived from the *resolved* locale code, never a hardcoded
+    language: drop ``lexicon.<code>.json`` next to the locale table and it is
+    picked up automatically. Returns ``{}`` when the locale has no hints.
+    """
+    code = normalize_lang(lang)
+    if not code:
+        return {}
+    if code in _locale_lexicon_cache:
+        return _locale_lexicon_cache[code]
+    data = _read_json(os.path.join(_CONTENT_DIR, f"lexicon.{code}.json"))
+    entry = data if isinstance(data, dict) else {}
+    _locale_lexicon_cache[code] = entry
+    return entry
+
+
+def locale_stopwords(lang: str) -> list[str]:
+    """Per-locale stopword list (empty when the locale defines none)."""
+    words = locale_lexicon(lang).get("stopwords")
+    return [str(word) for word in words] if isinstance(words, list) else []
+
+
+def locale_lang_hints(lang: str) -> dict[str, Any]:
+    """Per-locale language-detection hints: ``{markers, chars}``."""
+    entry = locale_lexicon(lang)
+    markers = entry.get("markers")
+    chars = entry.get("chars")
+    return {
+        "markers": [str(item) for item in markers] if isinstance(markers, list) else [],
+        "chars": [str(item) for item in chars] if isinstance(chars, list) else [],
+    }
 
 
 def _table(code: str) -> dict[str, str]:

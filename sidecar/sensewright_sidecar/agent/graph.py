@@ -20,7 +20,7 @@ from ..god.scheduler import (
     BackgroundScheduler,
 )
 from ..god.world_model import WorldState
-from ..llm import ProviderRegistry, build_registry
+from ..llm import ProviderRegistry, build_registry, langguard
 from ..llm.budgeter import ChatBudgeter
 from ..memory import MemoryStore, build_memory_store
 from ..observability import AuditLog
@@ -43,8 +43,12 @@ from .context_forge import ContextForge
 from .coordinator import Coordinator
 from .intents import intent_from_directive, normalize_intent
 from .nodes import AgentNodes
+from .presence import distance_between
 
 logger = logging.getLogger(__name__)
+
+# Tool names that carry spoken text (v0.4 P1 speech gating).
+_SPEECH_NAMES = frozenset({"spontaneous_line", "say_to", "socialize"})
 
 # Module-level state (configured by configure())
 _registry: ProviderRegistry | None = None
@@ -85,6 +89,26 @@ _PRUNE_INTERVAL_SECONDS = 86400.0
 
 def _census_key(player_id: str, save_id: str) -> str:
     return f"{player_id}:{save_id}"
+
+
+def _note_lang(lang: Any) -> None:
+    """Adopt the language the client (mod) reports as the running game language.
+
+    The sidecar's own ``settings.lang`` starts at the default (en) and is only
+    correct once a client request carries the real language. Every request path
+    that knows the language funnels through here so event/reaction/God/background
+    work uses the *game* language, not the sidecar default (v0.4 live fix).
+    """
+    global _current_lang
+    if not lang:
+        return
+    try:
+        code = normalize_lang(lang)
+    except Exception:
+        return
+    if code and code != _current_lang:
+        _current_lang = code
+        logger.info("active language from client: %s", code)
 
 
 def configure(settings: Settings) -> None:
@@ -221,6 +245,164 @@ def _autonomy_for_job(job: ImpulseJob) -> str:
     return _autonomy_default or "semi"
 
 
+def _partner_in_conversation(job: ImpulseJob, world: dict[str, Any]) -> int | None:
+    """A Sim currently targeting ``job.sim_id`` in a native interaction."""
+    sims = (world or {}).get("sims") or {}
+    for state in sims.values():
+        if not isinstance(state, dict):
+            continue
+        try:
+            if int(state.get("interaction_target_sim_id") or 0) == int(job.sim_id):
+                return int(state.get("sim_id") or 0) or None
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _repair_intent(
+    intent: dict[str, Any], job: ImpulseJob, world: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Repair a malformed speech intent, or return None to drop it.
+
+    ``socialize``/``say_to`` without a target are repaired to the Sim currently
+    talking to the agent; if there is none they degrade to a murmur
+    (``spontaneous_line``) so the mod never sees ``missing_argument``. Other
+    tools pass through unchanged.
+    """
+    name = str(intent.get("name") or "")
+    if name not in ("say_to", "socialize"):
+        return intent
+    args = intent.get("args")
+    if not isinstance(args, dict):
+        args = {}
+    params = intent.get("params")
+    if not isinstance(params, dict):
+        params = {}
+
+    target = (
+        args.get("target_sim_id")
+        or params.get("target_sim_id")
+        or intent.get("target_sim_id")
+    )
+    if not target:
+        target = _partner_in_conversation(job, world)
+    if not target:
+        text = (
+            args.get("message")
+            or args.get("text")
+            or args.get("reason")
+            or intent.get("reason")
+            or intent.get("thought")
+            or ""
+        )
+        text = str(text).strip()
+        if not text:
+            return None
+        intent["name"] = "spontaneous_line"
+        intent["kind"] = "speak"
+        intent["target_sim_id"] = None
+        intent["args"] = {"text": text, "audience": "self"}
+        intent["params"] = {"text": text}
+        return intent
+
+    try:
+        target_id = int(target)
+    except (TypeError, ValueError):
+        return None
+    if name == "say_to" and not (args.get("message") or params.get("message")):
+        message = str(intent.get("reason") or intent.get("thought") or "").strip()
+        if not message:
+            return None
+        args["message"] = message
+    args["target_sim_id"] = target_id
+    params["target_sim_id"] = target_id
+    intent["target_sim_id"] = target_id
+    intent["args"] = args
+    intent["params"] = params
+    return intent
+
+
+def _spoken_text(intent: dict[str, Any]) -> str:
+    """The spoken line carried by a speech intent (params or args), else ''."""
+    for source in (intent.get("params"), intent.get("args")):
+        if not isinstance(source, dict):
+            continue
+        for key in ("text", "message"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return ""
+
+
+def _annotate_speech(
+    intents: list[dict[str, Any]],
+    *,
+    job_kind: str,
+    world: dict[str, Any],
+    player_id: str,
+    save_id: str,
+    lang: str,
+) -> None:
+    """Set ``surfaced``/``speech_kind`` on every speech intent (v0.4 P1).
+
+    A line detected in the wrong language is marked ``speech_lang_rejected`` and
+    never surfaces (v0.4 P2); the caller drops rejected intents.
+    """
+    policy = getattr(_agency, "speech", None) if _agency is not None else None
+    if policy is None:
+        return
+    sims = (world or {}).get("sims") or {}
+    active_id = (world or {}).get("active_sim_id")
+    active_sim = sims.get(str(active_id)) if active_id is not None else None
+
+    for intent in intents:
+        name = str(intent.get("name") or "")
+        kind = str(intent.get("kind") or "")
+        if kind != "speak" and name not in _SPEECH_NAMES:
+            continue
+        text = _spoken_text(intent)
+        if text and langguard.is_wrong_lang(text, lang):
+            intent["speech_lang_rejected"] = True
+            logger.info(
+                "langguard rejected speech sim=%s lang=%s text=%r",
+                intent.get("sim_id"),
+                lang,
+                text[:80],
+            )
+        target = intent.get("target_sim_id")
+        speech_kind = policy.classify(
+            job_kind=job_kind, has_target=bool(target), intent_kind=kind
+        )
+        sim_state = sims.get(str(intent.get("sim_id")))
+        distance = None
+        if active_sim is not None and sim_state is not None:
+            try:
+                if int(sim_state.get("sim_id", 0)) != int(active_id):
+                    distance = distance_between(sim_state, active_sim)
+            except (TypeError, ValueError):
+                distance = None
+        sim_key = f"{player_id}:{save_id}:{intent.get('sim_id')}"
+        surfaced = (
+            not intent.get("speech_lang_rejected")
+            and policy.should_surface(sim_key, kind=speech_kind, distance=distance)
+        )
+        params = intent.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        params["surfaced"] = surfaced
+        intent["params"] = params
+        intent["speech_kind"] = speech_kind
+        if surfaced:
+            policy.note(sim_key, kind=speech_kind)
+        policy.log_line(
+            sim_id=int(intent.get("sim_id") or 0),
+            kind=speech_kind,
+            surfaced=surfaced,
+            lang=lang,
+            distance=distance,
+        )
+
+
 async def _gate_intents(job: ImpulseJob, outcome: dict[str, Any]) -> list[dict[str, Any]]:
     """Pass impulse intents through the rails/coordinator; return the allowed ones.
 
@@ -246,8 +428,12 @@ async def _gate_intents(job: ImpulseJob, outcome: dict[str, Any]) -> list[dict[s
     is_played = bool(_agency.is_player(job.player_id, job.save_id, job.sim_id)) if _agency else False
     allowed: list[dict[str, Any]] = []
     denied: list[tuple[str, str]] = []
+    world = _agency.world_context(job.player_id, job.save_id) if _agency else {}
 
-    for intent in candidates:
+    for raw_intent in candidates:
+        intent = _repair_intent(raw_intent, job, world)
+        if intent is None:
+            continue
         check_name = str(intent.get("name") or "")
         if _rails is not None and check_name:
             decision = _rails.check(sim_key, check_name)
@@ -263,6 +449,17 @@ async def _gate_intents(job: ImpulseJob, outcome: dict[str, Any]) -> list[dict[s
                 tool_name=check_name,
             )
         allowed.append(intent)
+
+    _annotate_speech(
+        allowed,
+        job_kind=job.kind,
+        world=world,
+        player_id=job.player_id,
+        save_id=job.save_id,
+        lang=job.lang or _current_lang,
+    )
+    # v0.4 P2: never surface/execute a line detected in the wrong language.
+    allowed = [intent for intent in allowed if not intent.get("speech_lang_rejected")]
 
     if denied and _memory is not None:
         mem_key = MemKey(job.player_id, job.save_id, int(job.sim_id))
@@ -933,6 +1130,7 @@ def _chat_budget_exhausted(sim) -> bool:
 
 async def handle_chat(req: ChatRequest) -> ChatResponse:
     """Handle a chat request from the mod."""
+    _note_lang(getattr(req, "lang", None))
     if not _nodes:
         logger.warning("Chat requested but agent not configured")
         return ChatResponse(
@@ -969,6 +1167,7 @@ async def handle_chat(req: ChatRequest) -> ChatResponse:
 
 async def handle_hey(req: HeyRequest) -> ChatResponse:
     """Handle a spontaneous hey request from the mod."""
+    _note_lang(getattr(req, "lang", None))
     if not _nodes:
         logger.warning("Hey requested but agent not configured")
         return ChatResponse(
@@ -1151,12 +1350,13 @@ def set_lang(lang: str) -> dict[str, Any]:
 
 
 def _maybe_enqueue_reaction(
-    sim, event_type: str, content: dict[str, Any], importance: float
+    sim, event_type: str, content: dict[str, Any], importance: float,
+    lang: str | None = None,
 ) -> None:
     """Schedule a prioritized Sim reaction to a salient event (A1/A3)."""
     if _agency is None or _settings is None:
         return
-    if event_type in ("tool_result", "directive_denied", "thought", "player_activity"):
+    if event_type in ("tool_result", "directive_denied", "thought", "player_activity", "player_interaction"):
         return
     threshold = _settings.agents.initiative.event_react_threshold
     if importance < threshold:
@@ -1167,7 +1367,7 @@ def _maybe_enqueue_reaction(
             getattr(sim, "save_id", "unknown"),
             int(getattr(sim, "sim_id", 0)),
             {"type": event_type, "content": content, "importance": importance, "source": "agent"},
-            lang=_current_lang,
+            lang=lang or _current_lang,
         )
     except Exception as exc:
         logger.debug(f"reaction enqueue failed: {exc}")
@@ -1216,6 +1416,21 @@ async def ingest_events(events) -> dict[str, Any]:
         event_type = getattr(event, "type", "event") or "event"
         content = dict(getattr(event, "content", {}) or {})
         importance = float(getattr(event, "importance", 1.0))
+        event_lang = getattr(event, "lang", None)
+        _note_lang(event_lang)
+
+        # v0.4 P4: a player social interaction seeds a conversation session.
+        if event_type == "player_interaction" and _agency is not None:
+            target = content.get("target_sim_id")
+            if target is not None:
+                _agency.note_interaction_seed(
+                    sim.player_id,
+                    sim.save_id,
+                    sim.sim_id,
+                    target,
+                    interaction=str(content.get("interaction") or ""),
+                    interaction_text=str(content.get("interaction_text") or ""),
+                )
 
         if _rails is not None and event_type in ("player_activity", "player_interaction"):
             _rails.record_player_activity(str(mem_key))
@@ -1238,7 +1453,7 @@ async def ingest_events(events) -> dict[str, Any]:
         await _absorb_extreme_event(mem_key, event_type, content, importance)
 
         # A1/A3: schedule a prioritized reaction to salient events.
-        _maybe_enqueue_reaction(sim, event_type, content, importance)
+        _maybe_enqueue_reaction(sim, event_type, content, importance, lang=event_lang)
 
     logger.info(
         "events ingested=%d types=%s",
@@ -2049,6 +2264,8 @@ async def ingest_autonomy_tick(req) -> dict[str, Any]:
     """Ingest a zone pulse and schedule per-Sim impulses (v0.2 A1/A2)."""
     if _agency is None:
         return {"ok": False, "scheduled": 0, "sleeping": [], "seats": {}}
+    # The pulse carries the running game language; adopt it sidecar-wide.
+    _note_lang(getattr(req, "lang", None))
     # M2: enforce memory retention at most once per day, off the critical path.
     await maybe_prune_memory()
     try:
@@ -2068,27 +2285,41 @@ async def _store_social(req, result: dict[str, Any]) -> None:
     The dialogues already carry one ``speak`` intent per line; each is passed
     through the same rails as other intents before landing on the bus, and the
     exchange is written to both participants' memory so it outlives the seat.
+    v0.4 P4: closed conversation sessions also yield a narrator summary event
+    and a ``notify`` intent the mod surfaces (inside the hearing radius).
     """
-    dialogues = result.get("social") or []
-    if not dialogues:
-        return
-
     sim_ref = getattr(req, "sim", None)
     player_id = getattr(sim_ref, "player_id", "local")
     save_id = getattr(sim_ref, "save_id", "unknown")
+    lang = getattr(req, "lang", None) or _current_lang
+    world = _agency.world_context(player_id, save_id) if _agency is not None else {}
 
+    dialogues = result.get("social") or []
     stored = 0
-    for intent in result.get("social_intents") or []:
-        sim_id = intent.get("sim_id")
-        name = str(intent.get("name") or "")
-        sim_key = f"{player_id}:{save_id}:{sim_id}"
-        if _rails is not None and name:
-            decision = _rails.check(sim_key, name)
-            if not decision.allowed:
-                logger.debug("social intent denied (%s): %s", name, decision.reason)
-                continue
-            _rails.note_executed(sim_key, name)
-        if _agency is not None:
+    if dialogues and _agency is not None:
+        passed: list[dict[str, Any]] = []
+        for intent in result.get("social_intents") or []:
+            sim_id = intent.get("sim_id")
+            name = str(intent.get("name") or "")
+            sim_key = f"{player_id}:{save_id}:{sim_id}"
+            if _rails is not None and name:
+                decision = _rails.check(sim_key, name)
+                if not decision.allowed:
+                    logger.debug("social intent denied (%s): %s", name, decision.reason)
+                    continue
+                _rails.note_executed(sim_key, name)
+            passed.append(intent)
+        _annotate_speech(
+            passed,
+            job_kind="social",
+            world=world,
+            player_id=player_id,
+            save_id=save_id,
+            lang=lang,
+        )
+        # v0.4 P2: drop a dialogue line detected in the wrong language.
+        passed = [intent for intent in passed if not intent.get("speech_lang_rejected")]
+        for intent in passed:
             stored += _agency.store_intents(player_id, save_id, [intent])
     if stored:
         logger.info("social dialogues=%d intents=%d", len(dialogues), stored)
@@ -2113,13 +2344,95 @@ async def _store_social(req, result: dict[str, Any]) -> None:
                                 "topic": str(dialogue.get("topic") or ""),
                                 "lines": lines,
                                 "with": partner,
-                                "source": "agent",
+                                # v0.5 R5: provenance so a dialogue can be
+                                # audited (llm vs template + which model).
+                                "source": str(dialogue.get("source") or "agent"),
+                                "provider": str(dialogue.get("provider") or ""),
+                                "model": str(dialogue.get("model") or ""),
+                                "object": str(dialogue.get("object") or ""),
+                                "interaction": str(dialogue.get("interaction") or ""),
                             },
                             "importance": 0.7,
                         },
                     )
                 except Exception:
                     pass
+
+    await _store_conversation_summaries(
+        result.get("conversations") or [],
+        player_id=player_id,
+        save_id=save_id,
+        world=world,
+    )
+
+
+async def _store_conversation_summaries(
+    summaries: list[Any],
+    *,
+    player_id: str,
+    save_id: str,
+    world: dict[str, Any],
+) -> None:
+    """Remember closed conversation sessions and notify the player (v0.4 P4b)."""
+    if not summaries:
+        return
+    policy = getattr(_agency, "speech", None) if _agency is not None else None
+    sims = (world or {}).get("sims") or {}
+    active_id = (world or {}).get("active_sim_id")
+    active_sim = sims.get(str(active_id)) if active_id is not None else None
+
+    for summary in summaries:
+        if not isinstance(summary, dict):
+            continue
+        a, b = summary.get("a"), summary.get("b")
+        text = str(summary.get("text") or "").strip()
+        if not text:
+            continue
+        if _memory is not None:
+            from ..memory.base import MemKey
+
+            for participant, partner in ((a, b), (b, a)):
+                if participant is None:
+                    continue
+                try:
+                    await _memory.add_event(
+                        MemKey(player_id, save_id, int(participant)),
+                        {
+                            "type": "conversation",
+                            "content": {
+                                "with": partner,
+                                "topic": summary.get("topic") or "",
+                                "tone": summary.get("tone") or "",
+                                "outcome": text,
+                                "leaving": bool(summary.get("leaving")),
+                                "relationship_shift": summary.get("relationship_shift"),
+                                "source": "agent",
+                            },
+                            "importance": 0.8,
+                        },
+                    )
+                except Exception:
+                    pass
+
+        if _agency is None:
+            continue
+        distance = None
+        if active_sim is not None and a is not None:
+            distance = distance_between(sims.get(str(a)), active_sim)
+        surfaced = policy.within_hearing(distance) if policy is not None else True
+        notify = {
+            "id": f"conv-{a}-{b}-{summary.get('topic', '')[:12]}",
+            "sim_id": int(a) if a is not None else 0,
+            "kind": "notify",
+            "target_sim_id": b,
+            "params": {"surfaced": surfaced},
+            "reason": str(summary.get("topic") or ""),
+            "narration": text,
+            "name": "",
+            "args": {},
+            "thought": "",
+        }
+        _agency.store_intents(player_id, save_id, [notify])
 
 
 async def pull_intents(

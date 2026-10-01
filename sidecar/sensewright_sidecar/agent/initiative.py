@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import namedtuple
 from typing import Any
 from uuid import uuid4
 
 from .. import content_i18n
+from ..llm import langguard
 from ..tools.registry import get_allowed_tools
 from ..tools.schemas import TOOL_SCHEMAS
 from .intents import intent_from_directive
@@ -44,6 +46,13 @@ _INITIATIVE_TOOLS = (
     "add_trait",
 )
 
+# v0.4 P1: idle impulses never *speak*. Speech comes from a conversation session
+# (P4), a reaction with a target, or player chat — never an idle monologue.
+_SPEECH_TOOLS = frozenset({"spontaneous_line", "say_to", "socialize"})
+# Movement levers are not reliable enough yet; keep them out of the idle palette
+# so the single idle impulse is not wasted on a ``not_implemented`` command.
+_MOVEMENT_TOOLS = frozenset({"approach", "move_to"})
+
 # An idle impulse may take at most one modest action.
 _IDLE_LIMIT = 1
 
@@ -66,9 +75,10 @@ _KIND_TASK = {
         "otherwise write one short thought as {name}."
     ),
     "idle": (
-        "This is an ordinary moment in your day. If {name} would act (speak, "
-        "socialize, move, do something), call exactly one tool now; otherwise "
-        "share one passing thought as {name}."
+        "This is an ordinary moment in your day. {name} does NOT start talking "
+        "here. If {name} would take a concrete action (change mood, do "
+        "something), call exactly one tool now; otherwise stay quiet and share "
+        "one passing inner thought as {name}."
     ),
     "sleep": "You are drifting off to sleep. Do not call any tool.",
 }
@@ -91,6 +101,10 @@ _LEADING_PREFIXES = (
 # unioned here, so adding a language also extends the meta filter.
 _META_MARKERS_CACHE: tuple[str, ...] | None = None
 
+# v0.4 P5: strip stage directions / *actions* from an impulse thought so it reads
+# as a private inner line, never as narrated role-play.
+_STAGE_DIRECTION_RE = re.compile(r"\*[^*\n]{0,120}\*")
+
 
 def _meta_markers() -> tuple[str, ...]:
     global _META_MARKERS_CACHE
@@ -107,16 +121,25 @@ def _meta_markers() -> tuple[str, ...]:
     return _META_MARKERS_CACHE
 
 
-def impulse_tools(autonomy: str) -> list[str]:
-    """Return the initiative-friendly tool names allowed at ``autonomy``."""
+def impulse_tools(autonomy: str, kind: str | None = None) -> list[str]:
+    """Return the initiative-friendly tool names allowed at ``autonomy``.
+
+    ``kind`` narrows the palette per impulse: idle impulses never get speech or
+    unreliable movement tools (v0.4 P1); sleep gets none.
+    """
+    if kind == "sleep":
+        return []
+    blocked: frozenset[str] = frozenset()
+    if kind == "idle":
+        blocked = _SPEECH_TOOLS | _MOVEMENT_TOOLS
     allowed = set(get_allowed_tools(autonomy))
-    return [name for name in _INITIATIVE_TOOLS if name in allowed]
+    return [name for name in _INITIATIVE_TOOLS if name in allowed and name not in blocked]
 
 
-def _tool_schemas(autonomy: str) -> list[dict[str, Any]]:
+def _tool_schemas(autonomy: str, kind: str | None = None) -> list[dict[str, Any]]:
     """Return OpenAI-style schemas for the initiative tools at ``autonomy``."""
     schemas: list[dict[str, Any]] = []
-    for name in impulse_tools(autonomy):
+    for name in impulse_tools(autonomy, kind):
         schema = TOOL_SCHEMAS.get(name)
         if schema:
             schemas.append(schema)
@@ -247,6 +270,7 @@ def _text_tool_calls(text: Any, allowed: set) -> list[Any]:
     if not raw or "name" not in raw:
         return []
     calls: list[Any] = []
+    seen: set[tuple[str, str]] = set()
     for span in _iter_balanced_json(raw):
         try:
             parsed = json.loads(span)
@@ -263,6 +287,15 @@ def _text_tool_calls(text: Any, allowed: set) -> list[Any]:
                 or item.get("input")
                 or {}
             )
+            # Nested balanced spans repeat the same call; keep it once. (Also
+            # avoids rescuing the same JSON printed inside an outer array.)
+            try:
+                signature = (name, json.dumps(arguments, sort_keys=True, default=str))
+            except (TypeError, ValueError):
+                signature = (name, str(arguments))
+            if signature in seen:
+                break
+            seen.add(signature)
             calls.append(_TextCall(str(item.get("id") or uuid4().hex), name, arguments))
             break
     return calls
@@ -318,11 +351,16 @@ async def build_impulse(
     messages = build_impulse_prompt(
         job=job, profile=profile, world=world, memories=memories, lang=lang
     )
-    schemas = _tool_schemas(autonomy)
-    allowed = set(impulse_tools(autonomy))
+    schemas = _tool_schemas(autonomy, job.kind)
+    allowed = set(impulse_tools(autonomy, job.kind))
     limit = _IDLE_LIMIT if job.kind == "idle" else max(1, len(allowed))
 
     for attempt in range(_MAX_LLM_ATTEMPTS):
+        if attempt > 0:
+            # Reinforce the language on the retry so an English slip is corrected.
+            messages = messages + [
+                {"role": "system", "content": langguard.language_directive(lang, reinforced=True)}
+            ]
         try:
             response = await registry.complete(
                 messages,
@@ -330,12 +368,22 @@ async def build_impulse(
                 tools=schemas or None,
                 max_tokens=IMPULSE_MAX_TOKENS,
                 reasoning_effort=reasoning_effort,
+                purpose="impulse",
             )
         except Exception as exc:
             logger.warning("impulse LLM call failed (attempt %d): %s", attempt + 1, exc)
             break
 
         directives, thought = _parse_impulse_response(job, response, allowed, limit)
+        # v0.4 P2: an inner thought becomes a memory; it must be in the game
+        # language. A wrong-language thought is dropped (and the loop retries).
+        if thought and langguard.is_wrong_lang(thought, lang):
+            logger.info(
+                "impulse thought rejected (wrong language) attempt %d lang=%s",
+                attempt + 1,
+                lang,
+            )
+            thought = ""
         if directives or thought:
             return _with_intents(
                 {
@@ -372,6 +420,8 @@ def _clean_thought(text: Any) -> str:
             cleaned = cleaned[len(prefix):].strip()
             lowered = cleaned.lower()
             break
+    # v0.4 P5: drop *stage directions* / *actions*; a thought is first-person.
+    cleaned = _STAGE_DIRECTION_RE.sub("", cleaned).strip()
     if not any(ch.isalnum() for ch in cleaned):
         return ""
     if any(marker in lowered for marker in _meta_markers()):

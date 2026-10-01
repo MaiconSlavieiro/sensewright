@@ -697,8 +697,67 @@ def _get_queue_size(sim_info) -> int:
         return 0
 
 
+def _native_block_id(position, surface_level) -> Optional[int]:
+    """Native room/block id for a position at a surface level (or None).
+
+    ``build_buy.get_block_id(zone_id, position, surface_level)`` is the engine
+    call S4CL's ``CommonLocationUtils.get_block_id`` delegates to. Guards make
+    it a no-op outside the game. ``0`` means outside.
+    """
+    try:
+        import build_buy  # type: ignore
+    except Exception:
+        return None
+    services = _get_services()
+    if services is None:
+        return None
+    zone_getter = _safe_getattr(services, "current_zone_id", None)
+    zone_id = _safe_call(zone_getter) if callable(zone_getter) else None
+    if zone_id is None:
+        return None
+    try:
+        return int(build_buy.get_block_id(int(zone_id), position, int(surface_level)))
+    except Exception:
+        return None
+
+
+def _get_room_id(sim_info) -> Optional[int]:
+    """The id of the room/block a Sim is in, or None when unknown (v0.4 P6).
+
+    Prefers S4CL ``CommonSimLocationUtils.get_current_room_id`` (which resolves
+    the position + surface level for us); falls back to the native
+    ``build_buy.get_block_id``. ``0`` means outside (the whole outdoors counts
+    as a single "room", matching S4CL semantics). Used to gate sim<->sim
+    dialogue to Sims that are actually in the same room.
+    """
+    utils = integrations.s4cl_sim_location_utils()
+    if utils is not None:
+        getter = _safe_getattr(utils, "get_current_room_id", None)
+        if callable(getter):
+            value = _safe_call(getter, sim_info)
+            try:
+                room_id = int(value)
+            except (TypeError, ValueError):
+                room_id = None
+            # S4CL returns -1 when the room is not found.
+            if room_id is not None and room_id >= 0:
+                return room_id
+
+    sim_instance = _get_sim_instance(sim_info)
+    if sim_instance is None:
+        return None
+    position = _safe_getattr(sim_instance, "position", None)
+    if position is None:
+        return None
+    surface = _safe_getattr(sim_instance, "routing_surface", None)
+    surface_level = _safe_getattr(surface, "secondary_id", None)
+    if surface_level is None:
+        surface_level = _safe_getattr(sim_instance, "level", 0)
+    return _native_block_id(position, surface_level)
+
+
 def _get_location(sim_info) -> Dict[str, Any]:
-    """Get location info."""
+    """Get location info (position, zone id and the current room id)."""
     loc = {}
     try:
         sim_instance = _get_sim_instance(sim_info)
@@ -712,6 +771,10 @@ def _get_location(sim_info) -> Dict[str, Any]:
             zone_id = _safe_getattr(sim_instance, "zone_id", None)
             if zone_id is not None:
                 loc["zone_id"] = _as_str(zone_id)
+
+        room_id = _get_room_id(sim_info)
+        if room_id is not None:
+            loc["room_id"] = room_id
     except Exception:
         pass
     return loc
@@ -737,6 +800,7 @@ def collect(sim_info=None) -> Dict[str, Any]:
         "relationships": [],
         "queue_size": 0,
         "location": {},
+        "room_id": None,
         "clock": "",
         "funds": 0,
     }
@@ -766,6 +830,7 @@ def collect(sim_info=None) -> Dict[str, Any]:
     context["kinship"] = _get_kinship(sim_info)
     context["queue_size"] = _get_queue_size(sim_info)
     context["location"] = _get_location(sim_info)
+    context["room_id"] = context["location"].get("room_id")
     context["clock"] = _get_time_string()
     context["funds"] = _get_funds(sim_info)
 

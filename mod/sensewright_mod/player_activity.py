@@ -88,8 +88,21 @@ def _sim_ref(sim_info):
     return {"player_id": "local", "save_id": save_id, "sim_id": sim_id}
 
 
-def _on_player_action(sim_info):
-    """Arm the player-priority lock locally and on the sidecar. Never raises."""
+def _params_text(value):
+    """Coerce ``interaction_parameters`` into a short token string (or '')."""
+    if not value:
+        return ""
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, (list, tuple, set)):
+        parts = [str(item) for item in value if item is not None and str(item)]
+    else:
+        parts = [str(value)]
+    return " ".join(parts).strip()[:80]
+
+
+def _on_player_action(sim_info, affordance=None, target=None, interaction_parameters=None):
+    """Arm the player-priority lock and seed a conversation. Never raises."""
     sim_ref = _sim_ref(sim_info)
     if not sim_ref["sim_id"]:
         return
@@ -103,6 +116,43 @@ def _on_player_action(sim_info):
         state_collector.notify_player_activity(sim_ref)
     except Exception as exc:
         log_exception("player_activity.sidecar", exc)
+    # v0.4 P4: seed a conversation when the player targets another Sim (the
+    # pulse frequently does not carry the interaction target).
+    try:
+        from . import state_collector
+        target_sim_id = state_collector._sim_id_of_target(target)
+        if target_sim_id and int(target_sim_id) != int(sim_ref["sim_id"]):
+            name = state_collector._name_of(affordance)
+            label = state_collector._interaction_label_of(affordance)
+            params = _params_text(interaction_parameters)
+            # The specific pie item is often only visible in the push's
+            # ``interaction_parameters`` (e.g. the joke/flirt token), while the
+            # affordance name is a generic base like ``sim_Chat``. Send the params
+            # as the label hint when no localized display name resolved.
+            hint = label or params
+            state_collector.notify_player_interaction(
+                sim_ref, name, int(target_sim_id), hint
+            )
+            # v0.5 R4 observability: make the captured interaction grep-able so a
+            # generic base name can be spotted and keyed correctly.
+            try:
+                from .debug_log import validation_log
+                validation_log(
+                    "player-interaction sim={} name={!r} label={!r} params={!r} "
+                    "display={!r} class={} target={}".format(
+                        sim_ref["sim_id"],
+                        name,
+                        label,
+                        params,
+                        state_collector._safe_getattr(affordance, "display_name", None),
+                        type(affordance).__name__,
+                        target_sim_id,
+                    )
+                )
+            except Exception:
+                pass
+    except Exception as exc:
+        log_exception("player_activity.interaction_seed", exc)
 
 
 def install():
@@ -131,11 +181,18 @@ def install():
 
         def _wrapped(self_sim, *args, **kwargs):
             try:
+                affordance = args[0] if len(args) >= 1 else kwargs.get("affordance")
+                target = args[1] if len(args) >= 2 else kwargs.get("target")
                 context = args[2] if len(args) >= 3 else kwargs.get("context")
+                parameters = kwargs.get("interaction_parameters")
+                if parameters is None and len(args) >= 4:
+                    parameters = args[3]
                 if _is_player_push(context, user_sources):
                     sim_info = safe_getattr(self_sim, "sim_info", None)
                     if sim_info is not None:
-                        _on_player_action(sim_info)
+                        _on_player_action(
+                            sim_info, affordance, target, interaction_parameters=parameters
+                        )
             except Exception as exc:
                 log_exception("player_activity.hook", exc)
             return original(self_sim, *args, **kwargs)

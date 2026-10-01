@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from .. import content_i18n
+from ..llm import langguard
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -197,8 +198,8 @@ async def reflect(
             f"Recent events summary: {summary}\n"
             f"Dominant themes: {', '.join(themes) or 'none'}\n\n"
             "Instructions:\n"
-            f"- Write a 2-4 sentence reflection for {name}.\n"
-            f"- Write only in {content_i18n.language_name(target_lang)}.\n"
+        f"- Write a 2-4 sentence reflection for {name}.\n"
+        f"- {langguard.language_directive(target_lang)}\n"
             "- Extract 2-4 concise insights as an array.\n"
             "- Drift the personality description slightly based on the events.\n"
             "- Optionally propose ONE trait to add and ONE to remove (or null).\n"
@@ -217,6 +218,7 @@ async def reflect(
             lang=target_lang,
             temperature=0.7,
             max_tokens=500,
+            purpose="summary",
         )
 
         raw_text = getattr(response, "text", "")

@@ -412,11 +412,29 @@ class AutonomySimState(BaseModel):
     mood: str = "neutral"
     needs: dict[str, Any] = Field(default_factory=dict)
     location: str = ""
+    # v0.4 P6: engine room/block id the Sim is in (0 = outside, None = unknown).
+    # The sim<->sim channel only pairs Sims in the same room so agents never
+    # "talk" through walls (S4CL ``CommonSimLocationUtils.get_current_room_id``).
+    room_id: int | None = None
     current_interaction: str = ""
+    # v0.4 P4c: the *localized pie-menu display name* of the current interaction
+    # (falls back to the raw name). ``current_interaction`` stays raw so
+    # classification tokens remain stable; this is semantic context for the LLM.
+    current_interaction_text: str = ""
+    # v0.5 R4: localized label of the object the Sim is currently using (from
+    # ``current.target`` or ``current.aop.target``; "" when none). Lets intimate
+    # fallback lines match the bed/bathtub/shower/hot tub.
+    current_object: str = ""
     # Sim id the Sim is currently in a native social interaction with (or None).
     # The sim<->sim dialogue channel only pairs Sims who are mutually in such a
     # conversation, so agents never "talk" at a distance (v0.3 R5 fix).
     interaction_target_sim_id: int | None = None
+    # v0.4 P6: the *next* interactions already in the Sim's queue (the running
+    # one excluded), each ``{"name": <raw>, "target_sim_id": <id|None>}``. A
+    # session is kept open (no premature "goodbye") while the queue still
+    # continues the interaction with the same Sim, and the sequence feeds the
+    # dialogue context.
+    queued_interactions: list[dict[str, Any]] = Field(default_factory=list)
     sleeping: bool = False
     is_player: bool = False
     autonomy: str = "semi"

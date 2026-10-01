@@ -24,10 +24,12 @@ audit = "data/audit.log"
 
 # ─── LLM ──────────────────────────────────────────────────────────────
 [llm]
-# Fallback order among enabled providers. Providers without a key are skipped,
-# so it is safe to list more than you have configured. OpenRouter leads (most
-# stable free tier); Gemini is last because its free tier rate-limits hard.
-chain = ["openrouter", "opencode", "gemini"]
+# Fallback order among enabled providers. Providers without a key (or disabled
+# ones) are skipped, so it is safe to list more than you have configured.
+# OpenRouter leads (most stable free tier); local Ollama comes next for offline
+# use; Gemini is late because its free tier rate-limits hard; paid DeepSeek is
+# the absolute last resort. Providers that are disabled here are simply skipped.
+chain = ["openrouter", "opencode", "ollama", "groq", "gemini", "deepseek"]
 budget_per_sim_per_day = 500
 # How much hidden reasoning a model may spend before its visible answer:
 # none | minimal | low | medium | high ("off"/"" = leave it to the model).
@@ -35,6 +37,26 @@ budget_per_sim_per_day = 500
 # models otherwise burn the whole output budget on a hidden "thinking process"
 # (truncating the answer). The per-agent override below wins.
 reasoning_effort = "none"
+# v0.4 P2: post-generation language guard. "strict" retries once with a
+# reinforced directive, then falls back to a deterministic localized line;
+# "off" records the mismatch without retrying.
+language_policy = "strict"
+# v0.5 R2: dynamically discover free models via each provider's GET /models and
+# add them to the pool (Zen: *-free slugs; OpenRouter: :free ids). 0 disables it.
+# When a configured model is in cool-down it is swapped for a discovered free
+# model of the same provider (never on an auth error). Refresh interval below;
+# a refresh is also forced on demand when a whole call fails.
+model_refresh_minutes = 30.0
+auto_swap_models = true
+# v0.5 A3: minimum seconds between two failure-triggered pool refreshes. Stops a
+# persistently failing chain from hammering GET /models + retrying on every
+# request. The periodic refresh above is unaffected. 0 disables the throttle.
+refresh_on_failure_min_seconds = 60.0
+# Optional per-purpose model override (wins over the "fast models first"
+# heuristic used for short tasks like social/summary):
+# [llm.task_models]
+# social  = ["nvidia/nemotron-3.5-lightning:free", "mimo-v2.6-flash-free"]
+# summary = ["nvidia/nemotron-3.5-lightning:free"]
 
 # `rpm`/`rpd` are the provider's real limits (requests/minute and requests/day).
 # When set, the chain skips a provider that would exceed them and falls through
@@ -55,7 +77,15 @@ free_only = true
 # is forwarded as `reasoning.effort` on each request.
 supports_reasoning = true
 rpm = 20
-rpd = 50                 # 1000 RPD with a one-time $10 credit (PLANO.md §5.4)
+# v0.5 A1: the account's real free-model daily limit (GET /api/v1/key ->
+# free_model_daily_requests) is 1000 with a one-time $10 credit, so the local
+# meter must not self-block at 50. Set 0 to disable the daily cap entirely.
+rpd = 1000
+# v0.5 R1: after `model_failure_threshold` (default 2) consecutive empty/error
+# answers a model is retired for this many seconds; a success resets it. This
+# stops an unstable model from being retried on every request.
+model_cooldown_seconds = 120
+# model_failure_threshold = 2
 
 # OpenCode Zen gateway (OpenAI-compatible, Bearer token). Optional power tier:
 # it needs an OpenCode Zen API key (https://opencode.ai/auth). IMPORTANT: Zen's
@@ -68,20 +98,55 @@ enabled = false
 models = ["space-bunny-free"]
 api_key = "${OPENCODE_API_KEY}"
 base_url = "https://opencode.ai/zen/v1"
+# v0.5 A4: Zen's GET /models free slugs 403 outside the OpenCode client, so its
+# dynamic discovery is disabled (it only adds models that never answer).
+discover_models = false
 # rpm = 20
 # rpd = 200
 
-# Google AI Studio: demoted to last resort (aggressive free-tier rate limits).
+# Google AI Studio (free tier; rate-limits hard). 2.5-era models are retired for
+# new accounts, so the free picks are the flash-lite family (small/fast first).
+# Limits below are deliberately conservative to stay inside the free tier —
+# check your real ones at https://aistudio.google.com (Rate limits).
 [llm.providers.gemini]
 enabled = true
-model = "gemini-2.5-flash"
+models = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
 api_key = "${GEMINI_API_KEY}"
-rpm = 15
-rpd = 1500
+rpm = 10
+rpd = 250
+# Gemini 3.x rejects thinkingBudget=0 (HTTP 400); leave unset. Set 0 only for
+# 2.5-era models that accept it.
+# thinking_budget = 0
 
-[llm.providers.deepseek]        # paid, God agent only
+# v0.5 A5/A6: any OpenAI-compatible endpoint can be plugged in without code by
+# setting `type = "openai_compat"` + `base_url`. Groq/Cerebras are fast free
+# tiers; Ollama runs fully local. `api_key_optional = true` allows no key.
+[llm.providers.groq]            # v0.5 A9: fast free tier (optional)
 enabled = false
-model = "deepseek-chat"
+type = "openai_compat"
+# Free-tier chat models (small/fast first). Groq's catalog rotates; check
+# https://console.groq.com/docs/models if one is retired.
+models = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+api_key = "${GROQ_API_KEY}"
+base_url = "https://api.groq.com/openai/v1"
+rpm = 30
+rpd = 1000
+
+[llm.providers.ollama]          # v0.5 A7: local, free, offline last resort
+enabled = false                 # enable after installing Ollama + the model
+type = "openai_compat"          # v0.5 A5: config-driven generic provider
+model = "granite4.1:8b"
+api_key = ""                    # v0.5 A6: local endpoints need no key
+api_key_optional = true
+base_url = "http://localhost:11434/v1"
+# v0.5 A7: keep the model from spending its budget on hidden reasoning.
+extra_body = { reasoning_effort = "none" }
+
+[llm.providers.deepseek]        # v0.5 A8: paid, absolute last resort
+enabled = false                 # enable when the free tiers are not enough
+# Current paid ids (validated 2026-10-01): deepseek-flash (V4.1-Flash) and
+# deepseek-v4-pro.
+models = ["deepseek-flash", "deepseek-v4-pro"]
 api_key = "${DEEPSEEK_API_KEY}"
 base_url = "https://api.deepseek.com/v1"
 
@@ -111,8 +176,8 @@ dejavu_chance = 0.05
 # `agent_seats` is the v0.3 agent-seat pool (how many Sims may hold a live
 # agent at once; active household first, then instanced visitors). It overrides
 # the legacy `max_active` when set.
-agent_seats = 12
-max_active = 12                  # legacy alias for agent_seats
+agent_seats = 6
+max_active = 6                   # legacy alias for agent_seats
 evolution_speed = "normal"       # slow | normal | fast
 autonomy_default = "semi"        # off | observe | suggest | semi | full
 # Safety rails (Phase 2): cap directive tool calls per Sim and hold off after
@@ -142,12 +207,18 @@ quota_fraction = 0.8             # target fraction of the free-tier RPM
 max_impulses_per_tick = 1
 # v0.3 §15.6: impulse/thought frequency dials. 0 = sleep-only. The agent-roster
 # panel (`sw.agents`) adjusts these live; a per-Sim override wins.
-impulse_frequency = 0.2
+# v0.5 A10: lowered to stretch the free-tier daily quota over a longer session.
+impulse_frequency = 0.1
 # The player's own household Sims are inhabited too (nonzero by default); the
 # mod's player-priority lock still keeps the player in control.
-player_sim_impulse_frequency = 0.2
+player_sim_impulse_frequency = 0.1
 # Salient event reactions stay on independently of the impulse dial.
 reactions_enabled = true
+# v0.5 R3: fraction of the shared per-minute LLM budget kept for social
+# conversation turns. Social may spend the full budget (reserve included); idle
+# impulses may only use the remainder, so an ongoing conversation is never
+# starved by idle chatter on a busy free tier.
+social_reserve_fraction = 0.4
 # Per-agent hidden-reasoning budget for impulses: none|minimal|low|medium|high.
 # Omit/None to inherit [llm] reasoning_effort ("none").
 # reasoning_effort = "none"
@@ -182,7 +253,45 @@ pair_cooldown_seconds = 180.0
 require_conversation = true
 # Max lot-space distance between the pair (from the pulse `location` "x,y").
 max_pair_distance = 4.0
+# v0.4 P6: only pair Sims that share a room (engine room id from the pulse;
+# 0 = outside). Unknown rooms degrade to the distance gate. Stops agents from
+# talking through walls.
+require_same_room = true
+# v0.4 P6: keep a conversation open while the pulse queue still holds an
+# interaction with the same Sim, instead of closing with a premature "goodbye".
+keep_open_on_queued = true
 line_max_tokens = 200
+# v0.5 R3: a new dialogue turn only when the pair's interaction/queue changed, or
+# after this many seconds of an open conversation. Prevents the same line from
+# being re-rendered on every zone pulse. 0 = turn on any pulse while active.
+turn_min_interval_seconds = 25.0
+
+# v0.4 P1: speech policy — the end of the random idle monologue. Idle impulses
+# only think (internal) or act; speech comes from a conversation session, a
+# reaction with a target, or player chat. A discreet murmur is occasional.
+[agents.speech]
+min_interval_between_lines = 30.0   # seconds between surfaced lines per Sim
+max_lines_per_minute = 12           # global ceiling across all Sims
+ambient_talk_chance = 0.08          # odds a devaneio (murmur) surfaces
+murmur_cooldown_seconds = 120.0
+notify_thoughts = true              # surface discreet devaneios at all
+hearing_radius = 20.0               # notify only near the active Sim; 0 = always
+
+# v0.4 P3: presence policy — visitors/passers-by are reactive by default, so
+# they no longer comment on the household's home. `visitor`: reactive | full | off.
+[agents.presence]
+visitor = "reactive"
+familiar_friendship = 20.0
+
+# v0.4 P4/P4b: conversation sessions. Two Sims already in a native conversation
+# hold a multi-turn exchange (1 LLM call per pulse), with a closing summary.
+[agents.conversations]
+enabled = true
+max_turns = 4
+max_tokens = 220
+summary_enabled = true
+leaving_summary = true
+idle_seconds = 90.0
 
 # ─── RUNTIME ──────────────────────────────────────────────────────────
 [runtime]
@@ -215,8 +324,8 @@ chaos_degree = 0.3               # 0..1
 # Slowest cadence between two God interventions (seconds). The frequency and
 # autonomy dials shorten it down to a 30 s floor (Phase 5c orchestration).
 base_interval_seconds = 600.0
-powers = { spawn_npc = true, apply_trait = true, force_social = true,
-           gossip = true, relationship_shift = true, extreme_events = false }
+# Inline tables must stay on one line in TOML 1.0.
+powers = { spawn_npc = true, apply_trait = true, force_social = true, gossip = true, relationship_shift = true, extreme_events = false }
 
 # Free-form ControlSpec-validated overrides.
 [god.settings]
@@ -230,7 +339,9 @@ enabled = true
 batch_size = 2                   # jobs per tick
 interval_seconds = 15.0          # pause between non-empty ticks
 idle_seconds = 30.0              # pause when the queue is empty
-per_minute = 6                   # burst cap (0 = unlimited)
-daily_limit = 120                # background generations per day (0 = unlimited)
+# v0.5 A10: lower caps to leave more of the shared free-tier quota for chat and
+# social conversation turns.
+per_minute = 3                   # burst cap (0 = unlimited)
+daily_limit = 60                 # background generations per day (0 = unlimited)
 max_queue = 200                  # queued job cap
 max_attempts = 2                 # retries per job before giving up

@@ -65,6 +65,7 @@ class FakeRegistry:
         temperature=None,
         max_tokens=None,
         tools=None,
+        purpose=None,
     ) -> LLMResponse:
         self.last_tools = tools
         return self.response

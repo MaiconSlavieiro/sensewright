@@ -82,12 +82,24 @@ class LoggingConfig(BaseModel):
 
 class ProviderConfig(BaseModel):
     enabled: bool = True
+    # v0.5 follow-up A5: provider implementation to instantiate. When omitted the
+    # block name is used (``openrouter``/``gemini``/...). Set ``type = "openai_compat"``
+    # for a config-driven OpenAI-compatible endpoint (Groq, Cerebras, Ollama, ...).
+    type: str | None = None
     model: str | None = None
     models: list[str] = Field(default_factory=list)
     api_key: str = ""
+    # v0.5 follow-up A6: local endpoints (e.g. Ollama) need no key. When True the
+    # provider is considered available with an empty ``api_key`` and no
+    # ``Authorization`` header is sent.
+    api_key_optional: bool = False
     base_url: str | None = None
     rpm: int | None = None
     rpd: int | None = None
+    # v0.5 follow-up A4: allow/disallow dynamic ``GET /models`` discovery for this
+    # provider. Zen/OpenCode's free tier returns HTTP 403 outside the OpenCode
+    # client, so its discovery is disabled in the example config.
+    discover_models: bool = True
     # When True, only models whose id marks them as free are ever used (e.g. an
     # OpenRouter id containing ``:free``). This is a hard billing guard: a
     # non-free model in the list is dropped instead of being called.
@@ -97,7 +109,25 @@ class ProviderConfig(BaseModel):
     # that would reject it (or that have their own thinking control) leave this
     # False and only use ``extra``.
     supports_reasoning: bool = False
+    # Gemini only (v0.5 follow-up): optional hidden-thinking budget forwarded as
+    # ``generationConfig.thinkingConfig.thinkingBudget``. ``None`` (default) sends
+    # nothing — required because Gemini 3.x rejects ``thinkingBudget=0`` with a
+    # 400. Set 0 only for 2.5-era models that accept it.
+    thinking_budget: int | None = None
+    # v0.5 R1: a model that returns empty/None content (or a truncated answer
+    # with no content) is a retryable failure. After this many consecutive
+    # failures a model is temporarily retired (``model_cooldown_seconds``) so the
+    # chain stops burning attempts on it. A success resets the counter.
+    model_failure_threshold: int = 2
+    model_cooldown_seconds: float = 120.0
+    # v0.5 R2: models discovered dynamically (``GET /models``). Runtime-only;
+    # not meant to be written to ``config.toml``.
+    discovered_models: list[str] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
+    # Extra top-level body fields merged into every request (v0.4 P2). Same as
+    # ``extra`` but named to make the passthrough intent explicit; both are
+    # merged, with ``extra_body`` winning on conflicts.
+    extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMConfig(BaseModel):
@@ -110,6 +140,25 @@ class LLMConfig(BaseModel):
     # are a single short line, and reasoning models otherwise burn the whole
     # output budget on a hidden "thinking process" (truncating the answer).
     reasoning_effort: str = "none"
+    # v0.4 P2: post-generation language guard. ``strict`` retries once with a
+    # reinforced directive, then falls back to a deterministic localized line;
+    # ``off`` records the mismatch but never retries/falls back.
+    language_policy: str = "strict"
+    # v0.5 R2: dynamic free-model discovery (``GET /models``) that activates the
+    # previously-dead ``auto_discover``. ``model_refresh_minutes=0`` disables it;
+    # a model in cool-down is swapped for a discovered free model of the same
+    # provider when ``auto_swap_models`` is set (never on an auth error).
+    model_refresh_minutes: float = 30.0
+    auto_swap_models: bool = True
+    # v0.5 follow-up A3: minimum seconds between two *on-demand* refreshes
+    # triggered by an all-providers failure. Stops a failing chain from
+    # hammering ``GET /models`` and retrying on every single request. The
+    # periodic refresh (``model_refresh_minutes``) is unaffected. 0 disables
+    # the throttle.
+    refresh_on_failure_min_seconds: float = 60.0
+    # Optional per-purpose model override; when a purpose is present its list
+    # wins over the "fast models first" heuristic (v0.5 R2).
+    task_models: dict[str, list[str]] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
 
 
@@ -155,6 +204,11 @@ class InitiativeConfig(BaseModel):
     player_sim_impulse_frequency: float = 0.2
     # Salient event reactions stay on independently of the impulse dial.
     reactions_enabled: bool = True
+    # v0.5 R3: fraction of the shared per-minute budget reserved for social
+    # conversation turns. Social may spend the full budget (including the
+    # reserve); idle impulses may only use the remainder (``1 - reserve``), so a
+    # busy free tier never starves an ongoing conversation.
+    social_reserve_fraction: float = 0.4
     # ── reasoning dial (per agent) ──
     # How much hidden reasoning an impulse may spend: none|minimal|low|medium|high.
     # ``None`` inherits ``[llm] reasoning_effort`` (low by default).
@@ -184,8 +238,70 @@ class SocialConfig(BaseModel):
     # missing the proximity check is skipped (the conversation gate still holds).
     require_conversation: bool = True
     max_pair_distance: float = 4.0
+    # v0.4 P6: only pair Sims that share a room (engine room id from the pulse;
+    # 0 = outside). When either room is unknown the check degrades to the
+    # distance gate. This stops agents from "talking through walls".
+    require_same_room: bool = True
+    # v0.4 P6: keep a conversation session (and its dialogue) open while the
+    # pulse queue still holds an interaction with the same Sim, instead of
+    # closing early with a "goodbye" summary.
+    keep_open_on_queued: bool = True
     # Output budget for the model-written exchange (two short lines).
     line_max_tokens: int = 200
+    # v0.5 R3: a new turn only when the pair's interaction/queue changed since
+    # the last turn, or when this many seconds elapsed with the session open.
+    # Between beats the session stays open and silent (no repeated line per
+    # pulse). 0 disables the interval gate (turn on every change).
+    turn_min_interval_seconds: float = 25.0
+
+
+class SpeechConfig(BaseModel):
+    """SpeechPolicy: cadence + surface rules for every vocal output (v0.4 P1).
+
+    ``min_interval_between_lines`` and ``max_lines_per_minute`` cap how often a
+    line may reach the player; ``ambient_talk_chance`` is the per-opportunity
+    probability of a discreet murmur; ``notify_thoughts`` decides whether
+    murmurs are surfaced at all; ``hearing_radius`` is the lot-space distance
+    from the active Sim within which a line may notify (0 = always "hear").
+    """
+
+    min_interval_between_lines: float = 30.0
+    max_lines_per_minute: int = 12
+    ambient_talk_chance: float = 0.08
+    murmur_cooldown_seconds: float = 120.0
+    notify_thoughts: bool = True
+    hearing_radius: float = 20.0
+
+
+class PresenceConfig(BaseModel):
+    """PresencePolicy: who is "at home" vs a visitor (v0.4 P3).
+
+    ``visitor`` is the agency tier for anyone outside the player's household:
+    ``reactive`` (default: react to events + join an existing conversation, no
+    idle impulse or directed speech), ``full`` (same as household) or ``off``
+    (never inhabited). ``familiar_friendship`` is the relationship level from
+    which a non-household Sim is considered a friend (they may react with
+    speech and receive less-sanitized context).
+    """
+
+    visitor: str = "reactive"  # reactive | full | off
+    familiar_friendship: float = 20.0
+
+
+class ConversationsConfig(BaseModel):
+    """Conversation sessions: multi-turn exchanges + summary (v0.4 P4/P4b)."""
+
+    enabled: bool = True
+    # Lines a single session may reach before it is closed naturally.
+    max_turns: int = 4
+    # Output budget for one session turn (the model writes one exchange).
+    max_tokens: int = 220
+    summary_enabled: bool = True
+    leaving_summary: bool = True
+    # A session with no new turn for this long is closed (seconds). Keep this
+    # above ``agents.social.pair_cooldown_seconds`` so a session waiting for the
+    # pair cooldown is not mistaken for an ended conversation.
+    idle_seconds: float = 300.0
 
 
 class PersonalityConfig(BaseModel):
@@ -213,7 +329,8 @@ class EvolutionConfig(BaseModel):
 
 class AgentsConfig(BaseModel):
     # Kept as an alias for installed configs; ``agent_seats`` (v0.3) wins when set.
-    max_active: int = 12
+    # v0.4 P3: the default pool drops to 6 (visitors are reactive, not inhabited).
+    max_active: int = 6
     agent_seats: int | None = None
     evolution_speed: str = "normal"
     autonomy_default: str = "semi"
@@ -231,6 +348,12 @@ class AgentsConfig(BaseModel):
     layers: LayersConfig = Field(default_factory=LayersConfig)
     # v0.3 R5: sim<->sim dialogue channel cadence.
     social: SocialConfig = Field(default_factory=SocialConfig)
+    # v0.4 P1: vocal-output cadence + surface rules.
+    speech: SpeechConfig = Field(default_factory=SpeechConfig)
+    # v0.4 P3: visitor presence policy.
+    presence: PresenceConfig = Field(default_factory=PresenceConfig)
+    # v0.4 P4/P4b: conversation sessions + summary.
+    conversations: ConversationsConfig = Field(default_factory=ConversationsConfig)
 
     @property
     def seat_count(self) -> int:

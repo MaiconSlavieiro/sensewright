@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from .. import content_i18n
+from ..llm import langguard
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,7 @@ def _build_profile_messages(
         f"Hints: {str(hints or '').strip() or 'none'}\n\n"
         "Instructions:\n"
         f"- Write a profile for {name}.\n"
-        f"- Write only in {content_i18n.language_name(target_lang)}.\n"
+        f"- {langguard.language_directive(target_lang)}\n"
         "- Never contradict the native traits, age, career or skills.\n"
         '- Return ONLY a JSON object with keys: "name" (string), '
         '"backstory" (2-4 sentences), "personality" (string), '
@@ -209,6 +210,7 @@ async def generate_profile(
             lang=target_lang,
             temperature=0.9,
             max_tokens=600,
+            purpose="profile",
         )
         raw_text = getattr(response, "text", "")
         parsed = _extract_json_object(raw_text)

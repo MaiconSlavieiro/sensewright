@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from .. import content_i18n
+from ..llm import langguard
 from ..schemas import normalize_lang
 from .zeitgeist import clamp01, normalize_zeitgeist, zeitgeist_to_prompt_block
 
@@ -599,6 +600,49 @@ def _build_household_messages(
     ]
 
 
+async def _complete_guarded(
+    messages: list[dict[str, str]],
+    registry: Any,
+    target_lang: str,
+    *,
+    build: Any,
+) -> tuple[dict | None, str | None]:
+    """Call the model, then retry once if the prose is in the wrong language.
+
+    ``build`` maps the raw response text to a background dict (or None when the
+    answer was JSON/incomplete). A wrong-language answer is retried once with a
+    reinforced directive and a larger token budget; when it is still wrong or
+    empty, ``(None, None)`` lets the caller fall back to the localized template.
+    Never raises.
+    """
+    for attempt in range(2):
+        try:
+            if attempt == 0:
+                response = await registry.complete(
+                    messages, lang=target_lang, temperature=0.8,
+                    max_tokens=BACKGROUND_MAX_TOKENS, purpose="background",
+                )
+            else:
+                retry_messages = list(messages) + [
+                    {"role": "system", "content": langguard.language_directive(target_lang, reinforced=True)}
+                ]
+                response = await registry.complete(
+                    retry_messages, lang=target_lang, temperature=0.6,
+                    max_tokens=int(BACKGROUND_MAX_TOKENS * 1.5), purpose="background",
+                )
+        except Exception as exc:
+            logger.warning("background generation failed: %s", exc)
+            return None, None
+        background = build(getattr(response, "text", ""))
+        if background is None:
+            continue
+        if langguard.is_wrong_lang(background.get("text", ""), target_lang):
+            logger.info("langguard rejected background attempt %d (target=%s)", attempt + 1, target_lang)
+            continue
+        return background, getattr(response, "provider", None)
+    return None, None
+
+
 async def generate_sim_background(
     sim_data: dict,
     zeitgeist: dict,
@@ -625,21 +669,16 @@ async def generate_sim_background(
 
     try:
         messages = _build_sim_messages(data, zeitgeist, player_hints, target_lang, influence)
-        response = await registry.complete(
+        traits = clean_traits(_native_view(data).get("traits"))
+        background, provider = await _complete_guarded(
             messages,
-            lang=target_lang,
-            temperature=0.8,
-            max_tokens=BACKGROUND_MAX_TOKENS,
-        )
-        background = _background_from_response(
-            getattr(response, "text", ""),
-            clean_traits(_native_view(data).get("traits")),
-            tags,
-            influence,
+            registry,
+            target_lang,
+            build=lambda text: _background_from_response(text, traits, tags, influence),
         )
         if background is None:
             return {"background": fallback, "provider": None}
-        return {"background": background, "provider": getattr(response, "provider", None)}
+        return {"background": background, "provider": provider}
     except Exception as exc:
         logger.warning("sim background generation failed: %s", exc)
         return {"background": fallback, "provider": None}
@@ -670,21 +709,17 @@ async def generate_household_background(
 
     try:
         messages = _build_household_messages(data, zeitgeist, player_hints, target_lang, influence)
-        response = await registry.complete(
+        background, provider = await _complete_guarded(
             messages,
-            lang=target_lang,
-            temperature=0.8,
-            max_tokens=BACKGROUND_MAX_TOKENS,
-        )
-        background = _background_from_response(
-            getattr(response, "text", ""),
-            clean_traits(data.get("traits")),
-            tags,
-            influence,
+            registry,
+            target_lang,
+            build=lambda text: _background_from_response(
+                text, clean_traits(data.get("traits")), tags, influence
+            ),
         )
         if background is None:
             return {"background": fallback, "provider": None}
-        return {"background": background, "provider": getattr(response, "provider", None)}
+        return {"background": background, "provider": provider}
     except Exception as exc:
         logger.warning("household background generation failed: %s", exc)
         return {"background": fallback, "provider": None}

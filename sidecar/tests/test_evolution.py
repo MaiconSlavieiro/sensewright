@@ -23,7 +23,7 @@ class FakeRegistry:
         self._insights = insights or ["insight 1", "insight 2"]
         self.provider = "fake"
 
-    async def complete(self, messages: list[dict[str, str]], *, lang: str, temperature: float, max_tokens: int) -> LLMResponse:
+    async def complete(self, messages: list[dict[str, str]], *, lang: str, temperature: float, max_tokens: int, purpose: str | None = None) -> LLMResponse:
         json_payload = {
             "reflection": self._reflection_text,
             "insights": self._insights,
@@ -40,7 +40,7 @@ class FakeRegistry:
 class FailingRegistry:
     """Registry that always raises."""
 
-    async def complete(self, messages: list[dict[str, str]], *, lang: str, temperature: float, max_tokens: int) -> LLMResponse:
+    async def complete(self, messages: list[dict[str, str]], *, lang: str, temperature: float, max_tokens: int, purpose: str | None = None) -> LLMResponse:
         raise RuntimeError("LLM unavailable")
 
 

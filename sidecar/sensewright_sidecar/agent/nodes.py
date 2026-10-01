@@ -211,6 +211,7 @@ class AgentNodes:
                 temperature=None,  # uses settings default
                 max_tokens=None,   # uses settings default
                 tools=tools,
+                purpose="chat",
             )
             return {
                 **prompt_result,

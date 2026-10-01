@@ -15,6 +15,7 @@ default), and :func:`t(key, **args)` with default-locale fallback.
 import io
 import json
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 # Cache for loaded locale tables
@@ -24,6 +25,8 @@ _current_locale: str = ""
 _locale_override: Optional[str] = None  # explicit override from config
 # True once the locale is settled (explicit override, or a game API answered).
 _auto_detected: bool = False
+# Human-readable trail of the last detection attempt (see ``detection_report``).
+_last_detection: str = ""
 
 _LOCALES_SUBDIR = "locales"
 _MANIFEST_NAME = "manifest.json"
@@ -222,58 +225,145 @@ def _locale_candidates(locale_obj):
     return candidates
 
 
+def _safe_str(value: Any) -> str:
+    try:
+        return str(value)
+    except Exception:
+        return "<unprintable>"
+
+
+def _match_value(value: Any, source: str, attempts: List[str]) -> Optional[str]:
+    """Match a game locale value against the manifest, recording the attempt.
+
+    Returns the matched locale code, or None when the value is missing or does
+    not match any manifest entry. Unknown values are deliberately NOT coerced to
+    the default here: a non-match means "keep retrying", never "lock English".
+    """
+    if value is None:
+        attempts.append("{}:none".format(source))
+        return None
+    for candidate in _locale_candidates(value):
+        entry = _match_entry(candidate)
+        if entry is not None:
+            attempts.append("{}:{}->{}".format(source, candidate, entry["code"]))
+            return entry["code"]
+    attempts.append("{}:{}->nomatch".format(source, _safe_str(value)))
+    return None
+
+
 def _detect_game_locale():
     """
-    Detect the game language, returning ``(locale, available)``.
+    Detect the game language, returning ``(locale, available, report)``.
 
-    ``available`` is True when a game locale API actually answered; it is False
-    when the game services were not ready (script mods load before them), which
-    lets callers retry instead of locking in the default fallback.
+    ``available`` is True only when a source returned a value that *matched* a
+    manifest locale. A source that answered but did not match (e.g. the English
+    default before the account loads) does NOT lock a language: the caller keeps
+    retrying until a real match appears. This is what keeps the running game's
+    language (pt_BR) from being silently replaced by the ``en`` fallback.
     """
-    # Method 1: services.get_locale() -> client.account.locale (a Locale enum)
+    attempts: List[str] = []
+
+    # 1. services.get_locale() (the account locale once the client is up).
     try:
         import services  # type: ignore
-        locale_obj = services.get_locale()
-        if locale_obj is not None:
-            for candidate in _locale_candidates(locale_obj):
-                entry = _match_entry(candidate)
-                if entry is not None:
-                    return entry["code"], True
-            return _normalize_locale(str(locale_obj)), True
-    except Exception:
-        pass
+        getter = getattr(services, "get_locale", None)
+        if callable(getter):
+            code = _match_value(getter(), "services.get_locale", attempts)
+            if code:
+                return code, True, "; ".join(attempts)
+        else:
+            attempts.append("services.get_locale:absent")
+    except Exception as exc:
+        attempts.append("services.get_locale:err={}".format(_safe_str(exc)))
 
+    # 2. client.account.locale (the authoritative running-game locale).
     try:
-        # Method 2: common.locales
+        import services  # type: ignore
+        manager = services.client_manager()
+        client = manager.get_first_client() if manager is not None else None
+        account = getattr(client, "account", None) if client is not None else None
+        if account is not None:
+            for attr in ("locale", "language", "game_locale"):
+                code = _match_value(
+                    getattr(account, attr, None), "account.{}".format(attr), attempts
+                )
+                if code:
+                    return code, True, "; ".join(attempts)
+        else:
+            attempts.append("account:absent")
+    except Exception as exc:
+        attempts.append("account:err={}".format(_safe_str(exc)))
+
+    # 3. common.locales.get_current_locale()
+    try:
         from sims4 import common  # type: ignore
-        if hasattr(common, "locales"):
-            locale_obj = common.locales.get_current_locale()
-            if locale_obj:
-                return _normalize_locale(str(locale_obj)), True
-    except Exception:
-        pass
+        locales = getattr(common, "locales", None)
+        if locales is not None:
+            code = _match_value(
+                locales.get_current_locale(), "common.locales", attempts
+            )
+            if code:
+                return code, True, "; ".join(attempts)
+        else:
+            attempts.append("common.locales:absent")
+    except Exception as exc:
+        attempts.append("common.locales:err={}".format(_safe_str(exc)))
 
+    # 4. sims4.locale.get_locale()
     try:
-        # Method 3: sims4.locale
         from sims4 import locale as sims4_locale  # type: ignore
-        if hasattr(sims4_locale, "get_locale"):
-            lang = sims4_locale.get_locale()
-            if lang:
-                return _normalize_locale(str(lang)), True
-    except Exception:
-        pass
+        getter = getattr(sims4_locale, "get_locale", None)
+        if callable(getter):
+            code = _match_value(getter(), "sims4.locale", attempts)
+            if code:
+                return code, True, "; ".join(attempts)
+        else:
+            attempts.append("sims4.locale:absent")
+    except Exception as exc:
+        attempts.append("sims4.locale:err={}".format(_safe_str(exc)))
 
+    # 5. localization.get_locale()
     try:
-        # Method 4: localization module
         import localization  # type: ignore
-        if hasattr(localization, "get_locale"):
-            lang = localization.get_locale()
-            if lang:
-                return _normalize_locale(str(lang)), True
-    except Exception:
-        pass
+        getter = getattr(localization, "get_locale", None)
+        if callable(getter):
+            code = _match_value(getter(), "localization", attempts)
+            if code:
+                return code, True, "; ".join(attempts)
+        else:
+            attempts.append("localization:absent")
+    except Exception as exc:
+        attempts.append("localization:err={}".format(_safe_str(exc)))
 
-    return _default_locale(), False
+    # 6. Windows registry install locale (last resort; still manifest-matched, so
+    #    it stays inside the data-driven locale framework - no hardcoded code).
+    #    Only consulted when the Sims engine is actually loaded (``sims4`` import),
+    #    so offline tests and tools are not affected by the host registry.
+    if "sims4" in sys.modules:
+        try:
+            import winreg  # type: ignore
+            for path in (
+                r"SOFTWARE\Maxis\The Sims 4",
+                r"SOFTWARE\WOW6432Node\Maxis\The Sims 4",
+            ):
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
+                        value, _ = winreg.QueryValueEx(key, "Locale")
+                except OSError:
+                    attempts.append("registry:{}:absent".format(path))
+                    continue
+                code = _match_value(value, "registry:{}".format(path), attempts)
+                if code:
+                    return code, True, "; ".join(attempts)
+        except Exception as exc:
+            attempts.append("registry:err={}".format(_safe_str(exc)))
+
+    return _default_locale(), False, "; ".join(attempts)
+
+
+def detection_report() -> str:
+    """Last detection attempt trail (for the ``[validate] locale:`` log line)."""
+    return _last_detection
 
 
 def detect_game_language() -> str:
@@ -283,18 +373,23 @@ def detect_game_language() -> str:
     Normalizes values like pt_BR/pt-BR/pt using the manifest, falling back to
     the manifest default.
     """
-    return _detect_game_locale()[0]
+    global _last_detection
+    normalized, _available, report = _detect_game_locale()
+    _last_detection = report
+    return normalized
 
 
 def init_locale(config_locale: str = "auto") -> str:
     """
     Resolve AND set the active locale at boot (config override, else game language).
 
-    Script mods load before the game services, so ``auto`` detection may not be
-    possible yet; ``ensure_locale`` retries later. Returns the effective locale.
-    Never raises.
+    An explicit ``[ui] language`` override wins immediately. In ``auto`` mode the
+    game language is NOT probed at import: the game services are not ready yet and
+    a pre-account source can return the English default, which would lock the
+    wrong language. ``ensure_locale`` detects the real running language once the
+    game is up. Returns the effective (possibly provisional) locale. Never raises.
     """
-    global _current_locale, _locale_override, _auto_detected
+    global _current_locale, _locale_override, _auto_detected, _last_detection
 
     if config_locale and config_locale != "auto":
         normalized = _normalize_locale(config_locale)
@@ -304,28 +399,29 @@ def init_locale(config_locale: str = "auto") -> str:
         return normalized
 
     _locale_override = None
-    normalized, available = _detect_game_locale()
-    _current_locale = normalized
-    _auto_detected = bool(available)
-    return normalized
+    _current_locale = _default_locale()
+    _auto_detected = False
+    _last_detection = "init:deferred"
+    return _current_locale
 
 
 def ensure_locale() -> str:
     """
     Retry game-language detection while running in ``auto`` mode.
 
-    At import the services are usually not ready, so ``auto`` falls back to the
-    default. This re-detects on the first command (when the game is up) and locks
-    the result. An explicit ``sw.lang`` override is never changed. Never raises.
+    Detection only locks a locale once a source returns a value that *matches* a
+    manifest locale (never on a non-matching fallback). An explicit ``sw.lang``
+    override is never changed. Never raises.
     """
-    global _current_locale, _auto_detected
+    global _current_locale, _auto_detected, _last_detection
 
     if _locale_override is not None or _auto_detected:
         return current_locale()
     try:
-        normalized, available = _detect_game_locale()
+        normalized, available, report = _detect_game_locale()
     except Exception:
         return current_locale()
+    _last_detection = report
     if available:
         _current_locale = normalized
         _auto_detected = True

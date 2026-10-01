@@ -83,6 +83,47 @@ def test_on_player_action_arms_local_and_sidecar(monkeypatch):
     assert sidecar == [{"player_id": "local", "save_id": "save-x", "sim_id": 42}]
 
 
+def test_on_player_action_seeds_a_social_conversation(monkeypatch):
+    from sensewright_mod import tool_executor, state_collector, sim_context
+
+    monkeypatch.setattr(tool_executor, "record_player_activity", lambda sim_id=0: None)
+    monkeypatch.setattr(state_collector, "notify_player_activity", lambda sim: None)
+    monkeypatch.setattr(sim_context, "_get_save_id", lambda: "save-x")
+    monkeypatch.setattr(state_collector, "_sim_id_of_target", lambda target: 99)
+    monkeypatch.setattr(state_collector, "_name_of", lambda affordance: "social_Flirt")
+    monkeypatch.setattr(state_collector, "_interaction_label_of", lambda affordance: "Flertar")
+    seeds = []
+    monkeypatch.setattr(state_collector, "notify_player_interaction",
+                        lambda sim, name, target, text="": seeds.append((sim, name, target, text)))
+
+    class Info(object):
+        id = 42
+
+    pa._on_player_action(Info(), affordance=object(), target=object())
+
+    assert seeds == [({"player_id": "local", "save_id": "save-x", "sim_id": 42},
+                      "social_Flirt", 99, "Flertar")]
+
+
+def test_on_player_action_no_seed_for_object_target(monkeypatch):
+    from sensewright_mod import tool_executor, state_collector, sim_context
+
+    monkeypatch.setattr(tool_executor, "record_player_activity", lambda sim_id=0: None)
+    monkeypatch.setattr(state_collector, "notify_player_activity", lambda sim: None)
+    monkeypatch.setattr(sim_context, "_get_save_id", lambda: "save-x")
+    monkeypatch.setattr(state_collector, "_sim_id_of_target", lambda target: None)
+    seeds = []
+    monkeypatch.setattr(state_collector, "notify_player_interaction",
+                        lambda sim, name, target, text="": seeds.append((sim, name, target, text)))
+
+    class Info(object):
+        id = 42
+
+    pa._on_player_action(Info(), affordance=object(), target=object())
+
+    assert seeds == []
+
+
 def test_on_player_action_skips_without_sim_id(monkeypatch):
     local = []
     from sensewright_mod import tool_executor
@@ -139,7 +180,8 @@ def _install_fake_game(monkeypatch):
 def test_install_wraps_and_detects_player_push(monkeypatch):
     Sim, calls = _install_fake_game(monkeypatch)
     detected = []
-    monkeypatch.setattr(pa, "_on_player_action", lambda info: detected.append(info))
+    monkeypatch.setattr(pa, "_on_player_action",
+                        lambda info, *args, **kwargs: detected.append(info))
 
     assert pa.install() is True
     assert pa.is_installed() is True
@@ -157,7 +199,8 @@ def test_install_wraps_and_detects_player_push(monkeypatch):
 def test_install_ignores_script_push(monkeypatch):
     Sim, _calls = _install_fake_game(monkeypatch)
     detected = []
-    monkeypatch.setattr(pa, "_on_player_action", lambda info: detected.append(info))
+    monkeypatch.setattr(pa, "_on_player_action",
+                        lambda info, *args, **kwargs: detected.append(info))
 
     assert pa.install() is True
     sim = Sim()
@@ -170,7 +213,7 @@ def test_install_ignores_script_push(monkeypatch):
 
 def test_install_is_idempotent(monkeypatch):
     Sim, _calls = _install_fake_game(monkeypatch)
-    monkeypatch.setattr(pa, "_on_player_action", lambda info: None)
+    monkeypatch.setattr(pa, "_on_player_action", lambda *a, **k: None)
 
     assert pa.install() is True
     wrapped = Sim.push_super_affordance

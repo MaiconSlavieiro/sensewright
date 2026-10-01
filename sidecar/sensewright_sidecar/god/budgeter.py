@@ -25,11 +25,16 @@ class BackgroundBudgeter:
         *,
         per_minute: int = 6,
         daily: int = 120,
+        reserve_fraction: float = 0.0,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._per_minute = max(0, int(per_minute))
         self._daily = max(0, int(daily))
+        # v0.5 R3: a slice of the per-minute burst kept for priority work
+        # (social turns). Non-reserve callers (idle impulses) may only use the
+        # remainder; reserve callers may use the whole window.
+        self._reserve_fraction = max(0.0, min(0.9, float(reserve_fraction or 0.0)))
         self._monotonic = monotonic
         self._wall = wall_clock
         self._window: deque[float] = deque()
@@ -51,14 +56,22 @@ class BackgroundBudgeter:
             self._day = today
             self._day_used = 0
 
-    def try_acquire(self) -> bool:
-        """Consume one slot; return False when any active limit is reached."""
+    def try_acquire(self, *, allow_reserve: bool = False) -> bool:
+        """Consume one slot; return False when any active limit is reached.
+
+        ``allow_reserve=True`` (v0.5 R3) lets priority work (social) spend the
+        reserved slice; the default keeps the free-tier remainder for idle work.
+        """
         now = self._monotonic()
         self._prune(now)
         self._roll_day()
 
-        if self._per_minute > 0 and len(self._window) >= self._per_minute:
-            return False
+        if self._per_minute > 0:
+            cap = self._per_minute
+            if not allow_reserve and self._reserve_fraction > 0:
+                cap = max(1, round(self._per_minute * (1.0 - self._reserve_fraction)))
+            if len(self._window) >= cap:
+                return False
         if self._daily > 0 and self._day_used >= self._daily:
             return False
 
@@ -88,6 +101,7 @@ class BackgroundBudgeter:
         return {
             "per_minute": self._per_minute,
             "daily_limit": self._daily,
+            "reserve_fraction": self._reserve_fraction,
             "minute_used": len(self._window),
             "day_used": self._day_used,
             "day_remaining": None if self._daily <= 0 else max(0, self._daily - self._day_used),

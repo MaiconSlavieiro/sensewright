@@ -126,3 +126,26 @@ def test_locale_files_have_parity_with_default():
         if extra:
             problems.append(f"{code} extra keys: {sorted(extra)}")
     assert not problems, "\n".join(problems)
+
+
+# ─── per-locale lexicon (manifest-driven, v0.4 P2) ───────────────────────
+
+
+def test_every_locale_has_lexical_data():
+    for code in content_i18n.available_locales():
+        assert os.path.isfile(os.path.join(_locale_dir(), f"lexicon.{code}.json")), code
+        assert content_i18n.locale_stopwords(code), code
+
+
+def test_locale_lexicon_resolves_by_code_not_hardcoded_map():
+    assert "the" in content_i18n.locale_stopwords("en")
+    assert "não" in content_i18n.locale_stopwords("pt-BR")
+    hints = content_i18n.locale_lang_hints("pt-BR")
+    assert hints["chars"]
+    assert content_i18n.locale_lang_hints("en")["chars"] == []
+
+
+def test_locale_lexicon_unknown_locale_falls_back_to_default():
+    # An unknown tag resolves to the default locale (manifest-driven), matching
+    # the rest of content_i18n.
+    assert content_i18n.locale_lexicon("fr") == content_i18n.locale_lexicon("en")

@@ -55,6 +55,44 @@ class ProviderRateLimiter:
             self._day = today
             self._day_used = 0
 
+    def has_capacity(self) -> bool:
+        """Peek whether one more request fits, without consuming a slot.
+
+        Used by the chain to decide if a provider is worth trying before making
+        the call; the actual usage is recorded afterwards with :meth:`record`
+        (v0.5 follow-up A2).
+        """
+        if not self.enabled:
+            return True
+
+        now = self._monotonic()
+        self._prune(now)
+        self._roll_day()
+
+        if self._rpm > 0 and len(self._window) >= self._rpm:
+            return False
+        return not (self._rpd > 0 and self._day_used >= self._rpd)
+
+    def record(self, count: int = 1) -> None:
+        """Record ``count`` real upstream requests without gating.
+
+        A single chain call may try several models inside one provider (each is
+        a real request against the provider quota). The chain peeks with
+        :meth:`has_capacity`, then records the actual number of requests the
+        provider made, so the local meter matches the provider's own count
+        (v0.5 follow-up A2).
+        """
+        if count <= 0:
+            return
+
+        now = self._monotonic()
+        self._prune(now)
+        self._roll_day()
+        for _ in range(count):
+            self._window.append(now)
+        self._day_used += count
+        self._total_used += count
+
     def try_acquire(self) -> bool:
         """Consume one slot; return False when any active limit is reached."""
         if not self.enabled:

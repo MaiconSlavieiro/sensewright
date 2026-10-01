@@ -90,6 +90,42 @@ def _name_of(value: Any) -> str:
         return ""
 
 
+def _localized_text(value: Any) -> str:
+    """Best-effort localized string from a ``LocalizedString`` or plain value.
+
+    Tries the display-name/localize accessors first (v0.4 P4c); rejects a
+    numeric/hash-like result so a translation hash never reaches the wire.
+    Returns ``""`` when nothing readable is available.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value if not value.isdigit() else ""
+    for attr in ("get_display_name", "localize", "localized_name"):
+        accessor = _safe_getattr(value, attr, None)
+        text = _safe_call(accessor) if callable(accessor) else accessor
+        if isinstance(text, str) and text and not text.isdigit():
+            return text
+    for attr in ("__name__", "name"):
+        name = _safe_getattr(value, attr, None)
+        if isinstance(name, str) and name:
+            return name
+    return ""
+
+
+def _interaction_label_of(affordance) -> str:
+    """Localized pie-menu label of an affordance/interaction, or ''.
+
+    v0.5 R4 live fix: the raw tuning name of a pushed social affordance can be a
+    generic base (``sim_Chat``) while the *pie item* the player chose is specific
+    ("Contar piada"). The sidecar classifies on this localized label first, so a
+    joke reads as funny instead of generic small talk.
+    """
+    if affordance is None:
+        return ""
+    return _localized_text(_safe_getattr(affordance, "display_name", None))
+
+
 def _first_attr(values, names):
     """Return the first non-None attribute found in any of the given values."""
     for value in values:
@@ -102,6 +138,9 @@ def _first_attr(values, names):
     return None
 
 
+_LAST_LANG_LOGGED = {"value": ""}
+
+
 def _current_lang() -> str:
     """Current UI language for outgoing events (retries game detection)."""
     try:
@@ -111,6 +150,14 @@ def _current_lang() -> str:
     try:
         lang = i18n.current_locale()
         if lang:
+            if lang != _LAST_LANG_LOGGED["value"]:
+                _LAST_LANG_LOGGED["value"] = lang
+                try:
+                    validation_log(
+                        "locale: {} ({})".format(lang, i18n.detection_report())
+                    )
+                except Exception:
+                    pass
             return lang
     except Exception:
         pass
@@ -644,21 +691,102 @@ def _location_string_of(sim_info) -> str:
     return "" if zone_id is None else str(zone_id)
 
 
-def _current_interaction_of(sim_info) -> str:
-    """Best-effort name of the Sim's current interaction, or ''."""
+def _queued_suffix(sim: Dict[str, Any]) -> str:
+    """Compact ``" (+name->target, ...)"`` suffix of a Sim's queued interactions."""
+    entries = sim.get("queued_interactions") or []
+    parts = []
+    for entry in entries[:3]:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or "?"
+        parts.append("{}->{}".format(name, entry.get("target_sim_id")))
+    return (" (+" + ",".join(parts) + ")") if parts else ""
+
+
+def _room_id_of(sim_info) -> Optional[int]:
+    """The id of the room/block a Sim is in, or None when unknown (v0.4 P6).
+
+    Delegates to ``sim_context._get_room_id`` (S4CL first, native
+    ``build_buy.get_block_id`` fallback). ``0`` means outside.
+    """
+    try:
+        return sim_context._get_room_id(sim_info)
+    except Exception as exc:
+        log_exception("state_collector._room_id_of", exc)
+        return None
+
+
+def _interaction_object_of(sim_info):
+    """The Sim's current interaction object, or None (best-effort)."""
     sim_instance = _get_sim_instance_of(sim_info)
     if sim_instance is None:
-        return ""
+        return None
     queue = _safe_getattr(sim_instance, "queue", None)
     if queue is None:
-        return ""
+        return None
     for attr in ("get_current_interaction", "current_interaction"):
         value = _safe_getattr(queue, attr, None)
         if value is None:
             continue
         result = _safe_call(value) if callable(value) else value
         if result is not None:
-            return _name_of(result)
+            return result
+    return None
+
+
+def _current_interaction_of(sim_info) -> str:
+    """Best-effort name of the Sim's current interaction, or ''."""
+    current = _interaction_object_of(sim_info)
+    if current is None:
+        return ""
+    return _name_of(current)
+
+
+def _current_interaction_text_of(sim_info) -> str:
+    """Localized pie-menu display name of the current interaction, or ''.
+
+    v0.4 P4c: kept separate from the raw ``current_interaction`` because the
+    sidecar classifies on the stable raw name but feeds the localized text to
+    the LLM. Falls back to the raw name when the display name is unavailable.
+    """
+    current = _interaction_object_of(sim_info)
+    if current is None:
+        return ""
+    text = _localized_text(_safe_getattr(current, "display_name", None))
+    return text or _name_of(current)
+
+
+def _current_object_of(sim_info) -> str:
+    """Localized label of the object the Sim is currently using, or ''.
+
+    v0.5 R4: resolves ``current.target`` first (when it is an object, not a Sim)
+    and falls back to ``current.aop.target``. The localized text feeds the
+    sidecar's intimate dialogue templates (``{object}``) so a line matches the
+    bed/bathtub/shower. A Sim target is rejected (it is a conversation, handled
+    by ``interaction_target_sim_id``).
+    """
+    current = _interaction_object_of(sim_info)
+    if current is None:
+        return ""
+    candidates = [
+        _safe_getattr(current, "target", None),
+        _safe_getattr(_safe_getattr(current, "aop", None), "target", None),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        if isinstance(candidate, tuple) and candidate:
+            candidate = candidate[0]
+        # A Sim target (has sim_info/full_name) is a conversation, not an object.
+        if _safe_getattr(candidate, "sim_info", None) is not None:
+            continue
+        if _safe_getattr(candidate, "full_name", None) is not None:
+            continue
+        label = _localized_text(_safe_getattr(candidate, "display_name", None))
+        if not label:
+            label = _name_of(candidate)
+        if label:
+            return label
     return ""
 
 
@@ -693,23 +821,49 @@ def _interaction_target_id_of(sim_info) -> Optional[int]:
     other current interaction returns None. This is the wire signal the sidecar
     uses to allow sim<->sim dialogue only during a real native conversation.
     """
-    sim_instance = _get_sim_instance_of(sim_info)
-    if sim_instance is None:
-        return None
-    queue = _safe_getattr(sim_instance, "queue", None)
-    if queue is None:
-        return None
-    current = None
-    for attr in ("get_current_interaction", "current_interaction"):
-        value = _safe_getattr(queue, attr, None)
-        if value is None:
-            continue
-        current = _safe_call(value) if callable(value) else value
-        if current is not None:
-            break
+    current = _interaction_object_of(sim_info)
     if current is None:
         return None
     return _sim_id_of_target(_safe_getattr(current, "target", None))
+
+
+def _queued_interactions_of(sim_info, limit: int = 6) -> List[Dict[str, Any]]:
+    """The Sim's queued (future) interactions, with their target Sim ids.
+
+    The current/running interaction (``_interaction_object_of``) is skipped so
+    this exposes only what comes *next* in the queue. Each entry is
+    ``{"name": <raw interaction name>, "target_sim_id": <id|None>}``. The sidecar
+    uses the targets to keep a conversation session (and its dialogue) open when
+    the next queued interaction continues with the same Sim, instead of emitting
+    a premature "goodbye" (v0.4 P6).
+    """
+    sim_instance = _get_sim_instance_of(sim_info)
+    if sim_instance is None:
+        return []
+    queue = _safe_getattr(sim_instance, "queue", None)
+    if queue is None:
+        return []
+    raw = _safe_getattr(queue, "queue", None)
+    if raw is None:
+        return []
+    try:
+        items = list(raw)
+    except Exception:
+        return []
+
+    current = _interaction_object_of(sim_info)
+    out: List[Dict[str, Any]] = []
+    for interaction in items:
+        if interaction is None or interaction is current:
+            continue
+        name = _name_of(interaction)
+        target_sim_id = _sim_id_of_target(_safe_getattr(interaction, "target", None))
+        if not name and target_sim_id is None:
+            continue
+        out.append({"name": name, "target_sim_id": target_sim_id})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _zone_time_of_day() -> str:
@@ -804,8 +958,12 @@ def _autonomy_sim_state(sim_info, player_household_id=None) -> Dict[str, Any]:
         "mood": mood,
         "needs": needs,
         "location": _location_string_of(sim_info),
+        "room_id": _room_id_of(sim_info),
         "current_interaction": _current_interaction_of(sim_info),
+        "current_interaction_text": _current_interaction_text_of(sim_info),
+        "current_object": _current_object_of(sim_info),
         "interaction_target_sim_id": _interaction_target_id_of(sim_info),
+        "queued_interactions": _queued_interactions_of(sim_info),
         "sleeping": _is_sleeping(_buff_names_of(sim_info)),
         "is_player": _is_player_of(sim_info, player_household_id),
         "autonomy": DEFAULT_AUTONOMY,
@@ -866,6 +1024,36 @@ def send_autonomy_tick(sim: Optional[Dict[str, Any]] = None):
                 len(sims), zone.get("zone_id"), zone.get("lot_type")
             )
         )
+        # v0.4 P4/P6 diagnostic: show which Sims the pulse sees in a social
+        # interaction (the seed for a conversation session), their room id and
+        # the queued (next) interactions, so same-room gating + continuation can
+        # be validated from the logs.
+        try:
+            talking = [
+                "{}:room={}:{}->{}{}".format(
+                    s.get("sim_id"),
+                    s.get("room_id"),
+                    s.get("current_interaction") or "?",
+                    s.get("interaction_target_sim_id"),
+                    _queued_suffix(s),
+                )
+                for s in sims
+                if s.get("interaction_target_sim_id") or s.get("queued_interactions")
+            ]
+            if talking:
+                validation_log(
+                    "interactions: {} sim(s) social/queued".format(len(talking))
+                )
+                debug_log("[Sensewright] interactions: " + ", ".join(talking))
+            rooms = [
+                "{}:{}".format(s.get("sim_id"), s.get("room_id"))
+                for s in sims
+                if s.get("room_id") is not None
+            ]
+            if rooms:
+                validation_log("rooms: " + ", ".join(rooms))
+        except Exception as exc:
+            log_exception("state_collector.send_autonomy_tick(interactions)", exc)
         result = http_client.autonomy_tick(sim, zone, sims, _current_lang())
         try:
             social = result.get("social") if isinstance(result, dict) else None
@@ -1001,11 +1189,28 @@ def pull_and_execute_directives(sim: Optional[Dict[str, Any]] = None):
     for intent in intents:
         if not isinstance(intent, dict):
             continue
+        params = intent.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        # v0.4 P1/P3: the sidecar decides what may surface (cadence + hearing
+        # radius). An intent without the flag is legacy and always surfaces.
+        surfaced = bool(params.get("surfaced", True))
+        kind = str(intent.get("kind") or "")
+        # v0.4 P4b: a narrator summary of a closed conversation (no game action).
+        if kind == "notify":
+            narration = intent.get("narration")
+            if narration and surfaced:
+                _show_autonomy_text(
+                    "notify.conversation.summary",
+                    narration,
+                    _sim_info_by_id(intent.get("sim_id")),
+                )
+            continue
         narration = intent.get("narration")
         if narration:
             _show_autonomy_text("notify.autonomy.directive", narration)
         thought = intent.get("thought")
-        if thought:
+        if thought and surfaced:
             _show_autonomy_text("notify.autonomy.thought", thought)
         try:
             result = tool_executor.execute_intent(intent)
@@ -1030,7 +1235,7 @@ def pull_and_execute_directives(sim: Optional[Dict[str, Any]] = None):
         # to the speaking Sim (name + native owner portrait).
         if isinstance(result, dict):
             text = result.get("text")
-            if isinstance(text, str) and text.strip():
+            if isinstance(text, str) and text.strip() and surfaced:
                 _show_autonomy_text(
                     "notify.social.speech", text,
                     _sim_info_by_id(intent.get("sim_id")),
@@ -1523,6 +1728,34 @@ class StateCollector:
             log_exception("state_collector.notify_player_activity", exc)
             return None
 
+    def notify_player_interaction(self, sim: Dict[str, Any], interaction: str,
+                                  target_sim_id: int,
+                                  interaction_text: str = "") -> Optional[Dict[str, Any]]:
+        """Tell the sidecar the player started a social interaction (v0.4 P4).
+
+        This is the reliable conversation seed: the pulse often does not carry
+        the interaction target, but the player-activity hook sees it directly.
+        ``interaction`` is the raw tuning name (may be a generic base like
+        ``sim_Chat``); ``interaction_text`` is the localized pie label ("Contar
+        piada"), which the sidecar classifies more specifically (v0.5 R4).
+        """
+        content = {"interaction": interaction, "target_sim_id": int(target_sim_id)}
+        if interaction_text:
+            content["interaction_text"] = interaction_text
+        try:
+            return http_client.send_event(
+                sim,
+                "player_interaction",
+                content,
+                importance=1.0,
+                lang=_current_lang(),
+            )
+        except (http_client.SidecarUnreachable, http_client.SidecarError):
+            return None
+        except Exception as exc:
+            log_exception("state_collector.notify_player_interaction", exc)
+            return None
+
     # --- sending ---
 
     def _send(self, event_list: List[Dict[str, Any]]) -> None:
@@ -1985,6 +2218,19 @@ def notify_player_activity(sim: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return get_collector().notify_player_activity(sim)
     except Exception as exc:
         log_exception("state_collector.notify_player_activity", exc)
+        return None
+
+
+def notify_player_interaction(sim: Dict[str, Any], interaction: str,
+                              target_sim_id: int,
+                              interaction_text: str = "") -> Optional[Dict[str, Any]]:
+    """Best-effort social-interaction seed notification. Never raises."""
+    try:
+        return get_collector().notify_player_interaction(
+            sim, interaction, target_sim_id, interaction_text
+        )
+    except Exception as exc:
+        log_exception("state_collector.notify_player_interaction", exc)
         return None
 
 

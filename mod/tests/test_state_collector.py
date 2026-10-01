@@ -526,3 +526,88 @@ def test_no_print_statements_in_state_collector():
     with open(path, "r", encoding="utf-8") as handle:
         source = handle.read()
     assert "print(" not in source
+
+
+# --- v0.4 P6: room id + queued interactions -------------------------------
+
+class _FakeTarget(object):
+    def __init__(self, sim_id, full_name="Bob"):
+        self.id = sim_id
+        self.full_name = full_name
+
+
+class _FakeInteraction(object):
+    def __init__(self, name, target=None):
+        self.name = name
+        self.target = target
+
+
+class _FakeQueue(object):
+    def __init__(self, items, current=None):
+        self.queue = list(items)
+        self.current_interaction = current
+
+
+class _FakeInstance(object):
+    def __init__(self, queue):
+        self.queue = queue
+
+
+def test_room_id_of_delegates_to_sim_context(monkeypatch):
+    import sensewright_mod.sim_context as sim_context
+
+    monkeypatch.setattr(sim_context, "_get_room_id", lambda sim_info: 4)
+    assert state_collector._room_id_of(object()) == 4
+
+
+def test_room_id_of_swallows_errors(monkeypatch):
+    import sensewright_mod.sim_context as sim_context
+
+    def boom(sim_info):
+        raise RuntimeError("no game")
+
+    monkeypatch.setattr(sim_context, "_get_room_id", boom)
+    assert state_collector._room_id_of(object()) is None
+
+
+def test_queued_interactions_of_reports_names_and_targets(monkeypatch):
+    target = _FakeTarget(22)
+    running = _FakeInteraction("social_Chat", target)
+    queued_social = _FakeInteraction("social_Joke", target)
+    queued_object = _FakeInteraction("object_Read")
+    queue = _FakeQueue([running, queued_social, queued_object], current=running)
+
+    monkeypatch.setattr(state_collector, "_get_sim_instance_of",
+                        lambda sim_info: _FakeInstance(queue))
+
+    out = state_collector._queued_interactions_of(object())
+    assert out == [
+        {"name": "social_Joke", "target_sim_id": 22},
+        {"name": "object_Read", "target_sim_id": None},
+    ]
+
+
+def test_queued_interactions_of_handles_missing_queue(monkeypatch):
+    monkeypatch.setattr(state_collector, "_get_sim_instance_of",
+                        lambda sim_info: None)
+    assert state_collector._queued_interactions_of(object()) == []
+
+
+def test_queued_interactions_of_respects_limit(monkeypatch):
+    target = _FakeTarget(1)
+    items = [_FakeInteraction("i{}".format(i), target) for i in range(10)]
+    queue = _FakeQueue(items, current=None)
+    monkeypatch.setattr(state_collector, "_get_sim_instance_of",
+                        lambda sim_info: _FakeInstance(queue))
+    assert len(state_collector._queued_interactions_of(object(), limit=3)) == 3
+
+
+def test_queued_suffix_formats_entries():
+    sim = {
+        "queued_interactions": [
+            {"name": "social_Chat", "target_sim_id": 1},
+            {"name": "object_Read", "target_sim_id": None},
+        ]
+    }
+    assert state_collector._queued_suffix(sim) == " (+social_Chat->1,object_Read->None)"
+    assert state_collector._queued_suffix({}) == ""

@@ -375,7 +375,7 @@ class GodOrchestrator:
                 },
                 {"role": "user", "content": directive.type},
             ]
-            response = await registry.complete(messages, lang=lang, max_tokens=80)
+            response = await registry.complete(messages, lang=lang, max_tokens=80, purpose="summary")
             return (getattr(response, "text", "") or "").strip()
         except Exception as exc:
             logger.debug(f"God narration failed: {exc}")

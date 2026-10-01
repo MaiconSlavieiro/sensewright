@@ -23,6 +23,7 @@ from typing import Any
 
 from .. import content_i18n
 from ..config import PersonalityConfig
+from ..llm import langguard
 from ..schemas import normalize_lang
 
 logger = logging.getLogger(__name__)
@@ -722,7 +723,7 @@ def _build_absorption_messages(profile: dict, events: list[dict], lang: str) -> 
         f"Existing psyche: {json.dumps(existing, ensure_ascii=False)}\n"
         f"Salient events:\n{summary}\n\n"
         "Instructions:\n"
-        f"- Write only in {content_i18n.language_name(lang)}.\n"
+        f"- {langguard.language_directive(lang)}\n"
         "- Write ONE short first-person life-story line in past tense.\n"
         "- Derive at most 2 traumas and 2 baggage beliefs from the events.\n"
         "- A trauma belief is a verb phrase, e.g. \"brace yourself whenever evil sims show up\".\n"
@@ -794,6 +795,7 @@ async def absorb_events(
                     lang=normalize_lang(lang),
                     temperature=0.6,
                     max_tokens=700,
+                    purpose="sleep",
                 )
                 raw_text = getattr(response, "text", "")
                 parsed = _extract_json_object(raw_text)

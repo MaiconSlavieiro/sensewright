@@ -21,10 +21,13 @@ from typing import Any
 
 from ..god.budgeter import BackgroundBudgeter
 from .context_forge import PairContext
+from .conversations import ConversationManager
 from .initiative import build_impulse
 from .intents import IntentBus, intent_from_directive
+from .presence import PresencePolicy
 from .seats import SeatManager
 from .social import SocialLayer
+from .speech import SpeechPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +111,17 @@ class Agency:
         self._intents = IntentBus()
         self.seats = SeatManager(self._initial_seats(settings), clock=self._clock)
         self.social = SocialLayer(settings, registry=registry, rng=self._rng, clock=self._clock)
+        # v0.4: speech/presence policies + conversation sessions.
+        self.speech = SpeechPolicy(settings, clock=self._clock, rng=self._rng)
+        self.presence = PresencePolicy(settings)
+        self.conversations = ConversationManager(
+            settings, registry=registry, clock=self._clock
+        )
         self._context_forge: Any = None
         self._world: dict[tuple[str, str], dict[str, Any]] = {}
+        # v0.4 P4 / v0.5 R4: (player, save, sim_id) ->
+        # (target_id, interaction_raw, interaction_text, ts).
+        self._interaction_seeds: dict[tuple[str, str, int], tuple[int, str, str, float]] = {}
         self._sleeping: set[tuple[str, str, int]] = set()
         self._last_impulse: dict[tuple[tuple[str, str], int], float] = {}
         self._rr: dict[tuple[str, str], int] = {}
@@ -144,12 +156,20 @@ class Agency:
             0.0, min(1.0, float(config.player_sim_impulse_frequency))
         )
         self.reactions_enabled = bool(config.reactions_enabled)
+        # v0.5 R3: shared budget reserve for social conversation turns.
+        self.social_reserve_fraction = max(
+            0.0, min(0.9, float(getattr(config, "social_reserve_fraction", 0.4) or 0.0))
+        )
         self.sleep_consolidation = bool(settings.agents.personality.sleep_consolidation)
         self.default_autonomy = settings.agents.autonomy_default
 
         self.seats.configure(self._initial_seats(settings))
         self.social.configure(settings)
         self.social.set_registry(self._registry)
+        self.speech.configure(settings)
+        self.presence.configure(settings)
+        self.conversations.configure(settings)
+        self.conversations.set_registry(self._registry)
 
         if not self._budgeter_injected:
             self._rebuild_budgeter()
@@ -176,6 +196,7 @@ class Agency:
         self._budgeter = BackgroundBudgeter(
             per_minute=per_minute,
             daily=0,
+            reserve_fraction=float(getattr(self, "social_reserve_fraction", 0.0) or 0.0),
             monotonic=self._clock,
             wall_clock=self._clock,
         )
@@ -188,6 +209,7 @@ class Agency:
         """
         self._registry = registry
         self.social.set_registry(registry)
+        self.conversations.set_registry(registry)
         if not self._budgeter_injected:
             self._rebuild_budgeter()
 
@@ -303,9 +325,17 @@ class Agency:
 
         zone = _dump(getattr(req, "zone", None))
         sims = [_dump(sim) for sim in (getattr(req, "sims", None) or [])]
+        # v0.4 P3: the player's household id grounds presence tiers.
+        player_household_id = None
+        for sim in sims:
+            if sim.get("is_player") and sim.get("household_id") is not None:
+                player_household_id = sim.get("household_id")
+                break
         self._world[key] = {
             "zone": zone,
             "sims": {str(sim.get("sim_id", 0)): sim for sim in sims},
+            "player_household_id": player_household_id,
+            "active_sim_id": getattr(sim_ref, "sim_id", None),
             "updated_at": now,
             "lang": lang,
         }
@@ -332,13 +362,13 @@ class Agency:
 
         scheduled = self._schedule_idle(player_id, save_id, sims, lang)
 
-        # v0.3 R5: let two seated agent Sims exchange a short dialogue.
-        dialogues, social_intents = await self._plan_social(
+        # v0.3 R5 / v0.4 P4: let two seated agent Sims hold a conversation session.
+        dialogues, social_intents, conversations = await self._plan_social(
             player_id, save_id, sims, lang
         )
 
         logger.info(
-            "pulse save=%s/%s sims=%d sleeping=%s scheduled=%d seats=%s social=%d",
+            "pulse save=%s/%s sims=%d sleeping=%s scheduled=%d seats=%s social=%d conversations=%d",
             player_id,
             save_id,
             len(sims),
@@ -346,6 +376,7 @@ class Agency:
             scheduled,
             seat_report,
             len(dialogues),
+            len(conversations),
         )
         return {
             "ok": True,
@@ -354,6 +385,7 @@ class Agency:
             "seats": seat_report,
             "social": [dialogue.to_dict() for dialogue in dialogues],
             "social_intents": social_intents,
+            "conversations": conversations,
         }
 
     async def _plan_social(
@@ -362,37 +394,205 @@ class Agency:
         save_id: str,
         sims: list[dict[str, Any]],
         lang: str,
-    ) -> tuple[list[Any], list[dict[str, Any]]]:
-        """Plan sim<->sim dialogues; never raises (empty result on error)."""
+    ) -> tuple[list[Any], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Plan sim<->sim conversation sessions; never raises.
+
+        Returns ``(dialogues, intents, conversation_summaries)``. The sessions
+        are tracked by ``self.conversations``; a session that reaches
+        ``max_turns`` or whose pair stops conversing closes with a summary.
+        """
         if not getattr(self.social, "enabled", True):
-            return [], []
+            return [], [], []
         try:
             seated_ids = [
                 int(seat["sim_id"]) for seat in self.seats.seats_for(player_id, save_id)
             ]
-            # v0.3 R5 fix: only pair Sims who are actually in a native social
-            # conversation with each other (and close enough), so agents never
-            # talk telepathically across the lot.
-            conversing = self.social.filter_conversing(sims)
-            if len(conversing) < 2:
-                return [], []
-            forge = PairContext(self._context_forge)
-            dialogues = await self.social.plan(
-                player_id=player_id,
-                save_id=save_id,
-                sims=conversing,
-                seated_ids=seated_ids,
-                lang=lang,
-                forge=forge,
-            )
+            # v0.4 P4 live fix: seed conversations from the pairs *actually*
+            # interacting (A targets B), not only mutually-targeting pairs — a
+            # player-initiated social is usually unilateral in the pulse.
+            candidates = self.social.candidate_pairs(sims)
+            # v0.4 P4: merge player-interaction seeds (reliable target from the
+            # player hook) with the pairs the pulse happens to show.
+            by_id: dict[int, dict[str, Any]] = {}
+            for sim in sims:
+                try:
+                    by_id[int(sim.get("sim_id"))] = sim
+                except (TypeError, ValueError):
+                    continue
+            existing = {
+                frozenset({int(x.get("sim_id")), int(y.get("sim_id"))})
+                for x, y in candidates
+            }
+            for seed_sim, seed_target, seed_text, seed_label in self.interaction_seeds(
+                player_id, save_id
+            ):
+                a_sim, b_sim = by_id.get(seed_sim), by_id.get(seed_target)
+                key = frozenset({seed_sim, seed_target})
+                if a_sim is None or b_sim is None or key in existing:
+                    continue
+                # v0.5 R4: a sleeping Sim is never paired, even via a player seed.
+                if a_sim.get("sleeping") or b_sim.get("sleeping"):
+                    logger.info(
+                        "social skip reason=sleeping a=%s b=%s (seed)", seed_sim, seed_target
+                    )
+                    continue
+                seeded = dict(a_sim)
+                if seed_text or seed_label:
+                    # The player's specific interaction must drive classification
+                    # too (not only the label), so a joke/flirt dialogue matches
+                    # even when the pulse's raw current_interaction is a generic
+                    # base like ``sim_Chat`` (v0.5 R4 live fix).
+                    seeded["current_interaction"] = seed_text or seed_label
+                    seeded["current_interaction_text"] = seed_label or seed_text
+                candidates.insert(0, (seeded, b_sim))
+                existing.add(key)
+            active_pairs = {
+                frozenset({int(a.get("sim_id")), int(b.get("sim_id"))})
+                for a, b in candidates
+            }
+
+            dialogues: list[Any] = []
+            summaries: list[dict[str, Any]] = []
+            if self.conversations.enabled:
+                forge = PairContext(self._context_forge)
+                started = 0
+                for a, b in candidates:
+                    a_id = int(a.get("sim_id"))
+                    b_id = int(b.get("sim_id"))
+                    key = frozenset({a_id, b_id})
+                    active = self.conversations.is_active(a_id, b_id)
+                    signature = self._pair_signature(a, b)
+                    # A new session waits for the pair cooldown; an open session
+                    # continues only when the interaction/queue changed or the
+                    # turn interval elapsed (v0.5 R3) — never once per pulse.
+                    if not active and (
+                        started >= self.social.max_pairs or not self.social.pair_ready(key)
+                    ):
+                        continue
+                    if active:
+                        allowed, reason = self.conversations.should_turn(
+                            a_id, b_id, signature
+                        )
+                        if not allowed:
+                            logger.info(
+                                "social skip reason=%s a=%s b=%s", reason, a_id, b_id
+                            )
+                            continue
+
+                    # v0.5 R3: social draws on the shared budget *with* its
+                    # reserve; without budget it still renders the template so
+                    # the interaction never dies.
+                    budget_ok = True
+                    if self._budgeter is not None:
+                        budget_ok = self._budgeter.try_acquire(allow_reserve=True)
+                    try:
+                        dlg = await self.social._dialogue_for_pair(
+                            a,
+                            b,
+                            player_id=player_id,
+                            save_id=save_id,
+                            lang=lang,
+                            forge=forge,
+                            use_llm=budget_ok,
+                            variant=self.conversations.turns_for(a_id, b_id),
+                        )
+                    except Exception as exc:
+                        logger.warning("social dialogue failed: %s", exc)
+                        if self._budgeter is not None and budget_ok:
+                            self._budgeter.refund()
+                        continue
+                    if dlg is None:
+                        if self._budgeter is not None and budget_ok:
+                            self._budgeter.refund()
+                        continue
+                    # Only a real LLM call consumes the slot.
+                    if self._budgeter is not None and budget_ok and dlg.source != "llm":
+                        self._budgeter.refund()
+                    if not active:
+                        self.social.note_pair(key)
+                        started += 1
+                    self.consume_interaction_seed(player_id, save_id, a_id, b_id)
+                    interaction_text = str(
+                        a.get("current_interaction_text")
+                        or b.get("current_interaction_text")
+                        or ""
+                    ).strip()
+                    closed = self.conversations.record(
+                        dlg,
+                        a_name=str(a.get("full_name") or ""),
+                        b_name=str(b.get("full_name") or ""),
+                        interaction_text=interaction_text,
+                        signature=signature,
+                    )
+                    dialogues.append(dlg)
+                    if closed is not None:
+                        summaries.append(
+                            await self._summarize_session(closed, lang=lang, leaving=False)
+                        )
+                # Close sessions whose pair stopped conversing (a "goodbye").
+                for closed in self.conversations.sweep(active_pairs):
+                    summaries.append(
+                        await self._summarize_session(closed, lang=lang, leaving=True)
+                    )
+            else:
+                # Legacy v0.3 behavior: one isolated exchange per pair per pulse.
+                conversing = self.social.filter_conversing(sims)
+                if len(conversing) >= 2:
+                    forge = PairContext(self._context_forge)
+                    dialogues = await self.social.plan(
+                        player_id=player_id,
+                        save_id=save_id,
+                        sims=conversing,
+                        seated_ids=seated_ids,
+                        lang=lang,
+                        forge=forge,
+                    )
         except Exception as exc:
             logger.warning("social plan failed: %s", exc)
-            return [], []
+            return [], [], []
 
         intents: list[dict[str, Any]] = []
         for dialogue in dialogues:
             intents.extend(dialogue.intents())
-        return dialogues, intents
+        return dialogues, intents, summaries
+
+    @staticmethod
+    def _pair_signature(a: dict[str, Any], b: dict[str, Any]) -> str:
+        """A stable signature of a pair's current interaction + queued sequence.
+
+        Used by turn pacing (v0.5 R3): a new dialogue turn is produced only when
+        this changes (or the turn interval elapses), so a static conversation
+        does not repeat a line once per zone pulse.
+        """
+        parts: list[str] = []
+        for sim in (a, b):
+            interaction = str(sim.get("current_interaction") or "").strip()
+            queued: list[str] = []
+            for entry in sim.get("queued_interactions") or []:
+                if isinstance(entry, dict) and entry.get("name"):
+                    queued.append(str(entry["name"]))
+            parts.append(interaction + "|" + ",".join(queued))
+        return " // ".join(parts)
+
+    async def _summarize_session(
+        self, session: Any, *, lang: str, leaving: bool
+    ) -> dict[str, Any]:
+        """Build the summary event dict for a closed session (never raises)."""
+        try:
+            text = await self.conversations.summarize(session, lang=lang, leaving=leaving)
+        except Exception as exc:
+            logger.warning("conversation summary failed: %s", exc)
+            text = self.conversations.summary_line(session, lang=lang, leaving=leaving)
+        return {
+            "a": session.a,
+            "b": session.b,
+            "topic": session.topic,
+            "tone": session.tone,
+            "text": text,
+            "leaving": bool(leaving),
+            # v0.4 P4: a proposal the graph may apply when the God allows it.
+            "relationship_shift": _relationship_delta(session),
+        }
 
     def _schedule_idle(
         self,
@@ -402,18 +602,40 @@ class Agency:
         lang: str,
     ) -> int:
         max_n = self.max_impulses_per_tick
+        # v0.5 R3: backpressure — idle impulses scale with chain health so a
+        # cool/rate-limited free tier is not hammered. Social keeps its reserve.
+        if self._registry is not None and max_n > 0:
+            try:
+                factor = self._registry.chain.backpressure_factor()
+            except Exception:
+                factor = 1.0
+            if factor <= 0.0:
+                logger.info("idle backpressure: no warm provider, skipping idle impulses")
+                return 0
+            if factor < 1.0 and max_n > 1:
+                max_n = max(1, round(max_n * factor))
         if max_n <= 0:
             return 0
+        key = (player_id, save_id)
+        player_household_id = self._world.get(key, {}).get("player_household_id")
         eligible = [
             sim
             for sim in sims
-            if str(sim.get("autonomy", "off")) != "off" and not sim.get("sleeping")
+            if str(sim.get("autonomy", "off")) != "off"
+            and not sim.get("sleeping")
+            # v0.4 P3: only `full` presence Sims (the player's household by
+            # default) get idle impulses; visitors are reactive. When the pulse
+            # does not identify a player household, fall back to the legacy
+            # behavior (cannot classify visitors without a household).
+            and (
+                player_household_id is None
+                or self.presence.allows_idle(sim, player_household_id=player_household_id)
+            )
         ]
         if not eligible:
             return 0
         eligible.sort(key=lambda item: int(item.get("sim_id", 0)))
 
-        key = (player_id, save_id)
         now = self._clock()
         cooldown = self.cooldown_seconds
         start = self._rr.get(key, 0) % len(eligible)
@@ -596,6 +818,64 @@ class Agency:
         state = sims.get(str(sim_id)) or {}
         return bool(state.get("is_player"))
 
+    def note_interaction_seed(
+        self,
+        player_id: str,
+        save_id: str,
+        sim_id: int,
+        target_id: int,
+        *,
+        interaction: str = "",
+        interaction_text: str = "",
+    ) -> None:
+        """Remember that the player started a social interaction (v0.4 P4).
+
+        The pulse often lacks the interaction target; the mod's player hook sees
+        it directly and forwards it as a ``player_interaction`` event. The seed
+        lets the next pulse open/continue a conversation session for the pair.
+        ``interaction`` is the raw tuning name (may be a generic base like
+        ``sim_Chat``); ``interaction_text`` is the localized label ("Contar
+        piada"), which classifies more specifically (v0.5 R4 live fix).
+        """
+        try:
+            sim = int(sim_id)
+            target = int(target_id)
+        except (TypeError, ValueError):
+            return
+        if sim == target or not sim:
+            return
+        self._interaction_seeds[(player_id, save_id, sim)] = (
+            target,
+            str(interaction or ""),
+            str(interaction_text or ""),
+            self._clock(),
+        )
+
+    def interaction_seeds(
+        self, player_id: str, save_id: str, *, ttl: float = 180.0
+    ) -> list[tuple[int, int, str, str]]:
+        """Non-expired ``(sim_id, target_id, interaction, interaction_text)`` seeds."""
+        now = self._clock()
+        out: list[tuple[int, int, str, str]] = []
+        for key, (target, interaction, text, ts) in list(self._interaction_seeds.items()):
+            if key[0] != player_id or key[1] != save_id:
+                continue
+            if now - ts > ttl:
+                self._interaction_seeds.pop(key, None)
+                continue
+            out.append((key[2], target, interaction, text))
+        return out
+
+    def consume_interaction_seed(
+        self, player_id: str, save_id: str, sim_id: int, target_id: int
+    ) -> None:
+        """Drop a seed once its session has started (either direction)."""
+        for sid in (sim_id, target_id):
+            key = (player_id, save_id, int(sid))
+            seed = self._interaction_seeds.get(key)
+            if seed is not None and int(seed[0]) in (int(sim_id), int(target_id)):
+                self._interaction_seeds.pop(key, None)
+
     def clear(self, player_id: str | None = None, save_id: str | None = None) -> None:
         """Drop queued/pending state for one save key, or everything."""
         if player_id is None or save_id is None:
@@ -608,6 +888,8 @@ class Agency:
             self._last_impulse.clear()
             self._rr.clear()
             self.social._last_pair_at.clear()
+            self.conversations._sessions.clear()
+            self._interaction_seeds.clear()
             return
 
         key = (player_id, save_id)
@@ -624,6 +906,9 @@ class Agency:
         self._sleeping = {marker for marker in self._sleeping if (marker[0], marker[1]) != key}
         self._last_impulse = {k: v for k, v in self._last_impulse.items() if k[0] != key}
         self._rr.pop(key, None)
+        self._interaction_seeds = {
+            k: v for k, v in self._interaction_seeds.items() if (k[0], k[1]) != key
+        }
         # Pair cooldowns are keyed by Sim ids only (no save context), so a
         # per-save clear leaves them alone rather than wiping other saves.
 
@@ -696,6 +981,9 @@ class Agency:
             "sleep_consolidation": self.sleep_consolidation,
             "seats": self.seats.snapshot(),
             "social": self.social.snapshot(),
+            "speech": self.speech.snapshot(),
+            "presence": self.presence.snapshot(),
+            "conversations": self.conversations.snapshot(),
             "world_contexts": len(self._world),
             "processed": self._stats["processed"],
             "failed": self._stats["failed"],
@@ -712,3 +1000,15 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _relationship_delta(session: Any) -> float:
+    """A small relationship nudge proposed by a conversation's tone."""
+    tone = str(getattr(session, "tone", "") or "").lower()
+    if tone in ("tense",):
+        return -0.2
+    if tone in ("flirty", "romantic"):
+        return 0.15
+    if tone in ("funny", "warm", "friendly"):
+        return 0.1
+    return 0.05

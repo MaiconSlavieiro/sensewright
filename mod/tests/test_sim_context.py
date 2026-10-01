@@ -406,6 +406,116 @@ def test_get_aspiration_without_tracker_is_empty():
     assert sim_context._get_aspiration(_NoTracker()) == ""
 
 
+# --- v0.4 P6: room id ("which room is the Sim in?") -----------------------
+
+def test_get_room_id_prefers_s4cl(monkeypatch):
+    class FakeLocUtils(object):
+        @staticmethod
+        def get_current_room_id(sim_info):
+            return 5
+
+    monkeypatch.setattr(integrations, "s4cl_sim_location_utils", lambda: FakeLocUtils())
+
+    class FakeInfo(object):
+        pass
+
+    assert sim_context._get_room_id(FakeInfo()) == 5
+
+
+def test_get_room_id_s4cl_minus_one_falls_back(monkeypatch):
+    class FakeLocUtils(object):
+        @staticmethod
+        def get_current_room_id(sim_info):
+            return -1  # S4CL "room not found"
+
+    monkeypatch.setattr(integrations, "s4cl_sim_location_utils", lambda: FakeLocUtils())
+    monkeypatch.setattr(sim_context, "_get_sim_instance", lambda sim_info: None)
+
+    class FakeInfo(object):
+        pass
+
+    assert sim_context._get_room_id(FakeInfo()) is None
+
+
+def test_get_room_id_native_fallback(monkeypatch):
+    import types
+
+    monkeypatch.setattr(integrations, "s4cl_sim_location_utils", lambda: None)
+
+    class FakePosition(object):
+        x = 1.0
+        y = 2.0
+        z = 0.0
+
+    class FakeSurface(object):
+        secondary_id = 3
+
+    class FakeInstance(object):
+        position = FakePosition()
+        routing_surface = FakeSurface()
+
+    class FakeServices(object):
+        @staticmethod
+        def current_zone_id():
+            return 42
+
+    monkeypatch.setattr(sim_context, "_get_sim_instance", lambda sim_info: FakeInstance())
+    monkeypatch.setattr(sim_context, "_get_services", lambda: FakeServices())
+
+    captured = {}
+    fake_build_buy = types.ModuleType("build_buy")
+
+    def get_block_id(zone_id, position, surface_level):
+        captured["args"] = (zone_id, position, surface_level)
+        return 9
+
+    fake_build_buy.get_block_id = get_block_id
+    monkeypatch.setitem(sys.modules, "build_buy", fake_build_buy)
+
+    class FakeInfo(object):
+        pass
+
+    assert sim_context._get_room_id(FakeInfo()) == 9
+    assert captured["args"][0] == 42
+    assert captured["args"][2] == 3
+
+
+def test_get_location_includes_room_id(monkeypatch):
+    class FakePosition(object):
+        x = 1.0
+        y = 2.0
+        z = 0.0
+
+    class FakeInstance(object):
+        position = FakePosition()
+        zone_id = None
+
+    monkeypatch.setattr(sim_context, "_get_sim_instance", lambda sim_info: FakeInstance())
+    monkeypatch.setattr(sim_context, "_get_room_id", lambda sim_info: 8)
+
+    class FakeInfo(object):
+        pass
+
+    location = sim_context._get_location(FakeInfo())
+    assert location["room_id"] == 8
+    assert location["x"] == 1.0 and location["y"] == 2.0
+
+
+def test_collect_includes_room_id(monkeypatch):
+    class FakeInfo(object):
+        id = 7
+        full_name = "Ana"
+
+    monkeypatch.setattr(
+        sim_context, "_get_location",
+        lambda sim_info: {"x": 1.0, "y": 2.0, "room_id": 4},
+    )
+    monkeypatch.setattr(sim_context, "_get_room_id", lambda sim_info: 4)
+
+    context = sim_context.collect(FakeInfo())
+    assert context["room_id"] == 4
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

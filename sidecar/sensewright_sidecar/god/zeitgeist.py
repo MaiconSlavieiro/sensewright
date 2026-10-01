@@ -210,6 +210,7 @@ async def suggest_zeitgeist(
             lang=target_lang,
             temperature=0.7,
             max_tokens=400,
+            purpose="summary",
         )
         text = _coerce_text(getattr(response, "text", "")).strip()
         if not text:

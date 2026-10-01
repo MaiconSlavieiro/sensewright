@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "purpose": "Multilingual lexical data used by deterministic text heuristics (topic/emotion/name extraction). Data only - no code edits to add languages or words.",
-    "version": "0.1.0"
+    "purpose": "Cross-locale lexical data used by deterministic text heuristics (emotion/name extraction + a shared stopword fallback). Per-locale stopwords/markers live in lexicon.<code>.json next to each locale table. Data only - no code edits to add languages or words.",
+    "version": "0.2.0"
   },
   "stopwords": [
     "about", "after", "again", "against", "being", "could", "did", "does", "doing",
@@ -56,6 +56,22 @@
     "envergonhado": "embarrassment",
     "grateful": "gratitude",
     "grato": "gratitude"
+  },
+  "interaction_tokens": {
+    "intimate": ["woohoo", "make out", "make_out", "makeout", "kiss", "beij", "transar", "amasso", "sex"],
+    "affectionate": ["hug", "cuddle", "affection", "abraç", "abraco", "carinho", "cafuné", "cafune"],
+    "intro": ["get to know", "gettoknow", "introduce", "apresent", "conhec", "prazer"],
+    "flirty": ["flirt", "flert", "romance", "romantic", "paquera", "flerte", "charme", "cantada", "seduz", "namor"],
+    "funny": ["joke", "funny", "comedy", "piada", "engraç", "engrac", "gracejo", "brincadeira", "zoeira"],
+    "mean": ["insult", "mock", "gossip", "ofend", "zomb", "fofoca", "maltrat", "humilh"],
+    "tense": ["argue", "fight", "yell", "anger", "briga", "gritar", "raiva", "discuss"],
+    "friendly": ["chat", "talk", "friendly", "convers", "amig", "bate-papo", "bate papo", "papo"]
+  },
+  "object_tokens": {
+    "hot_tub": ["hot tub", "hot_tub", "hot-tub", "hidromassagem", "jacuzzi", "spa"],
+    "bed": ["bed", "cama", "lit"],
+    "bathtub": ["bathtub", "banheira", "bath"],
+    "shower": ["shower", "chuveiro", "ducha", "douche"]
   },
   "name_exclude": [
     "The", "And", "But", "You", "She", "He", "They", "We", "It", "That", "This",

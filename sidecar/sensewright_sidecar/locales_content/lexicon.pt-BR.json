@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "purpose": "Brazilian Portuguese lexical hints for deterministic heuristics (language detection). Data only. Add a locale by dropping lexicon.<code>.json next to its table and a manifest entry.",
+    "code": "pt-BR"
+  },
+  "stopwords": [
+    "você", "voce", "para", "pra", "muito", "bem", "também", "tambem", "só",
+    "so", "já", "ja", "aqui", "ali", "isso", "isto", "aquilo", "tudo", "nada",
+    "algo", "porque", "então", "entao", "como", "quando", "onde", "quem", "qual",
+    "mas", "uma", "uns", "umas", "dos", "das", "nos", "nas", "pelo", "pela",
+    "nós", "eles", "elas", "meu", "minha", "seu", "sua", "nosso", "nossa",
+    "está", "esta", "estou", "tem", "tenho", "ter", "vai", "vou", "não", "nao",
+    "sim", "obrigado", "obrigada", "que", "com", "por", "em", "um", "de", "da",
+    "do", "eu", "ele", "ela", "a", "o", "os", "as", "e", "é", "eh"
+  ],
+  "markers": [
+    "que", "não", "nao", "você", "voce", "está", "esta", "para", "com", "uma", "isso", "muito"
+  ],
+  "chars": ["ã", "õ", "ç", "á", "é", "í", "ó", "ú", "â", "ê", "ô", "à"]
+}

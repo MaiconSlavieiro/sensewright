@@ -97,7 +97,7 @@ async def test_ingest_census_and_controls(god_settings):
     assert result["households"] == 1
     # v0.3 R2: the census seeds the agent-seat pool.
     assert result["seats"]["used"] == 1
-    assert result["seats"]["seats"] == 12
+    assert result["seats"]["seats"] == 6
 
     controls = graph.god_controls()
     assert controls["ok"] is True
