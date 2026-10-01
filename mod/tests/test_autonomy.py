@@ -116,9 +116,9 @@ def test_sample_zone_shapes(monkeypatch):
     assert len(sims) == 2
     state = sims[0]
     assert set(state.keys()) == {
-        "sim_id", "full_name", "household_id", "mood", "needs", "location",
-        "current_interaction", "sleeping", "is_player", "autonomy",
-        "relationships",
+        "sim_id", "full_name", "household_id", "aspiration", "mood", "needs",
+        "location", "current_interaction", "interaction_target_sim_id",
+        "sleeping", "is_player", "autonomy", "relationships",
     }
     assert state["sim_id"] == 1
     assert state["full_name"] == "Ana"
@@ -129,7 +129,7 @@ def test_sample_zone_shapes(monkeypatch):
     assert state["sleeping"] is True
     assert state["is_player"] is True
     assert state["autonomy"] == state_collector.DEFAULT_AUTONOMY
-    assert state["relationships"] == [{"target_id": 99, "depth": 12.0}]
+    assert state["relationships"] == [{"target_id": 99, "target_name": "X", "depth": 12.0}]
 
     assert sims[1]["sim_id"] == 2
     assert sims[1]["sleeping"] is False
@@ -576,6 +576,77 @@ def test_install_zone_hook_waits_for_active_sim(monkeypatch):
 
     assert calls == []  # no active Sim yet -> keep waiting
     assert Zone.update is not original  # still wrapped for the next tick
+
+
+# --- Interaction target signal (v0.3 R5 anti-telepathy gate) ---
+
+class FakeInteraction(object):
+    def __init__(self, target=None, name="social_Chat"):
+        self.target = target
+        self.name = name
+
+
+class FakeQueue(object):
+    def __init__(self, current=None):
+        self._current = current
+
+    def get_current_interaction(self):
+        return self._current
+
+
+class FakeSimInstance(object):
+    def __init__(self, queue=None):
+        self.queue = queue
+
+
+class FakeSimInfoWithInstance(FakeSimInfo):
+    def __init__(self, *args, **kwargs):
+        instance = kwargs.pop("instance", None)
+        FakeSimInfo.__init__(self, *args, **kwargs)
+        self._instance = instance
+
+    def get_sim_instance(self):
+        return self._instance
+
+
+def test_sim_id_of_target_accepts_sim_info():
+    assert state_collector._sim_id_of_target(FakeSimInfo(42, "Bea")) == 42
+
+
+def test_sim_id_of_target_accepts_sim_instance():
+    target_instance = FakeSimInstance()
+    target_instance.sim_info = FakeSimInfo(42, "Bea")
+    assert state_collector._sim_id_of_target(target_instance) == 42
+
+
+def test_sim_id_of_target_accepts_tuple():
+    assert state_collector._sim_id_of_target((FakeSimInfo(42, "Bea"), None)) == 42
+
+
+def test_sim_id_of_target_rejects_objects_and_none():
+    class FakeObject(object):
+        id = 7
+
+    assert state_collector._sim_id_of_target(FakeObject()) is None
+    assert state_collector._sim_id_of_target(None) is None
+
+
+def test_interaction_target_id_of_reads_current_interaction():
+    interaction = FakeInteraction(target=FakeSimInfo(42, "Bea"))
+    sim_info = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(interaction))
+    )
+    assert state_collector._interaction_target_id_of(sim_info) == 42
+
+
+def test_interaction_target_id_of_none_without_queue_or_target():
+    no_queue = FakeSimInfoWithInstance(1, "Ana", instance=FakeSimInstance(None))
+    assert state_collector._interaction_target_id_of(no_queue) is None
+    object_target = FakeInteraction(target=None)
+    with_object = FakeSimInfoWithInstance(
+        1, "Ana", instance=FakeSimInstance(FakeQueue(object_target))
+    )
+    assert state_collector._interaction_target_id_of(with_object) is None
 
 
 if __name__ == "__main__":

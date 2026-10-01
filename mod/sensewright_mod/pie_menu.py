@@ -24,6 +24,9 @@ TUNING_PANEL = 16907656493241729025
 TUNING_CHAT = 16907656493241729026
 TUNING_CONFIRM = 16907656493241729027
 TUNING_HUD = 16907656493241729028
+TUNING_BACKGROUND = 16907656493241729029
+TUNING_REGEN_BACKGROUND = 16907656493241729030
+TUNING_CONSOLIDATE = 16907656493241729031
 
 # Vanilla tag used to add the panel entry to computers (matches the old snippet).
 _COMPUTER_TAG = "FUNC_COMPUTER"
@@ -124,12 +127,38 @@ class SensewrightHudInteraction(_SensewrightInteraction):
     DISPLAY_KEY = "cmd.pie.hud"
 
 
+class SensewrightBackgroundInteraction(_SensewrightInteraction):
+    """Show the clicked Sim's background (generating it if absent)."""
+
+    ACTION = "background"
+    DISPLAY_KEY = "cmd.pie.background"
+
+
+class SensewrightRegenBackgroundInteraction(_SensewrightInteraction):
+    """Force-regenerate the clicked Sim's background (with confirmation)."""
+
+    ACTION = "regen_background"
+    DISPLAY_KEY = "cmd.pie.regen_background"
+
+
+class SensewrightConsolidateInteraction(_SensewrightInteraction):
+    """Fold the clicked Sim's recent dialogue into one memory."""
+
+    ACTION = "consolidate"
+    DISPLAY_KEY = "cmd.pie.consolidate"
+
+
 _INTERACTIONS = (
     SensewrightPanelInteraction,
     SensewrightChatInteraction,
     SensewrightConfirmInteraction,
     SensewrightHudInteraction,
+    SensewrightBackgroundInteraction,
+    SensewrightRegenBackgroundInteraction,
+    SensewrightConsolidateInteraction,
 )
+
+_SIM_ACTIONS = ("background", "regen_background", "consolidate")
 
 _REGISTERED = {"done": False}
 
@@ -137,14 +166,17 @@ _REGISTERED = {"done": False}
 def _build_handlers():
     """Build the S4CL interaction handlers, or return an empty tuple.
 
-    * all four interactions are added to **Sims**;
+    * every interaction is added to **Sims**;
     * the panel interaction is added to **computers** (tag ``Func_Computer``).
     """
     handler_base = integrations.s4cl_interaction_handler_base()
     if handler_base is None:
         return ()
 
-    all_ids = (TUNING_PANEL, TUNING_CHAT, TUNING_CONFIRM, TUNING_HUD)
+    all_ids = (
+        TUNING_PANEL, TUNING_CHAT, TUNING_CONFIRM, TUNING_HUD,
+        TUNING_BACKGROUND, TUNING_REGEN_BACKGROUND, TUNING_CONSOLIDATE,
+    )
 
     class _SimInteractionHandler(handler_base):
         @property
@@ -272,5 +304,13 @@ def _dispatch(action, target=None):
         elif action == "panel":
             from . import panel_ui
             panel_ui.open_panel(sim_info)
+        elif action in _SIM_ACTIONS:
+            from . import sim_actions
+            if action == "background":
+                sim_actions.view_background(sim_info)
+            elif action == "regen_background":
+                sim_actions.regenerate_background(sim_info)
+            else:
+                sim_actions.consolidate_memory(sim_info)
     except Exception as exc:
         log_exception("pie_menu._dispatch." + str(action), exc)

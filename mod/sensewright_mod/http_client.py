@@ -278,8 +278,12 @@ def suggest_zeitgeist(sim: Dict[str, Any], mood_tags: List[str], free_text: str,
 def request_background(sim: Dict[str, Any], scope: str = "sim",
                        household_id: Optional[int] = None, player_hints: str = "",
                        census: Optional[Dict[str, Any]] = None, force: bool = False,
-                       lang: str = "en") -> Dict[str, Any]:
-    """POST /v1/god/background to generate a Sim/household background."""
+                       queue: bool = False, lang: str = "en") -> Dict[str, Any]:
+    """POST /v1/god/background to generate a Sim/household background.
+
+    ``queue=True`` is the player-action lane: the sidecar returns a cache hit
+    inline or enqueues the generation at top priority (no game-thread block).
+    """
     payload = {
         "sim": sim,
         "scope": scope,
@@ -287,9 +291,24 @@ def request_background(sim: Dict[str, Any], scope: str = "sim",
         "player_hints": player_hints,
         "census": census,
         "force": force,
+        "queue": queue,
         "lang": lang,
     }
     return post_json("/v1/god/background", payload)
+
+
+def request_consolidate(sim: Dict[str, Any], lang: str = "en",
+                        queue: bool = False) -> Dict[str, Any]:
+    """POST /v1/memory/consolidate to fold a Sim's dialogue into one memory.
+
+    ``queue=True`` enqueues at top priority and returns immediately.
+    """
+    payload = {
+        "sim": sim,
+        "queue": queue,
+        "lang": lang,
+    }
+    return post_json("/v1/memory/consolidate", payload)
 
 
 def get_god_controls() -> Dict[str, Any]:

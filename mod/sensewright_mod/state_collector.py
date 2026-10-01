@@ -367,8 +367,38 @@ def _relationships_of(sim_info) -> List[Dict[str, Any]]:
             depth = float(relationship.get("depth", 0.0) or 0.0)
         except (TypeError, ValueError):
             depth = 0.0
-        result.append({"target_id": target_id, "depth": depth})
+        target_name = relationship.get("target_name")
+        entry = {
+            "target_id": target_id,
+            "target_name": target_name if isinstance(target_name, str) else "",
+            "depth": depth,
+        }
+        # Phase 2b: carry the relationship type/track, progression and the
+        # target's known traits through to the census (best-effort).
+        track = relationship.get("track")
+        if isinstance(track, str) and track:
+            entry["track"] = track
+        for key in ("friendship", "romance"):
+            value = relationship.get(key)
+            if value is None:
+                continue
+            try:
+                entry[key] = float(value)
+            except (TypeError, ValueError):
+                pass
+        known = relationship.get("known_traits")
+        if isinstance(known, (list, tuple)):
+            entry["known_traits"] = [t for t in known if isinstance(t, str)][:8]
+        result.append(entry)
     return result
+
+
+def _aspiration_of(sim_info) -> str:
+    """Best-effort aspiration track name reported by sim_context."""
+    try:
+        return sim_context._get_aspiration(sim_info) or ""
+    except Exception:
+        return ""
 
 
 def _kinship_of(sim_info) -> List[Dict[str, Any]]:
@@ -632,6 +662,56 @@ def _current_interaction_of(sim_info) -> str:
     return ""
 
 
+def _sim_id_of_target(value) -> Optional[int]:
+    """Best-effort Sim id of a social-interaction target (or None).
+
+    Accepts a Sim instance (``target.sim_info``), a ``SimInfo`` (which carries
+    ``full_name``), or a ``(SimInfo, ...)`` tuple. A non-Sim target (an object)
+    has no ``full_name`` and is rejected, so object interactions never produce a
+    bogus "conversation" partner.
+    """
+    if value is None:
+        return None
+    if isinstance(value, tuple) and value:
+        value = value[0]
+    sim_info = _safe_getattr(value, "sim_info", None)
+    if sim_info is not None:
+        value = sim_info
+    if _safe_getattr(value, "full_name", None) is None:
+        return None
+    try:
+        sim_id = int(_safe_getattr(value, "id", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    return sim_id or None
+
+
+def _interaction_target_id_of(sim_info) -> Optional[int]:
+    """Sim id the Sim is currently interacting with, or None.
+
+    Only a social interaction (whose target is another Sim) yields an id; every
+    other current interaction returns None. This is the wire signal the sidecar
+    uses to allow sim<->sim dialogue only during a real native conversation.
+    """
+    sim_instance = _get_sim_instance_of(sim_info)
+    if sim_instance is None:
+        return None
+    queue = _safe_getattr(sim_instance, "queue", None)
+    if queue is None:
+        return None
+    current = None
+    for attr in ("get_current_interaction", "current_interaction"):
+        value = _safe_getattr(queue, attr, None)
+        if value is None:
+            continue
+        current = _safe_call(value) if callable(value) else value
+        if current is not None:
+            break
+    if current is None:
+        return None
+    return _sim_id_of_target(_safe_getattr(current, "target", None))
+
+
 def _zone_time_of_day() -> str:
     """Current game clock string (best effort)."""
     try:
@@ -720,10 +800,12 @@ def _autonomy_sim_state(sim_info, player_household_id=None) -> Dict[str, Any]:
         "sim_id": sim_id,
         "full_name": _full_name_of(sim_info),
         "household_id": _household_id_of(sim_info),
+        "aspiration": _aspiration_of(sim_info),
         "mood": mood,
         "needs": needs,
         "location": _location_string_of(sim_info),
         "current_interaction": _current_interaction_of(sim_info),
+        "interaction_target_sim_id": _interaction_target_id_of(sim_info),
         "sleeping": _is_sleeping(_buff_names_of(sim_info)),
         "is_player": _is_player_of(sim_info, player_household_id),
         "autonomy": DEFAULT_AUTONOMY,
@@ -1139,6 +1221,7 @@ def build_census(scope: str = "active_zone"):
             "sim_id": sim_id,
             "full_name": _full_name_of(sim_info),
             "household_id": household_id,
+            "aspiration": _aspiration_of(sim_info),
             "traits": _traits_of(sim_info),
             "age": _age_of(sim_info),
             "gender": _gender_of(sim_info),
@@ -1171,6 +1254,27 @@ def build_census(scope: str = "active_zone"):
         bucket["members"].append(sim_id)
 
     return sims, list(households.values())
+
+
+def _census_ready() -> bool:
+    """Whether the loaded zone has a live Sim worth censusing.
+
+    The collector auto-boots (and the zone-load hook pushes a census) as soon as
+    its event handlers register — often while the zone is still loading, before
+    any Sim is instanced. That produced empty ``active_zone`` censuses that were
+    never refreshed. Gate the automatic push on a live Sim; the zone heartbeat
+    retries until one exists. ``full_save`` scans are never gated.
+    """
+    try:
+        sim_info = sim_context._get_active_sim_info()
+        if sim_info is not None and sim_context._get_sim_instance(sim_info) is not None:
+            return True
+    except Exception:
+        pass
+    try:
+        return bool(_iter_instanced_sim_infos())
+    except Exception:
+        return False
 
 
 def send_census(sim: Optional[Dict[str, Any]] = None,
@@ -1248,6 +1352,10 @@ class StateCollector:
             events.EVENT_RELATIONSHIP_CHANGE: [self._on_relationship_change],
             events.EVENT_SOCIAL_INTERACTION: [self._on_social],
             events.EVENT_HOUSEHOLD_CHANGE: [self._on_household_change],
+            events.EVENT_TRAIT_CHANGE: [self._on_trait_change],
+            events.EVENT_SKILL_LEVEL_UP: [self._on_skill_level_up],
+            events.EVENT_CAREER_CHANGE: [self._on_career_change],
+            events.EVENT_SIM_DEATH: [self._on_death],
         }
 
     # --- lifecycle ---
@@ -1325,10 +1433,13 @@ class StateCollector:
 
     def ensure_started(self) -> bool:
         """
-        Retry ``start()``; on the first successful boot, push the zone census.
+        Retry ``start()``; on the first successful boot **with a live Sim**, push
+        the zone census.
 
         Called from the command paths (and autoboot) so a save loaded before the
-        services were ready still gets its census, events and alarms wired.
+        services were ready still gets its census, events and alarms wired. The
+        bootstrap is deferred until a Sim is instanced, so an early boot cannot
+        send an empty ``active_zone`` census and mark itself done.
         """
         try:
             self.start()
@@ -1336,6 +1447,12 @@ class StateCollector:
             log_exception("StateCollector.ensure_started(start)", exc)
         ready = self.is_ready()
         if ready and not self._bootstrapped:
+            if not _census_ready():
+                # Services are up but the zone has no live Sim yet: defer the
+                # bootstrap (and the census) so the zone heartbeat can send a
+                # non-empty snapshot once a Sim is instanced.
+                debug_log("StateCollector.ensure_started: census deferred (no live Sim)")
+                return ready
             self._bootstrapped = True
             try:
                 send_census()
@@ -1530,7 +1647,10 @@ class StateCollector:
         except Exception as exc:
             log_exception("StateCollector._on_zone_load(god_ui)", exc)
         try:
-            send_census()
+            if _census_ready():
+                send_census()
+            else:
+                debug_log("StateCollector._on_zone_load: census deferred (no live Sim)")
         except Exception as exc:
             log_exception("StateCollector._on_zone_load(census)", exc)
         try:
@@ -1577,12 +1697,13 @@ class StateCollector:
         except Exception:
             sim_info = None
         census = None
-        try:
-            census_sims, census_households = build_census()
-            census = {"sims": census_sims, "households": census_households}
-        except Exception as exc:
-            log_exception("StateCollector._on_household_change(census)", exc)
-            census = None
+        if _census_ready():
+            try:
+                census_sims, census_households = build_census()
+                census = {"sims": census_sims, "households": census_households}
+            except Exception as exc:
+                log_exception("StateCollector._on_household_change(census)", exc)
+                census = None
         try:
             god_ui.prompt_household_background(
                 sim_info,
@@ -1644,6 +1765,83 @@ class StateCollector:
         if target_name:
             content["target"] = target_name
         self._emit("social", content, IMPORTANCE_SOCIAL)
+
+    def _event_sim_id(self, args) -> Optional[int]:
+        """Best-effort Sim id of the Sim an event is about (or None)."""
+        sim = _first_attr(args, ("sim", "sim_info", "actor", "owner"))
+        sim_id = _safe_getattr(sim, "id", None) if sim is not None else None
+        if sim_id is None:
+            for value in args:
+                sim_id = _safe_getattr(value, "id", None)
+                if sim_id is not None:
+                    break
+        try:
+            return int(sim_id) if sim_id is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _on_trait_change(self, *args, **kwargs) -> None:
+        """Forward a compact trait-change event (personality evolution)."""
+        try:
+            content = {}
+            sim_id = self._event_sim_id(args)
+            if sim_id is not None:
+                content["sim_id"] = sim_id
+            trait = _first_attr(args, ("trait", "trait_type", "new_trait",
+                                       "added_trait", "removed_trait"))
+            name = _name_of(trait)
+            if name:
+                content["trait"] = name
+            self._emit("trait_change", content, IMPORTANCE_BUFF)
+        except Exception as exc:
+            log_exception("StateCollector._on_trait_change", exc)
+
+    def _on_skill_level_up(self, *args, **kwargs) -> None:
+        """Forward a compact skill-level-up event."""
+        try:
+            content = {}
+            sim_id = self._event_sim_id(args)
+            if sim_id is not None:
+                content["sim_id"] = sim_id
+            skill = _first_attr(args, ("skill", "statistic", "skill_type", "stat"))
+            name = _name_of(skill)
+            if name:
+                content["skill"] = name
+            level = _first_attr(args, ("level", "new_level", "value"))
+            if level is not None:
+                content["level"] = level
+            self._emit("skill_level_up", content, IMPORTANCE_BUFF)
+        except Exception as exc:
+            log_exception("StateCollector._on_skill_level_up", exc)
+
+    def _on_career_change(self, *args, **kwargs) -> None:
+        """Forward a compact career-change/promotion event."""
+        try:
+            content = {}
+            sim_id = self._event_sim_id(args)
+            if sim_id is not None:
+                content["sim_id"] = sim_id
+            career = _first_attr(args, ("career", "career_type", "new_career"))
+            name = _name_of(career)
+            if name:
+                content["career"] = name
+            level = _first_attr(args, ("level", "new_level"))
+            if level is not None:
+                content["level"] = level
+            self._emit("career_change", content, IMPORTANCE_BUFF)
+        except Exception as exc:
+            log_exception("StateCollector._on_career_change", exc)
+
+    def _on_death(self, *args, **kwargs) -> None:
+        """Forward a compact Sim-death event."""
+        try:
+            content = {}
+            sim_id = self._event_sim_id(args)
+            if sim_id is not None:
+                content["sim_id"] = sim_id
+            self._emit("sim_death", content, IMPORTANCE_RELATIONSHIP)
+        except Exception as exc:
+            log_exception("StateCollector._on_death", exc)
 
 
 # --- module-level singleton ---

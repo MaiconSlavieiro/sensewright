@@ -8,7 +8,10 @@
         "0xA1400001": "Open Panel",
         "0xA1400002": "Chat…",
         "0xA1400003": "Confirm…",
-        "0xA1400004": "HUD on/off"
+        "0xA1400004": "HUD on/off",
+        "0xA1400005": "View Background",
+        "0xA1400006": "Regenerate Background",
+        "0xA1400007": "Consolidate Memory"
       }
     },
     {
@@ -18,7 +21,10 @@
         "0xA1400001": "Abrir Painel",
         "0xA1400002": "Conversar…",
         "0xA1400003": "Confirmar…",
-        "0xA1400004": "HUD on/off"
+        "0xA1400004": "HUD on/off",
+        "0xA1400005": "Ver Histórico",
+        "0xA1400006": "Regerar Histórico",
+        "0xA1400007": "Consolidar Memória"
       }
     }
   ]

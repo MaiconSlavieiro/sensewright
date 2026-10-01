@@ -159,8 +159,51 @@ def test_get_relationships_uses_target_infos():
         relationship_tracker = FakeTracker()
 
     assert sim_context._get_relationships(FakeInfo()) == [
-        {"target_id": 42, "target_name": "Bella Goth", "depth": 0.75, "track": ""}
+        {
+            "target_id": 42,
+            "target_name": "Bella Goth",
+            "depth": 0.75,
+            "track": "",
+            "friendship": None,
+            "romance": None,
+            "known_traits": [],
+        }
     ]
+
+
+def test_get_relationships_enriches_track_progression_and_known_traits(monkeypatch):
+    """Phase 2b: relationship type/track, progression and the target's traits."""
+
+    class FakeRel(object):
+        relationship_track = "Friendship"
+        friendship = 30.0
+        romance = 5.0
+
+    class FakeTarget(object):
+        sim_id = 7
+        full_name = "Bella"
+
+    class FakeTracker(object):
+        def get_target_sim_infos(self):
+            return [FakeTarget()]
+
+        def get_relationship_depth(self, sim_id):
+            return 12.5
+
+        def get_relationship(self, sim_id):
+            return FakeRel()
+
+    class FakeInfo(object):
+        relationship_tracker = FakeTracker()
+
+    monkeypatch.setattr(sim_context, "_get_traits", lambda si: ["trait_Cheerful"])
+
+    result = sim_context._get_relationships(FakeInfo())
+
+    assert result[0]["track"] == "Friendship"
+    assert result[0]["friendship"] == 30.0
+    assert result[0]["romance"] == 5.0
+    assert result[0]["known_traits"] == ["trait_Cheerful"]
 
 
 def test_get_time_string_calls_clock_accessor(monkeypatch):
@@ -338,6 +381,29 @@ def test_get_kinship_falls_back_to_family_ids(monkeypatch):
     assert sim_context._get_kinship(FakeInfo()) == [
         {"relation": "family", "target_id": 11, "name": ""}
     ]
+
+
+class _AspirationTrack(object):
+    __name__ = "AspirationTrack_Soulmate"
+
+
+class _AspirationTracker(object):
+    active_track = _AspirationTrack()
+
+
+class _SimWithAspiration(object):
+    aspiration_tracker = _AspirationTracker()
+
+
+def test_get_aspiration_strips_tuning_prefix():
+    assert sim_context._get_aspiration(_SimWithAspiration()) == "Soulmate"
+
+
+def test_get_aspiration_without_tracker_is_empty():
+    class _NoTracker(object):
+        pass
+
+    assert sim_context._get_aspiration(_NoTracker()) == ""
 
 
 if __name__ == "__main__":

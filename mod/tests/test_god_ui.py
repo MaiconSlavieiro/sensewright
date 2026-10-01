@@ -292,6 +292,7 @@ def test_request_background_body(monkeypatch):
         "player_hints": "hi",
         "census": census,
         "force": True,
+        "queue": False,
         "lang": "pt-BR",
     }
 
@@ -308,6 +309,7 @@ def test_request_background_defaults(monkeypatch):
         "player_hints": "",
         "census": None,
         "force": False,
+        "queue": False,
         "lang": "en",
     }
 

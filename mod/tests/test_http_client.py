@@ -137,6 +137,25 @@ def test_chat_endpoint():
                 assert request.full_url == "http://127.0.0.1:8765/v1/chat"
 
 
+def test_request_consolidate_endpoint():
+    """``request_consolidate`` POSTs the SimRef to /v1/memory/consolidate."""
+    mock_response = MockResponse({"ok": True, "consolidated": 2})
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+        with patch.object(http_client, "get_base_url", return_value="http://127.0.0.1:8765"):
+            with patch.object(http_client, "get_auth_header", return_value={"X-Sensewright-Token": "test"}):
+                result = http_client.request_consolidate(
+                    sim={"player_id": "local", "save_id": "save1", "sim_id": 123},
+                    lang="en",
+                )
+
+                assert result["consolidated"] == 2
+                request = mock_urlopen.call_args[0][0]
+                assert request.full_url == "http://127.0.0.1:8765/v1/memory/consolidate"
+                body = json.loads(request.data.decode("utf-8"))
+                assert body["sim"]["sim_id"] == 123
+
+
 def test_post_json_sanitizes_non_json_objects():
     """Game objects must be dropped so only primitives travel (review item 5)."""
     mock_response = MockResponse({"ok": True})

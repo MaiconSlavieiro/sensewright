@@ -6,7 +6,7 @@ Outside the game returns {} plus keys without crashing.
 """
 
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence
 
 from . import integrations
 from .debug_log import log_exception
@@ -448,6 +448,9 @@ def _get_relationships(sim_info) -> List[Dict[str, Any]]:
                 targets = []
 
         depth_fn = _safe_getattr(rel_tracker, "get_relationship_depth", None)
+        # Phase 2b: the richer relationship object (type/track + friendship/romance
+        # progression), when the live patch exposes one.
+        rel_obj_fn = _safe_getattr(rel_tracker, "get_relationship", None)
 
         for entry in targets or []:
             target_sim = None
@@ -487,15 +490,106 @@ def _get_relationships(sim_info) -> List[Dict[str, Any]]:
             else:
                 target_name = ""
 
+            # Relationship type/track + progression (best-effort; guarded).
+            rel_obj = None
+            if callable(rel_obj_fn) and target_id:
+                rel_obj = _safe_call(rel_obj_fn, target_id)
+            track = _rel_track_name(rel_obj)
+            friendship = _rel_value(rel_obj, ("friendship", "get_friendship", "friendship_value"))
+            romance = _rel_value(rel_obj, ("romance", "get_romance", "romance_value"))
+
+            # Traits of the other Sim that this Sim has learned/observed.
+            known_traits = []
+            if target_sim is not None:
+                try:
+                    traits = _get_traits(target_sim)
+                    if isinstance(traits, (list, tuple)):
+                        known_traits = [t for t in traits if isinstance(t, str)][:8]
+                except Exception:
+                    known_traits = []
+
             relationships.append({
                 "target_id": target_id,
                 "target_name": target_name,
                 "depth": depth,
-                "track": "",
+                "track": track,
+                "friendship": friendship,
+                "romance": romance,
+                "known_traits": known_traits,
             })
     except Exception:
         pass
     return relationships
+
+
+def _rel_value(rel_obj, attrs: Sequence[str]) -> Optional[float]:
+    """Best-effort numeric value (friendship/romance) from a relationship object."""
+    if rel_obj is None:
+        return None
+    for attr in attrs:
+        value = _safe_getattr(rel_obj, attr, None)
+        if callable(value):
+            value = _safe_call(value)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _rel_track_name(rel_obj) -> str:
+    """Best-effort readable relationship track/type name (or '')."""
+    if rel_obj is None:
+        return ""
+    for attr in ("relationship_track", "track", "get_relationship_track"):
+        value = _safe_getattr(rel_obj, attr, None)
+        if callable(value):
+            value = _safe_call(value)
+        if value is None:
+            continue
+        name = _safe_getattr(value, "__name__", None)
+        if name is None:
+            name = _safe_getattr(value, "name", None)
+        text = _as_str(name if name is not None else value)
+        if text:
+            return text
+    return ""
+
+
+def _get_aspiration(sim_info) -> str:
+    """Best-effort readable aspiration track name for a Sim (or '').
+
+    Reads the native ``AspirationTracker.active_track`` (``aspirations.aspirations``,
+    confirmed via S4CL) and strips the ``AspirationTrack_`` tuning prefix so the
+    value reads like a real aspiration. Never raises.
+    """
+    try:
+        tracker = _safe_getattr(sim_info, "aspiration_tracker", None)
+        if tracker is None:
+            return ""
+        track = None
+        for attr in ("active_track", "get_active_track", "get_aspiration_track",
+                     "aspiration_track"):
+            value = _safe_getattr(tracker, attr, None)
+            if value is None:
+                continue
+            track = _safe_call(value) if callable(value) else value
+            if track is not None:
+                break
+        if track is None:
+            return ""
+        text = _as_str(track)
+        lowered = text.lower()
+        for prefix in ("aspirationtrack_", "aspirationtrack", "aspiration_track_",
+                       "aspiration_track"):
+            if lowered.startswith(prefix):
+                text = text[len(prefix):]
+                break
+        return text.strip("_")
+    except Exception:
+        return ""
 
 
 def _genealogy_index_enum():

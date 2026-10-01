@@ -56,6 +56,8 @@ def _install_census_fakes(monkeypatch, sims, active=None):
     monkeypatch.setattr(sim_context, "_get_kinship",
                         lambda sim_info: [{"relation": "mother", "target_id": 77,
                                            "name": "Mae"}])
+    monkeypatch.setattr(sim_context, "_get_aspiration",
+                        lambda sim_info: "Soulmate")
 
 
 def test_build_census_shapes(monkeypatch):
@@ -69,18 +71,19 @@ def test_build_census_shapes(monkeypatch):
     assert len(sims) == 2
     sim = sims[0]
     assert set(sim.keys()) == {
-        "sim_id", "full_name", "household_id", "traits", "age", "gender",
-        "career", "skills", "relationships", "kinship", "is_player",
+        "sim_id", "full_name", "household_id", "aspiration", "traits", "age",
+        "gender", "career", "skills", "relationships", "kinship", "is_player",
     }
     assert sim["sim_id"] == 1
     assert sim["full_name"] == "Alice"
     assert sim["household_id"] == 10
+    assert sim["aspiration"] == "Soulmate"
     assert sim["traits"] == ["Genius", "Cheerful"]
     assert sim["age"] == "adult"
     assert sim["gender"] == "female"
     assert sim["career"] == "Doctor"
     assert sim["skills"] == {"cooking": 3}
-    assert sim["relationships"] == [{"target_id": 999, "depth": 42.5}]
+    assert sim["relationships"] == [{"target_id": 999, "target_name": "X", "depth": 42.5}]
     assert sim["kinship"] == [{"relation": "mother", "target_id": 77, "name": "Mae"}]
     assert sim["is_player"] is True
     assert sims[1]["is_player"] is False
@@ -211,6 +214,7 @@ def test_zone_load_triggers_god_and_census(monkeypatch):
     calls = {"god": 0, "census": 0, "scan": 0}
     monkeypatch.setattr(http_client, "send_events", lambda *a, **k: {})
     monkeypatch.setattr(sim_context, "_get_active_sim_info", lambda: object())
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: True)
     monkeypatch.setattr(state_collector, "send_autonomy_tick", lambda *a, **k: None)
     monkeypatch.setattr(
         state_collector.god_ui, "maybe_show_zeitgeist_onboarding",
@@ -233,6 +237,65 @@ def test_zone_load_triggers_god_and_census(monkeypatch):
     assert calls["scan"] == 1
 
 
+def test_zone_load_defers_census_without_live_sim(monkeypatch):
+    """A zone-load before any Sim is instanced must not push an empty census."""
+    calls = {"census": 0}
+    monkeypatch.setattr(http_client, "send_events", lambda *a, **k: {})
+    monkeypatch.setattr(sim_context, "_get_active_sim_info", lambda: None)
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: False)
+    monkeypatch.setattr(state_collector, "send_autonomy_tick", lambda *a, **k: None)
+    monkeypatch.setattr(
+        state_collector.god_ui, "maybe_show_zeitgeist_onboarding", lambda sim_info: False
+    )
+    monkeypatch.setattr(state_collector, "scan_neighborhood", lambda *a, **k: None)
+    monkeypatch.setattr(
+        state_collector, "send_census",
+        lambda *a, **k: calls.__setitem__("census", calls["census"] + 1),
+    )
+
+    state_collector.StateCollector()._on_zone_load(zone_id=5)
+
+    assert calls["census"] == 0
+
+
+def test_ensure_started_defers_bootstrap_until_a_sim_is_live(monkeypatch):
+    sent = []
+    monkeypatch.setattr(state_collector, "send_census", lambda *a, **k: sent.append(1))
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: False)
+
+    collector = state_collector.StateCollector()
+    collector.start = lambda: True
+    collector.is_ready = lambda: True
+
+    assert collector.ensure_started() is True
+    assert collector._bootstrapped is False
+    assert sent == []
+
+
+def test_ensure_started_bootstraps_census_when_sim_is_live(monkeypatch):
+    sent = []
+    monkeypatch.setattr(state_collector, "send_census", lambda *a, **k: sent.append(1))
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: True)
+
+    collector = state_collector.StateCollector()
+    collector.start = lambda: True
+    collector.is_ready = lambda: True
+
+    assert collector.ensure_started() is True
+    assert collector._bootstrapped is True
+    assert sent == [1]
+
+
+def test_census_ready_requires_a_live_sim(monkeypatch):
+    monkeypatch.setattr(sim_context, "_get_active_sim_info", lambda: None)
+    monkeypatch.setattr(state_collector, "_iter_instanced_sim_infos", lambda manager=None: [])
+    assert state_collector._census_ready() is False
+
+    monkeypatch.setattr(state_collector, "_iter_instanced_sim_infos",
+                        lambda manager=None: [object()])
+    assert state_collector._census_ready() is True
+
+
 def test_scan_neighborhood_sends_full_save_once(monkeypatch):
     captured = []
     monkeypatch.setattr(
@@ -252,6 +315,7 @@ def test_household_change_triggers_background(monkeypatch):
     calls = []
     monkeypatch.setattr(http_client, "send_events", lambda *a, **k: {})
     monkeypatch.setattr(sim_context, "_get_active_sim_info", lambda: object())
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: True)
     monkeypatch.setattr(state_collector, "build_census", lambda: ([], []))
     monkeypatch.setattr(
         state_collector.god_ui, "prompt_household_background",
@@ -265,6 +329,22 @@ def test_household_change_triggers_background(monkeypatch):
     assert calls
     assert calls[0][0] == 7
     assert calls[0][1] == {"sims": [], "households": []}
+
+
+def test_household_change_skips_census_without_live_sim(monkeypatch):
+    calls = []
+    monkeypatch.setattr(http_client, "send_events", lambda *a, **k: {})
+    monkeypatch.setattr(sim_context, "_get_active_sim_info", lambda: None)
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: False)
+    monkeypatch.setattr(
+        state_collector.god_ui, "prompt_household_background",
+        lambda sim_info, household_id=None, census=None:
+        calls.append((household_id, census)) or True,
+    )
+
+    state_collector.StateCollector()._on_household_change(household_id=7)
+
+    assert calls[0][1] is None
 
 
 def test_send_census_logs_generic_failure(monkeypatch):
@@ -283,6 +363,28 @@ def test_send_census_logs_generic_failure(monkeypatch):
 
     assert state_collector.send_census() is None
     assert logged == ["state_collector.send_census"]
+
+
+def test_relationships_of_carries_track_progression_and_known_traits(monkeypatch):
+    """Phase 2b: track/progression/known traits survive the census compaction."""
+    rich = [{
+        "target_id": 7,
+        "target_name": "Bella",
+        "depth": 12.5,
+        "track": "Friendship",
+        "friendship": 30.0,
+        "romance": None,
+        "known_traits": ["trait_Cheerful", "trait_Bookworm"],
+    }]
+    monkeypatch.setattr(sim_context, "_get_relationships", lambda sim_info: rich)
+
+    result = state_collector._relationships_of(object())
+
+    assert result[0]["target_id"] == 7
+    assert result[0]["track"] == "Friendship"
+    assert result[0]["friendship"] == 30.0
+    assert result[0]["known_traits"] == ["trait_Cheerful", "trait_Bookworm"]
+    assert "romance" not in result[0]
 
 
 if __name__ == "__main__":

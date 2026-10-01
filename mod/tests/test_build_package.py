@@ -2,7 +2,7 @@
 Offline tests for the tuning package builder (``mod/build_package.py``).
 
 No game required: the DBPF/STBL writer is pure Python. These lock in the resource
-set (4 interaction tunings + one STBL per locale) and that **no** XmlInjector
+set (every interaction tuning + one STBL per locale) and that **no** XmlInjector
 snippet type is shipped anymore.
 
 Run with the system Python (3.10+).
@@ -19,9 +19,13 @@ import build_package  # noqa: E402
 SNIPPET_TYPE = 0x7DF2169C
 
 
-def test_interaction_resources_are_four():
+def test_interaction_resources_match_the_pie_menu():
     resources = build_package.interaction_resources()
-    assert len(resources) == 4
+    # One tuning resource per pie-menu interaction (panel, chat, confirm, hud,
+    # background, regenerate, consolidate).
+    xml_files = list((build_package.ROOT / "tuning" / "interactions").glob("*.xml"))
+    assert len(resources) == len(xml_files)
+    assert len(resources) == 7
     assert {r[1] for r in resources} == {build_package.INTERACTION_TUNING_TYPE}
 
 

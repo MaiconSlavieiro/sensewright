@@ -201,6 +201,7 @@ def test_notify_player_activity_swallows_errors(monkeypatch):
 def test_ensure_started_bootstraps_census_once(monkeypatch):
     monkeypatch.setattr(events, "add_alarm", lambda *a, **k: object())
     monkeypatch.setattr(events, "register", lambda handlers: True)
+    monkeypatch.setattr(state_collector, "_census_ready", lambda: True)
     calls = {"census": 0}
     monkeypatch.setattr(state_collector, "send_census",
                         lambda *a, **k: calls.__setitem__("census", calls["census"] + 1))
