@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<I c="InteractionSnippet" i="snippet" m="interactions.sensewright" n="sw_confirm" s="1234567890123456791">
+  <V n="affordance" t="enabled_interactions">
+    <U>
+      <T n="enabled_interaction">
+        <V n="interaction" t="reference">145680</V> <!-- Confirmation dialog -->
+        <V n="test_globals" t="test_globals">
+          <L>
+            <V t="test_global">test_sensewright_confirm_available</V>
+          </L>
+        </V>
+      </T>
+    </U>
+  </V>
+  <V n="category" t="category">Sim</V>
+  <V n="commodity" t="commodity">0</V>
+  <V n="insert_strategy" t="insert_strategy">END</V>
+</I>

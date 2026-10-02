@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "default_locale": "en-US",
+  "locales": [
+    {
+      "code": "en-US",
+      "base_subtag": "en",
+      "display_name": "English (US)",
+      "llm_language_name": "English",
+      "ts4_stbl_byte": "0x00",
+      "ts4_client_tokens": ["eng_us", "en_us", "en-us", "en"],
+      "direction": "ltr"
+    },
+    {
+      "code": "pt-BR",
+      "base_subtag": "pt",
+      "display_name": "Português (Brasil)",
+      "llm_language_name": "Português do Brasil (pt-BR)",
+      "ts4_stbl_byte": "0x11",
+      "ts4_client_tokens": ["por_br", "pt_br", "pt-br", "pt"],
+      "direction": "ltr"
+    }
+  ]
+}
