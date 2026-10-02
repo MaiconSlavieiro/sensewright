@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 # Package directory (where this file lives)
 _PKG_DIR = Path(__file__).resolve().parent
 _WEBUI_DIR = _PKG_DIR
-# Official locale bundle: <sidecar>/locales/ui
-_LOCALES_UI_DIR = _PKG_DIR.parent.parent / "locales" / "ui"
+# SPA's own UI string catalog (webui/locales/<code>.json)
+_SPA_LOCALES_DIR = _PKG_DIR / "locales"
 
 router = APIRouter(tags=["webui"])
 
@@ -89,9 +89,9 @@ async def serve_style_css() -> FileResponse:
 
 @router.get("/ui/locales/{code}.json", include_in_schema=False)
 async def serve_locale(code: str) -> JSONResponse:
-    """Serve a UI locale JSON file for the SPA (manifest-driven)."""
+    """Serve the SPA's own UI locale JSON (manifest-driven resolution)."""
     resolved = _resolve_locale_code(code)
-    locale_path = _LOCALES_UI_DIR / "{}.json".format(resolved)
+    locale_path = _SPA_LOCALES_DIR / "{}.json".format(resolved)
     data = _read_json_safe(locale_path)
     if data is None:
         # Return empty object rather than 404 so the SPA can fall back gracefully
