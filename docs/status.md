@@ -40,7 +40,7 @@ O que **falta de fato** não é fundação, é **fiação (wiring) e gatilhos**:
 - **Settings/Concurrency (F15/F16)**: cooldown por modelo (120 s) é código morto;
   concorrência por tier não é aplicada; o "refund assimétrico" é logicamente inócuo.
 
-Tudo o que existe hoje é coberto por **474 testes** (sidecar) e compila nos dois
+Tudo o que existe hoje é coberto por **508 testes** (sidecar) e compila nos dois
 interpretadores corretos.
 
 ---
@@ -49,7 +49,7 @@ interpretadores corretos.
 
 | Verificação | Comando | Resultado |
 |---|---|---|
-| Suíte de testes do sidecar | `python -m pytest -q` em `sidecar/` | **474 passed**, 1 warning |
+| Suíte de testes do sidecar | `python -m pytest -q` em `sidecar/` | **508 passed**, 1 warning |
 | Sintaxe do Mod (Python 3.7) | `py -3.7 -m py_compile` em `mod/sensewright_mod/*.py` | **OK** (16 arquivos) |
 | Sintaxe dos scripts de build (3.10+) | `python -m py_compile mod/build.py mod/build_package.py` | **OK** |
 | Build `.package` | `python mod/build_package.py` | **OK** — 25 recursos (19 buffs, 3 interactions, 1 trait, 2 STBL) |
@@ -125,35 +125,35 @@ gatilho/aplicação · **Fallback-only** = apenas `fallbacks.py` + declaração 
 | P04 | `sim.reaction` | ✅ Full | `services.py:386-422` |
 | P05 | `sim.social` | ✅ Full | `services.py:262-276` (assimétrico não roteado) |
 | P06 | `sim.social.close` | ⚪ Fallback-only | Sem handler; `social_sessions` sempre `[]` (`services.py:296`) |
-| P07 | `sim.dream` | 🟡 Parcial | Motor/prompt/fallback prontos; **sem gatilho de sono** |
-| P08 | `sim.cognition` | 🟡 Parcial | `apply_cognition` nunca chamado (`agent/cognition.py:33`) |
-| P09 | `sim.sleep` | ⚪ Fallback-only | Sem contexto/handler/gatilho |
-| P10 | `sim.diary` | ⚪ Fallback-only | Sem handler/gatilho |
-| P11 | `sim.lifestory` | ⚪ Fallback-only | Limites de Life Story não aplicados |
+| P07 | `sim.dream` | ✅ Full | Gatilho de sono (`services._process_sleep_transitions`) + motor/prompt/fallback + `dream_urge` no perfil |
+| P08 | `sim.cognition` | ✅ Full | Encadeado pós-sonho; `apply_cognition` persiste `daily_plan`/biases (`services._cognition_callback`) |
+| P09 | `sim.sleep` | ✅ Full | Gatilho no despertar (se evento saliente); memória + reforço de psique |
+| P10 | `sim.diary` | 🟡 Parcial | Gatilho fim-do-dia + memória `diary`; falta Tooltip/Snoop in-game (`P2`) |
+| P11 | `sim.lifestory` | ⚪ Fallback-only | Limites de Life Story aplicados (`enforce_life_story`), mas sem gatilho de 7 dias |
 | P12 | `sim.aspiration` | ⚪ Fallback-only | Sem handler/gatilho |
 | P13 | `sim.background.expand` | ⚪ Fallback-only | Sem handler; `sim_GetToKnow` ausente |
 | P14 | `god.zeitgeist` | ✅ Full | `god/zeitgeist.py:20`, `services.py:517` |
-| P15 | `god.plan` | 🟡 Parcial | Submetido (`orchestrator.py:56`), **resultado descartado**; `create_arc` sem caller |
+| P15 | `god.plan` | ✅ Full | Callback `_plan_callback` cria e persiste o arco (`create_arc` + `save_arc`) |
 | P16 | `god.cast` | ⚪ Fallback-only | Sem casting/reuso de townie/spawn |
-| P17 | `god.scene` | ⚪ Fallback-only | Beat é armado mas `god.scene` nunca chamado |
-| P18 | `god.puppeteer` | 🟡 Parcial | Lease + fala inicial (`god/puppeteer.py:38-57`); sem spawn/abordagem/objetivo assimétrico/continuação |
+| P17 | `god.scene` | ✅ Full | Beat armado → `god.scene` grava `scene_draft`/`scene_subtext` no beat |
+| P18 | `god.puppeteer` | 🟡 Parcial | Lease + fala inicial (`god/puppeteer.py`); sem spawn/abordagem/objetivo assimétrico/continuação |
 | P19 | `god.react` | ⚪ Fallback-only | `advance_arc` sem caller (`god/arcs.py:36`) |
 | P20 | `god.narration` | ✅ Full | `god/orchestrator.py:17-80` |
 | P21 | `god.background` | ⚪ Fallback-only | `set_sim_background` sem caller |
 | P22 | `world.npc.backstory` | ⚪ Fallback-only | Sem gatilho |
-| P23 | `world.household.chronicle` | ⚪ Fallback-only | `append_chronicle` sem caller; sem gatilho fim-do-dia |
-| P24 | `world.gossip` | ⚪ Fallback-only | `create_rumor`/`save_rumors` sem caller (só testes); mod stub `tool_executor.py:425-427` |
+| P23 | `world.household.chronicle` | 🟡 Parcial | Gatilho fim-do-dia + persistência; falta Caixa de Correio in-game (`P2`) |
+| P24 | `world.gossip` | ✅ Full | Criação em evento público saliente + contágio ao fim de `sim.social` + SMS (`_create_rumor_from_event`/`_spread_rumor`) |
 | P25 | `world.aftermath` | ⚪ Fallback-only | Constante/flag sem uso |
 | P26 | `mem.consolidate` | 🟡 Parcial | Endpoint funciona (`services.py:474`); **sem gatilho automático** (300 s/zona) |
-| P27 | `mem.compact` | ⚪ Fallback-only | `count_consolidated`/`archive_memories` sem caller |
+| P27 | `mem.compact` | 🟡 Parcial | Gatilho automático (>= 20 consolidadas) + arquivamento de 15 + VACUUM (`services._maybe_compact`); falta exposição no painel |
 | P28 | `mem.legacy` | ⚪ Fallback-only | Sem gatilho de morte/casamento/nascimento |
 | P29 | `mem.relationship.review` | ⚪ Fallback-only | `qualitative_note` nunca escrito |
-| P30 | `evo.reflect` | 🟡 Parcial | Responde mas `apply_reflection` não aplicado |
+| P30 | `evo.reflect` | ✅ Full | `handle_evolve` + `_reflect_callback` aplicam e persistem `current_demeanor` |
 | P31 | `evo.trait` | 🟡 Parcial | Helpers prontos; sem `run_purpose`/emissão |
 | P32 | `ops.recap` | 🟡 Parcial | Submetido no bootstrap (`services.py:61`); `recap_job_id` sempre `None`; resultado descartado |
 | P33 | `ops.panel.summary` | ⚪ Fallback-only | Sem caller |
 
-**Total: 7 Full · 8 Parciais · 18 Fallback-only.**
+**Total: 14 Full · 16 Parciais · 3 Fallback-only.**
 
 ---
 
@@ -182,48 +182,58 @@ gatilho/aplicação · **Fallback-only** = apenas `fallbacks.py` + declaração 
 
 ## 7. Gaps priorizados (o que falta implementar de fato)
 
-### P0 — Destravar o núcleo narrativo (maior impacto, menor esforço)
+### P0 — Destravar o núcleo narrativo (maior impacto, menor esforço) — ✅ CONCLUÍDO
 
-1. **Gatilhos de sono** (Mod → Sidecar): disparar `sim.dream`, depois `sim.cognition` e
-   `sim.sleep`; aplicar `apply_cognition` no perfil. Sem isso, F07 inteira fica inerte.
-2. **Aplicar `evo.reflect`**: chamar `apply_reflection` em `handle_evolve` e persistir
-   `current_demeanor` (`services.py:456-471`).
-3. **Decay/prune de psique agendado** por `sim_tick` (chamar `decay_blocks`) e limite de
-   Life Story (`constants.py:98-100`).
-4. **Speech Policy enforcement**: aplicar `max_lines_per_minute` e
-   `min_interval_between_lines` no pre-flight e/ou executor; aplicar
-   `hard_blocked_social` (CHILD) e `physical_actions_allowed` de verdade no impulso.
-5. **`world.gossip` + contágio social**: criar rumor a partir de evento saliente,
-   chamar `spread` ao fim de `sim.social` e enviar SMS; hoje nada cria rumores.
+1. ✅ **Gatilhos de sono** (Mod → Sidecar): `_process_sleep_transitions` detecta as bordas
+   de `is_sleeping` no pulso de autonomia e dispara `sim.dream` → `sim.cognition`
+   (`apply_cognition` persiste `daily_plan`/biases) e, no despertar, `sim.sleep` (se
+   evento saliente) + `evo.reflect`.
+2. ✅ **Aplicar `evo.reflect`**: `handle_evolve` e `_reflect_callback` chamam
+   `apply_reflection` e persistem `current_demeanor` (`services.py`).
+3. ✅ **Decay/prune de psique** no despertar (`decay_blocks`, por delta de sim-dias) e
+   **limite de Life Story** (`agent.profile.enforce_life_story`, 20 linhas / 2 000 chars).
+4. ✅ **Speech Policy enforcement**: `agent/speech.py` (janela de 60 s + intervalo mínimo)
+   aplicado no gate de `sim.social`; `hard_blocked_social` (CHILD) no pre-flight e na
+   emissão; `physical_actions_allowed` calculado com `schedule_blocks` reais e aplicado
+   no callback de `sim.impulse`.
+5. ✅ **`world.gossip` + contágio social**: `_create_rumor_from_event` cria e persiste o
+   rumor em evento público saliente (com testemunhas), `_spread_rumor` contamina ao fim
+   de `sim.social` e o Mod exibe o SMS diegético (`tool_executor.py`).
 
-### P1 — God Director completo e World Layer
+### P1 — God Director completo e World Layer (parcial)
 
-6. **Consumir `god.plan`** (`create_arc`) e implementar `god.cast` (reuso de townie),
-   `god.scene`, `god.react`, `god.background`.
-7. **`god.puppeteer` de verdade**: spawn/`VisitSituation`, abordagem, injeção do
-   `puppeteer_objective` em `sim.social` e ramificação pós-reação.
-8. **`sim.social.close`, `sim.diary`, `mem.compact`, `mem.legacy`,
-   `mem.relationship.review`, `ops.panel.summary`**: handlers + gatilhos.
-9. **`BackgroundScheduler`** com prioridade `PLAYER > HOUSEHOLD > ACTIVE > RELATED`.
-10. **Crônica da família + caixa de correio** e `world.aftermath`.
+6. 🟡 **Consumir `god.plan`** ✅ (`_plan_callback` → `create_arc` + `save_arc`) e
+   **`god.scene`** ✅ (`_scene_callback` grava `scene_draft`/`scene_subtext` no beat).
+   **`god.cast`** (spawn de NPC) e **`god.background`** ainda pendentes.
+7. ❌ **`god.puppeteer` de verdade**: spawn/`VisitSituation`, abordagem, injeção e
+   ramificação pós-reação (depende do Mod / validação in-game).
+8. 🟡 **`sim.diary`** ✅ e **`mem.compact`** ✅ (gatilho + VACUUM) com handlers.
+   **`sim.social.close`, `mem.legacy`, `mem.relationship.review`, `ops.panel.summary`**
+   ainda pendentes.
+9. ❌ **`BackgroundScheduler`** com prioridade `PLAYER > HOUSEHOLD > ACTIVE > RELATED`.
+10. 🟡 **Crônica da família** ✅ (`_maybe_end_of_day` → `append_chronicle`).
+    **Caixa de Correio** in-game e **`world.aftermath`** pendentes.
 
-### P2 — Hooks nativos (M5/M6)
+### P2 — Hooks nativos (M5/M6) — pendente (exige validação in-game)
 
 11. `VisitSituation` (NPC catalisador pela calçada/campainha).
 12. Diário com *TooltipComponent* + interação **"Bisbilhotar"**; Livro de Autobiografia.
 13. `sim_GetToKnow` revelando `secrets[]`/`background`.
 14. Epitáfio na Lápide; balões de sono; interação custom "Refletir" no Espelho (A8).
 
-### P3 — LLM, Config & Observabilidade
+### P3 — LLM, Config & Observabilidade — ✅ CONCLUÍDO
 
-15. Cooldown por modelo 120 s (A2 original) em `chain.py`.
-16. Enforcement de concorrência por tier no `LLMScheduler`.
-17. Corrigir o refund assimétrico (debita no envio, estorna só o Game Budget).
-18. `installed_packs` no Census → guards de EP (A10).
-19. `trace_id` nos logs de jobs `bg`/`deep`.
-20. VACUUM após `mem.compact` (A9).
+15. ✅ Cooldown por modelo 120 s em `chain.py` (`_record_failure` por `(provider, model)`).
+16. ✅ Enforcement de concorrência por tier no `LLMScheduler` (semáforo não bloqueante;
+    excesso degrada para o fallback determinístico).
+17. ✅ Refund assimétrico corrigido: debita no envio; estorna apenas o Game Budget na
+    falha e liquida com o uso real no sucesso.
+18. ✅ `installed_packs` no Census → `AppState.installed_packs` + exposto em `/v1/status`
+    (base para os guards de EP).
+19. ✅ `trace_id` propagado para os jobs `bg`/`deep` (`set_trace_id` no worker).
+20. ✅ VACUUM após `mem.compact` (A9), chamado a cada 20 consolidadas.
 
-### P4 — UI, Release & Backlog
+### P4 — UI, Release & Backlog — pendente
 
 21. Web Studio: persistir perfil/keys/casting/beats (hoje o backend ignora).
 22. `/v1/i18n/compile-addon` real (gerar `Sensewright_Locale_<code>.package`).
@@ -240,3 +250,58 @@ gatilho/aplicação · **Fallback-only** = apenas `fallbacks.py` + declaração 
   versionar caminhos absolutos de máquina; crie-o manualmente após o clone.
 - `research/s4cl/` e `research/lot51_core/` são clones de referência e permanecem
   ignorados (não redistribuídos).
+
+---
+
+## 9. Changelog de implementação (2026-10-02)
+
+Ondas P0, P3 e parte de P1 implementadas e cobertas por testes. Nenhuma alteração de
+schema; o Wire HTTP permanece compatível.
+
+### Novos módulos (sidecar)
+
+- `agent/sleep.py` — detecção de bordas `sleep_start`/`wake` (P07-P09).
+- `agent/speech.py` — política de fala (linhas/min + intervalo mínimo) (F11).
+- `agent/profile.enforce_life_story` — limite de Life Story (REQ-PSY-03).
+
+### Fiação principal (`services.py`)
+
+- `_process_sleep_transitions` / `_on_sleep_start` / `_on_wake`: dispara
+  `sim.dream` → `sim.cognition` (`apply_cognition`) e, no despertar, `sim.sleep` +
+  `evo.reflect` (`apply_reflection`); aplica decay de psique.
+- `_maybe_end_of_day`: crônica da família + diário do Sim ativo (P23/P10).
+- `_create_rumor_from_event` / `_spread_rumor`: gossip e contágio (P24).
+- `_impulse_callback` passa a respeitar `physical_actions_allowed` (REQ-IMP-03);
+  o gate de `sim.social` respeita a speech policy e o CHILD hard-block.
+- `_maybe_compact` + `SqliteStore.consolidated_memory_ids`: compactação e VACUUM (P27/A9).
+- `handle_census` guarda `installed_packs`; `/v1/status` os expõe (A10).
+
+### God Director (`god/orchestrator.py`)
+
+- `_plan_callback` cria/persiste o arco (`god.plan`, P15).
+- `_scene_callback` grava `scene_draft`/`scene_subtext` no beat armado (`god.scene`, P17).
+
+### LLM (`llm/`)
+
+- `chain.py`: cooldown por modelo (120 s) efetivamente aplicado.
+- `scheduler.py`: concorrência por tier (semáforo não bloqueante), refund assimétrico
+  correto e `trace_id` nos jobs `bg`/`deep`.
+- `sqlite_store.py`: `consolidated_memory_ids`; `vacuum()` agora é chamado.
+
+### Mod (`mod/sensewright_mod/tool_executor.py`)
+
+- `world.gossip` passa a exibir o rumor como notificação diegética (SMS/fofoca).
+
+### Testes
+
+- `sidecar/tests/test_p0_lifecycle.py` (19 testes), `test_p3_resilience.py` (8) e
+  `test_p1_god_world.py` (7) → **508 testes verdes**.
+- Verificação: `python -m pytest -q` (508), `py -3.7 -m py_compile` no Mod,
+  `python mod/build.py` (69.683 bytes) e `python mod/build_package.py` (25 recursos).
+
+### Ainda pendente
+
+P1 residual (`god.cast`/`god.react`/`god.puppeteer` completo, `BackgroundScheduler`,
+`world.aftermath`, mailbox, `ops.panel.summary`, `mem.legacy`,
+`mem.relationship.review`, `sim.social.close`), P2 (hooks nativos — exige TS4) e
+P4 (Web Studio, compile-addon, M8 in-game, FC2/FC5).

@@ -7,11 +7,61 @@ from typing import Any, Dict, List, Optional
 from ..agent import normalize_intent
 from ..observability.logging import get_logger
 from ..state import AppState
-from .arcs import advance_arc, current_beat, load_active_arc, save_arc, steer_arc
+from .arcs import (
+    advance_arc, create_arc, current_beat, load_active_arc, save_arc, steer_arc,
+)
 from .controls import current_preset, resolve_dial, resolve_mode
 from .puppeteer import run_puppeteer
 
 logger = get_logger("god.orchestrator")
+
+
+def _plan_callback(state: AppState, tick: int):
+    """Background callback: build and persist an arc from a god.plan result (P15)."""
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            beats = data.get("beats", []) or []
+            if not beats:
+                return
+            arc = create_arc(
+                data.get("theme", ""), beats, data.get("cast", []) or [], tick,
+            )
+            store = state.working_store()
+            if store is not None:
+                save_arc(store, arc)
+                state.active_arc = arc
+                logger.info("god.plan created arc id=%s beats=%d", arc["id"], len(beats))
+        except Exception:  # noqa: BLE001
+            logger.exception("god.plan callback failed")
+
+    return _callback
+
+
+def _scene_callback(state: AppState, arc: Dict[str, Any], beat_idx: int):
+    """Background callback: fold a god.scene draft into the armed beat (P17)."""
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            beat = current_beat(arc)
+            if beat is None:
+                return
+            beat["scene_draft"] = data.get("scene_draft", "")
+            beat["scene_subtext"] = data.get("scene_subtext", "")
+            beats = list(arc.get("beats", []) or [])
+            if 0 <= beat_idx < len(beats):
+                beats[beat_idx] = beat
+                arc["beats"] = beats
+            store = state.working_store()
+            if store is not None:
+                save_arc(store, arc)
+            state.active_arc = arc
+        except Exception:  # noqa: BLE001
+            logger.exception("god.scene callback failed")
+
+    return _callback
 
 
 def _narration_callback(state: AppState):
@@ -57,6 +107,7 @@ def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, A
                 "god.plan",
                 {"save_id": save_id, "world_sim_tick": tick, "preset": current_preset(state.panel, state.config)},
                 lang, dedup_key="{}:{}:god:plan".format(save_id, tick // 720),
+                callback=_plan_callback(state, tick),
             )
         return {
             "directives": directives,
@@ -68,7 +119,8 @@ def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, A
     beat = current_beat(active_arc)
     if beat and not beat.get("armed"):
         beat["armed"] = True
-        active_arc["beats"][int(active_arc.get("current_beat_idx", 0))] = beat
+        beat_idx = int(active_arc.get("current_beat_idx", 0))
+        active_arc["beats"][beat_idx] = beat
         save_arc(store, active_arc) if store else None
         # Narration is a realtime LLM call; run it in the background so the
         # autonomy tick response is never blocked by provider latency.
@@ -77,6 +129,14 @@ def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, A
             {"sim_name": "", "world_sim_tick": tick, "beat": beat.get("title", "")},
             lang,
             callback=_narration_callback(state),
+        )
+        # Prepare the catalyst scene draft for P18 (god.puppeteer).
+        state.scheduler.submit_bg(
+            "god.scene",
+            {"save_id": save_id, "world_sim_tick": tick, "beat": beat,
+             "theme": active_arc.get("theme", "")},
+            lang, dedup_key="{}:{}:god:scene".format(save_id, beat_idx),
+            callback=_scene_callback(state, active_arc, beat_idx),
         )
 
     state.active_arc = active_arc

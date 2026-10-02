@@ -15,14 +15,19 @@ from .impulse import (
     build_impulse_context, build_reaction_context, physical_actions_allowed,
 )
 from .intents import normalize_intent, validate_intent
-from .presence import capabilities, excluded_from_seats, presence_tier, sensory_only
-from .profile import normalize_profile, template_profile
+from .presence import (
+    capabilities, excluded_from_seats, hard_blocked_social, presence_tier,
+    sensory_only,
+)
+from .profile import enforce_life_story, normalize_profile, template_profile
 from .psyche import (
     block_for_category, compute_salience, decay_blocks, is_salient,
     reinforce_block, strongest_block,
 )
 from .seats import SeatManager
+from .sleep import sleep_transition
 from .social import build_social_context, has_rumor_to_spread, preflight
+from .speech import record_speech, resolve_limits, speech_allowed
 
 __all__ = [
     "build_chat_context", "extract_thought", "is_deferred", "strip_thought",
@@ -34,9 +39,11 @@ __all__ = [
     "build_impulse_context", "build_reaction_context", "physical_actions_allowed",
     "normalize_intent", "validate_intent",
     "capabilities", "excluded_from_seats", "presence_tier", "sensory_only",
-    "normalize_profile", "template_profile",
+    "enforce_life_story", "normalize_profile", "template_profile",
     "block_for_category", "compute_salience", "decay_blocks", "is_salient",
     "reinforce_block", "strongest_block",
     "SeatManager",
-    "build_social_context", "has_rumor_to_spread", "preflight",
+    "sleep_transition",
+    "build_social_context", "hard_blocked_social", "has_rumor_to_spread", "preflight",
+    "record_speech", "resolve_limits", "speech_allowed",
 ]

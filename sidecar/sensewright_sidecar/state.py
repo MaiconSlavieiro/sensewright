@@ -38,6 +38,8 @@ class AppState:
         self.current_lang: str = ""
         self.census: Dict[int, Dict[str, Any]] = {}
         self.relationships: Dict[str, Dict[str, Any]] = {}
+        #: Expansion packs installed in the running game (A10 / EP guards).
+        self.installed_packs: set = set()
 
         # IntentBus: intents produced this tick, returned to the mod on pull.
         self._pending_intents: List[Dict[str, Any]] = []
@@ -54,6 +56,17 @@ class AppState:
         # God Director state.
         self.active_arc: Optional[Dict[str, Any]] = None
         self.catalyst_leases: Dict[int, Dict[str, Any]] = {}
+
+        # Sleep-cycle edge detection + per-sim daily cadence (F07 / P07-P09).
+        self.sleep_state: Dict[int, bool] = {}
+        self.salient_since_sleep: Dict[int, bool] = {}
+        self.last_reflect_tick: Dict[int, int] = {}
+        self.last_psyche_decay_tick: Dict[int, int] = {}
+        #: Last in-game day for which the end-of-day pipeline ran (P23/P10).
+        self.last_day_tick: int = 0
+
+        # Speech pacing: sim_id -> wall-clock timestamps of recent lines (F11).
+        self.speak_history: Dict[int, List[float]] = {}
 
         # Player-activity lock: sim_id -> absolute wall-clock expiry.
         self.player_lock_until: Dict[int, float] = {}
@@ -146,9 +159,16 @@ class AppState:
             self.seats = {}
             self.active_arc = None
             self.catalyst_leases = {}
+            self.sleep_state = {}
+            self.salient_since_sleep = {}
+            self.last_reflect_tick = {}
+            self.last_psyche_decay_tick = {}
+            self.last_day_tick = 0
+            self.speak_history = {}
             self.player_lock_until = {}
             self.census = {}
             self.relationships = {}
+            self.installed_packs = set()
             self.rumors_cache = {}
 
 

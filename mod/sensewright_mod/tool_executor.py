@@ -423,8 +423,22 @@ class GameLever(object):
                 return True, {'weather_set': weather_type}
 
             elif command == 'world.gossip':
-                # Sidecar handles gossip generation
-                return True, {'gossip_triggered': True}
+                # Surface a neighborhood rumor as a diegetic "SMS" notification
+                # (P24 consumer). The sidecar owns rumor generation/contagion.
+                text = args.get('text', '') or args.get('rumor', '')
+                sender = args.get('from', '')
+                if text:
+                    try:
+                        from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification
+                        from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
+                        body = '{}: {}'.format(sender, text) if sender else text
+                        CommonBasicNotification(
+                            CommonLocalizationUtils.create_localized_string('Sensewright'),
+                            CommonLocalizationUtils.create_localized_string(body),
+                        ).show()
+                    except Exception as e:
+                        log_exception('Gossip SMS error: {}'.format(e))
+                return True, {'gossip_triggered': True, 'sms_shown': bool(text)}
 
             elif command == 'zone.modifier':
                 modifier = args.get('modifier', '')

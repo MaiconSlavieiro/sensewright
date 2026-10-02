@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..constants import SOCIAL_MAX_DISTANCE_M, SPEECH_DEFAULTS
-from .presence import capabilities
+from .presence import capabilities, hard_blocked_social
 
 
 def preflight(
@@ -19,14 +19,23 @@ def preflight(
     sim_b: Dict[str, Any],
     active_sim_id: Optional[int],
     hearing_radius: float = SPEECH_DEFAULTS["hearing_radius_m"],
+    category: Optional[str] = None,
 ) -> Dict[str, bool]:
-    """Run the F04 pre-flight gate; returns a dict of per-check booleans."""
+    """Run the F04 pre-flight gate; returns a dict of per-check booleans.
+
+    When ``category`` is known (e.g. from a puppeteer objective), the CHILD
+    hard-block (flirty/intimate) is enforced here (F12 / REQ-PRE-02).
+    """
     result = {
         "capable_a": capabilities(sim_a.get("species"), sim_a.get("age_stage"))["can_social"],
         "capable_b": capabilities(sim_b.get("species"), sim_b.get("age_stage"))["can_social"],
         "same_room": sim_a.get("room_id") is not None and sim_a.get("room_id") == sim_b.get("room_id"),
         "within_distance": _within_distance(sim_a, sim_b, SOCIAL_MAX_DISTANCE_M),
         "within_hearing": _within_hearing(sim_a, sim_b, active_sim_id, hearing_radius),
+        "category_ok": not (
+            hard_blocked_social(category, sim_a.get("age_stage"))
+            or hard_blocked_social(category, sim_b.get("age_stage"))
+        ),
     }
     result["ok"] = all(result.values())
     return result

@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 from ..fallbacks import render_fallback
-from ..observability.logging import get_logger
+from ..observability.logging import get_logger, set_trace_id
 from ..purposes import get_purpose
 from ..schemas import generate_trace_id, normalize_lang, sanitize_payload
 from .base import LLMError, LLMJob, LLMResult, LLMTimeout, ProviderResponse
@@ -129,8 +129,24 @@ class LLMScheduler:
         self._queue: "queue.Queue[LLMJob]" = queue.Queue()
         self._in_flight: set = set()
         self._lock = threading.Lock()
+        #: Per-tier concurrency gates (REQ-SCHED-01). A tier with concurrency=1
+        #: serializes its calls; realtime/interactive benefit most since they
+        #: run synchronously on multiple HTTP threads.
+        self._tier_sems: Dict[str, threading.BoundedSemaphore] = {}
         self._worker = threading.Thread(target=self._worker_loop, name="sensewright-llm-worker", daemon=True)
         self._worker.start()
+
+    def _tier_semaphore(self, tier: str) -> Optional[threading.BoundedSemaphore]:
+        with self._lock:
+            sem = self._tier_sems.get(tier)
+            if sem is None:
+                try:
+                    limit = int(self._config.tier(tier).get("concurrency", 1))
+                except Exception:  # noqa: BLE001
+                    limit = 1
+                sem = threading.BoundedSemaphore(max(1, limit))
+                self._tier_sems[tier] = sem
+            return sem
 
     # ── public API ───────────────────────────────────────────────────────
     def run_purpose(
@@ -166,6 +182,7 @@ class LLMScheduler:
         temperature = 0.0 if tier_cfg.get("thinking_budget") == 0 else 0.7
 
         messages = self._assembler.assemble(purpose_id, context, lang)
+        sim_id = context.get("sim_id")
 
         def _usable(response: ProviderResponse) -> bool:
             # Reject HTTP-200 generations we cannot parse; the chain then benches
@@ -176,16 +193,35 @@ class LLMScheduler:
                 or _recover_structured(purpose_id, response.text)
             )
 
-        response, provider_name, model = self._chain.run(
-            purpose_id, messages, max_tokens=max_out,
-            temperature=temperature, timeout=slo, validator=_usable,
-        )
+        # Enforce per-tier concurrency (REQ-SCHED-01). Excess calls degrade to
+        # the deterministic fallback instead of queueing behind a slow peer.
+        sem = self._tier_semaphore(tier)
+        if not sem.acquire(blocking=False):
+            return LLMResult(
+                ok=True, data=render_fallback(purpose_id, lang, context),
+                fallback=True, error="tier concurrency saturated",
+                latency_s=time.time() - started,
+            )
+
+        # Asymmetric game budget (REQ-SCHED-02): debit the estimate at dispatch;
+        # only the game budget is refunded on failure, never provider limits.
+        est = estimate_tokens(json.dumps(messages, ensure_ascii=False)) + max_out
+        if sim_id is not None:
+            self._budgeter.spend(int(sim_id), est)
+        response, provider_name, model = None, None, None
+        try:
+            response, provider_name, model = self._chain.run(
+                purpose_id, messages, max_tokens=max_out,
+                temperature=temperature, timeout=slo, validator=_usable,
+            )
+        except Exception:  # noqa: BLE001 - never let the chain crash the caller
+            logger.exception("chain dispatch failed for %s", purpose_id)
+        finally:
+            sem.release()
 
         latency = time.time() - started
-        sim_id = context.get("sim_id")
         if response is None:
-            # All routes failed/timeout — refund game budget (asymmetric rule).
-            est = estimate_tokens(json.dumps(messages, ensure_ascii=False)) + max_out
+            # All routes failed/timeout — refund the game budget (asymmetric rule).
             if sim_id is not None:
                 self._budgeter.refund(int(sim_id), est)
             return LLMResult(
@@ -207,6 +243,8 @@ class LLMScheduler:
         data = sanitize_payload(data)
 
         if sim_id is not None:
+            # Settle the dispatch estimate against the provider-reported usage.
+            self._budgeter.refund(int(sim_id), est)
             self._budgeter.spend(int(sim_id), response.total_tokens or est)
         logger.info(
             "llm.route purpose=%s provider=%s model=%s latency=%.2fs tokens=%s",
@@ -248,6 +286,9 @@ class LLMScheduler:
         while True:
             job = self._queue.get()
             try:
+                # Propagate the originating trace id into the worker thread so
+                # bg/deep log lines stay greppable (REQ-OBS-01).
+                set_trace_id(job.trace_id or "-")
                 result = self.run_purpose(
                     job.purpose_id, job.context, job.lang, job.trace_id,
                 )

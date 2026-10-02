@@ -353,6 +353,16 @@ class SqliteStore:
         ).fetchone()
         return int(row["c"]) if row else 0
 
+    def consolidated_memory_ids(self, sim_id: int, limit: int = 15) -> List[int]:
+        """Oldest consolidated, non-archived memory ids (FIFO archive order)."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT id FROM memories WHERE sim_id = ? AND consolidated = 1 AND archived = 0 "
+            "ORDER BY created_sim_tick ASC, id ASC LIMIT ?",
+            (int(sim_id), int(limit)),
+        ).fetchall()
+        return [int(r["id"]) for r in rows]
+
     # ── relationships ────────────────────────────────────────────────────
     def upsert_relationship(
         self,

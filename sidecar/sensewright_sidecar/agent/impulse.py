@@ -67,8 +67,14 @@ def build_impulse_context(
     is_off_lot_duty: bool,
     is_sleeping: bool,
     tick: int,
+    schedule_blocks: Any = None,
 ) -> Dict[str, Any]:
-    """Context for the ``sim.impulse`` purpose (idle)."""
+    """Context for the ``sim.impulse`` purpose (idle).
+
+    ``schedule_blocks`` (from the native census) feeds the survival &
+    punctuality guard so the LLM is told when physical actions are forbidden
+    (REQ-IMP-03).
+    """
     return {
         "sim_id": sim_id,
         "sim_name": sim_name,
@@ -78,7 +84,7 @@ def build_impulse_context(
         "current_needs": needs,
         "is_off_lot_duty": bool(is_off_lot_duty),
         "is_sleeping": bool(is_sleeping),
-        "physical_actions_allowed": physical_actions_allowed(needs, [], tick),
+        "physical_actions_allowed": physical_actions_allowed(needs, schedule_blocks, tick),
         "world_sim_tick": tick,
     }
 

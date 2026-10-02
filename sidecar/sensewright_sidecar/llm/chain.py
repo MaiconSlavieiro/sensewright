@@ -44,6 +44,7 @@ class ProviderChain:
         self._clients: Dict[str, Provider] = {}
         self._consecutive_failures: Dict[str, int] = {}
         self._circuit_cold_until: Dict[str, float] = {}
+        self._model_failures: Dict[Tuple[str, str], int] = {}
         self._model_cooldown_until: Dict[Tuple[str, str], float] = {}
         self._invalid_cooldown_until: Dict[Tuple[str, str], float] = {}
 
@@ -90,10 +91,23 @@ class ProviderChain:
                 self._consecutive_failures[name] = 0
                 logger.warning("circuit breaker opened for provider %s (60s)", name)
 
-    def _record_success(self, name: str) -> None:
+            # Per-model cooldown after repeated failures (REQ-LLM-02).
+            key = (name, model)
+            self._model_failures[key] = self._model_failures.get(key, 0) + 1
+            if self._model_failures[key] >= MODEL_COOLDOWN_FAILURES:
+                self._model_cooldown_until[key] = time.time() + MODEL_COOLDOWN_SECONDS
+                self._model_failures[key] = 0
+                logger.warning(
+                    "model %s/%s cooling for %.0fs", name, model, MODEL_COOLDOWN_SECONDS,
+                )
+
+    def _record_success(self, name: str, model: Optional[str] = None) -> None:
         with self._lock:
             self._consecutive_failures[name] = 0
             self._circuit_cold_until.pop(name, None)
+            if model is not None:
+                self._model_failures.pop((name, model), None)
+                self._model_cooldown_until.pop((name, model), None)
 
     def run(
         self,
@@ -163,7 +177,7 @@ class ProviderChain:
 
             # Success: reconcile tokens and reset failures.
             limiter.record_tokens(response.total_tokens or est_tokens)
-            self._record_success(name)
+            self._record_success(name, model)
             if validator is not None and not validator(response):
                 self._record_invalid(name, model)
                 last_error = "provider {} model {} returned unusable output".format(name, model)

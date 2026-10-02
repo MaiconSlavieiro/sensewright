@@ -98,3 +98,19 @@ MEMORY_PRUNE_DAYS = 180
 LIFE_STORY_MAX_LINES = 20
 LIFE_STORY_MAX_CHARS = 2000
 LIFE_STORY_CONTEXT_LINES = 5
+#: Consolidated memories required before a mem.compact run (P27).
+CONSOLIDATED_COMPACT_THRESHOLD = 20
+#: Oldest consolidated memories archived per compaction.
+COMPACT_ARCHIVE_COUNT = 15
+
+# ── Dual-clock conversion ──────────────────────────────────────────────────
+#: The mod's autonomy pulse reports 1000 ticks per sim-minute (see
+#: ``mod/sensewright_mod/main.py``). Used to convert sim-clock spans to days.
+TICKS_PER_SIM_MINUTE = 1000
+TICKS_PER_SIM_SECOND = TICKS_PER_SIM_MINUTE / 60.0
+#: Sim-minutes in one in-game day (used for psyche decay / reflect cadence).
+SIM_MINUTES_PER_DAY = 1440
+TICKS_PER_SIM_DAY = SIM_MINUTES_PER_DAY * TICKS_PER_SIM_MINUTE
+
+#: God Director intervention roll cadence (one rolled plan per sim-day window).
+GOD_PLAN_WINDOW_TICKS = TICKS_PER_SIM_DAY
