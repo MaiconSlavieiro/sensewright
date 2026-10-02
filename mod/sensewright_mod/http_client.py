@@ -56,9 +56,11 @@ def get_inbound_intents_queue():
 def _read_python_txt():
     """Read the sidecar Python executable from sidecar/python.txt."""
     try:
-        # Look for python.txt relative to the mod's location
-        mod_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        python_txt = os.path.join(mod_dir, 'sidecar', 'python.txt')
+        # The sidecar lives next to the .ts4script (sibling of the installed
+        # mod folder), matching the i18n bundle resolution convention: three
+        # dirname hops from __file__ reach the real Mods\Sensewright folder.
+        mod_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        python_txt = os.path.join(mod_root, 'sidecar', 'python.txt')
         if os.path.exists(python_txt):
             with open(python_txt, 'r', encoding='utf-8') as f:
                 line = f.readline().strip()
@@ -81,8 +83,8 @@ def _start_sidecar_process():
             pass
 
     python_exe = _read_python_txt()
-    mod_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sidecar_dir = os.path.join(mod_dir, 'sidecar')
+    mod_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sidecar_dir = os.path.join(mod_root, 'sidecar')
     sidecar_main = os.path.join(sidecar_dir, 'main.py')
 
     if not os.path.exists(sidecar_main):
@@ -95,10 +97,18 @@ def _start_sidecar_process():
         if sys.platform == 'win32':
             creation_flags = 0x08000000
 
+        # Bind the sidecar lifetime to the game: the PID is passed at launch so
+        # the sidecar watchdog can shut it down when the game exits, even if the
+        # /lifecycle/attach request never lands.
+        game_pid = str(os.getpid())
+        env = dict(os.environ)
+        env['SENSEWRIGHT_GAME_PID'] = game_pid
+
         _sidecar_process = subprocess.Popen(
-            [python_exe, 'main.py'],
+            [python_exe, 'main.py', '--game-pid', game_pid],
             cwd=sidecar_dir,
             creationflags=creation_flags,
+            env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL
@@ -154,7 +164,9 @@ def _make_request(method, endpoint, payload=None, timeout=None):
     headers = {'Content-Type': 'application/json'}
     data = None
     if payload is not None:
-        data = json.dumps(payload).encode('utf-8')
+        # default=str keeps game objects (e.g. FamilyFunds) from aborting a
+        # request with a non-serializable payload.
+        data = json.dumps(payload, default=str).encode('utf-8')
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
@@ -320,21 +332,42 @@ def process_inbound_queue():
     return processed
 
 
+def _queue_response_intents(response):
+    """Add any intents carried by a sidecar response to the intent bus."""
+    if not isinstance(response, dict):
+        return
+    intents = response.get('intents')
+    if not intents:
+        return
+    try:
+        from sensewright_mod.intent_bus import get_intent_bus
+        get_intent_bus().add_intents(intents)
+        worker_log_info('queued {} intent(s) from sidecar: {}'.format(
+            len(intents), [i.get('kind') for i in intents if isinstance(i, dict)]))
+    except Exception as e:
+        from sensewright_mod.debug_log import log_exception
+        log_exception('Failed to queue response intents: {}'.format(e))
+
+
 def _handle_inbound_item(item):
     """Handle an inbound item (response or intents)."""
     try:
         item_type = item.get('type')
         if item_type == 'response':
+            response = item.get('response')
             callback = item.get('callback')
             if callback is not None:
                 try:
-                    callback(item.get('response'), item.get('trace_id'))
+                    callback(response, item.get('trace_id'))
                 except Exception as e:
                     from sensewright_mod.debug_log import log_exception
                     log_exception('Callback error: {}'.format(e))
+            else:
+                # Responses without a callback (e.g. /autonomy/tick) can carry
+                # intents the sidecar wants applied on the main thread.
+                _queue_response_intents(response)
         elif item_type == 'intents':
-            # Direct intents from sidecar (if any)
-            pass
+            _queue_response_intents(item)
     except Exception as e:
         from sensewright_mod.debug_log import log_exception
         log_exception('Inbound item handling error: {}'.format(e))
@@ -401,7 +434,7 @@ def post_autonomy_tick(trace_id, player_id, save_id, world_sim_tick, clock_speed
     })
 
 
-def post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, message, lang):
+def post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, message, lang, callback=None):
     return post_async('/chat', {
         'trace_id': trace_id,
         'sim_id': sim_id,
@@ -411,10 +444,10 @@ def post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, mes
         'world_sim_tick': world_sim_tick,
         'message': message,
         'lang': lang
-    })
+    }, callback=callback)
 
 
-def post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, message, lang):
+def post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, message, lang, callback=None):
     return post_async('/hey', {
         'trace_id': trace_id,
         'sim_id': sim_id,
@@ -423,7 +456,7 @@ def post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, message, lang
         'world_sim_tick': world_sim_tick,
         'message': message,
         'lang': lang
-    })
+    }, callback=callback)
 
 
 def post_events(trace_id, sim_id, player_id, save_id, world_sim_tick,

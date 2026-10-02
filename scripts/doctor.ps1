@@ -37,6 +37,15 @@ function Check($name, $condition, $msgOk, $msgFail, $isWarning=$false) {
     }
 }
 
+# Depth-safe JSON parsing (Windows PowerShell 5.1's ConvertFrom-Json has no
+# -Depth parameter and truncates at depth 2).
+function ConvertFrom-JsonDeep([string]$content) {
+    Add-Type -AssemblyName System.Web.Extensions -ErrorAction SilentlyContinue
+    $serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $serializer.MaxJsonLength = 1073741824
+    return $serializer.DeserializeObject($content)
+}
+
 # Python versions
 Write-Host "Python Versions:" -ForegroundColor White
 $py37 = $null
@@ -80,13 +89,15 @@ $modFiles = @(
     'sensewright_mod\intent_bus.py',
     'sensewright_mod\tool_executor.py',
     'sensewright_mod\native_hooks.py',
+    'sensewright_mod\tuning.py',
     'sensewright_mod\chat_ui.py',
     'sensewright_mod\panel_ui.py',
     'sensewright_mod\pie_menu.py',
+    'sensewright_mod\interactions.py',
     'sensewright_mod\player_activity.py',
     'sensewright_mod\i18n.py',
-    'sensewright_mod\locales\en.json',
-    'sensewright_mod\locales\pt-BR.json',
+    'sensewright_mod\locales\ui\en-US.json',
+    'sensewright_mod\locales\ui\pt-BR.json',
     'sensewright_mod\locales\manifest.json'
 )
 
@@ -99,12 +110,12 @@ Write-Host ""
 
 # Locale JSON validity
 Write-Host "Locale JSON Validity:" -ForegroundColor White
-foreach ($lang in 'en', 'pt-BR') {
-    $path = Join-Path $ModDir "sensewright_mod\locales\$lang.json"
+foreach ($lang in 'en-US', 'pt-BR') {
+    $path = Join-Path $ModDir "sensewright_mod\locales\ui\$lang.json"
     if (Test-Path $path) {
         try {
             $content = Get-Content $path -Raw -Encoding UTF8
-            $json = $content | ConvertFrom-Json -Depth 100
+            $json = ConvertFrom-JsonDeep $content
             Check "Locale: $lang" $true 'Valid JSON' 'Invalid JSON'
         } catch {
             Check "Locale: $lang" $false "Invalid JSON: $($_.Exception.Message)"
@@ -114,20 +125,21 @@ foreach ($lang in 'en', 'pt-BR') {
     }
 }
 
-# Check key parity between en and pt-BR
-$enPath = Join-Path $ModDir 'sensewright_mod\locales\en.json'
-$ptPath = Join-Path $ModDir 'sensewright_mod\locales\pt-BR.json'
+# Check key parity between en-US and pt-BR
+$enPath = Join-Path $ModDir 'sensewright_mod\locales\ui\en-US.json'
+$ptPath = Join-Path $ModDir 'sensewright_mod\locales\ui\pt-BR.json'
 if ((Test-Path $enPath) -and (Test-Path $ptPath)) {
-    $enJson = (Get-Content $enPath -Raw -Encoding UTF8) | ConvertFrom-Json -Depth 100
-    $ptJson = (Get-Content $ptPath -Raw -Encoding UTF8) | ConvertFrom-Json -Depth 100
+    $enJson = ConvertFrom-JsonDeep (Get-Content $enPath -Raw -Encoding UTF8)
+    $ptJson = ConvertFrom-JsonDeep (Get-Content $ptPath -Raw -Encoding UTF8)
 
     function GetAllKeys($obj, $prefix='') {
         $keys = @()
-        if ($obj -is [System.Collections.Hashtable] -or $obj -is [PSCustomObject]) {
-            foreach ($prop in $obj.PSObject.Properties) {
-                $newPrefix = if ($prefix) { "$prefix.$($prop.Name)" } else { $prop.Name }
-                if ($prop.Value -is [System.Collections.Hashtable] -or $prop.Value -is [PSCustomObject]) {
-                    $keys += GetAllKeys $prop.Value $newPrefix
+        if ($obj -is [System.Collections.IDictionary]) {
+            foreach ($key in $obj.Keys) {
+                $newPrefix = if ($prefix) { "$prefix.$key" } else { $key }
+                $value = $obj[$key]
+                if ($value -is [System.Collections.IDictionary]) {
+                    $keys += GetAllKeys $value $newPrefix
                 } else {
                     $keys += $newPrefix
                 }
@@ -164,10 +176,16 @@ foreach ($f in $tuningFiles) {
     Check "Tuning: $rel" $true 'Exists' 'Missing'
 }
 
-if (-not (Test-Path (Join-Path $ModDir 'tuning\stbl.json'))) {
-    Check 'STBL source' $false 'stbl.json not found'
+if (-not (Test-Path (Join-Path $ModDir 'dist\stbl_keys.json'))) {
+    Check 'STBL keys' $false 'dist\stbl_keys.json not found (run build_package.py)' $true
 } else {
-    Check 'STBL source' $true 'stbl.json exists'
+    Check 'STBL keys' $true 'dist\stbl_keys.json exists'
+}
+
+if (-not (Test-Path (Join-Path $ModDir 'dist\tuning_ids.json'))) {
+    Check 'Tuning IDs' $false 'dist\tuning_ids.json not found (run build_package.py)' $true
+} else {
+    Check 'Tuning IDs' $true 'dist\tuning_ids.json exists'
 }
 
 Write-Host ""
@@ -209,11 +227,17 @@ Write-Host ""
 # TS4 Mods folder
 Write-Host "The Sims 4 Environment:" -ForegroundColor White
 $modsDir = "$env:USERPROFILE\Documents\Electronic Arts\The Sims 4\Mods"
+# Support OneDrive-redirected Documents folders.
+$oneDriveModsDir = "$env:USERPROFILE\OneDrive\Documents\Electronic Arts\The Sims 4\Mods"
+if ((Test-Path $oneDriveModsDir) -and -not (Test-Path $modsDir)) {
+    $modsDir = $oneDriveModsDir
+}
 Check 'Mods folder' (Test-Path $modsDir) 'Exists' 'Not found' $true
 
 if (Test-Path $modsDir) {
-    $installedTs4script = Get-ChildItem $modsDir -Filter 'Sensewright*.ts4script' -ErrorAction SilentlyContinue
-    $installedPackage = Get-ChildItem $modsDir -Filter 'Sensewright*.package' -ErrorAction SilentlyContinue
+    # Installed under Mods\Sensewright\ (or directly in Mods).
+    $installedTs4script = Get-ChildItem $modsDir -Filter 'Sensewright*.ts4script' -Recurse -ErrorAction SilentlyContinue
+    $installedPackage = Get-ChildItem $modsDir -Filter 'Sensewright*.package' -Recurse -ErrorAction SilentlyContinue
 
     Check 'Installed .ts4script' ($installedTs4script.Count -gt 0) ("Found: $($installedTs4script.Name)") 'Not installed' $true
     Check 'Installed .package' ($installedPackage.Count -gt 0) ("Found: $($installedPackage.Name)") 'Not installed' $true

@@ -354,8 +354,8 @@ make decompile  # decompila scripts TS4 para referência (precisa unpyc3)
 Verifica:
 - Disponibilidade de Python 3.7 (`py -3.7`) e 3.10+ (`python`)
 - Todos arquivos fonte do mod presentes
-- Validade JSON dos locales + paridade de chaves (en vs pt-BR)
-- XMLs de tuning + `stbl.json` existem
+- Validade JSON dos locales + paridade de chaves (en-US vs pt-BR)
+- XMLs de tuning presentes + `dist/stbl_keys.json` e `dist/tuning_ids.json` gerados
 - Artefatos de build (`.ts4script`, `.package`) existem e são ZIP/DBPF válidos
 - Diretório sidecar + `python.txt` + `main.py`
 - Pasta Mods do TS4 + artefatos instalados

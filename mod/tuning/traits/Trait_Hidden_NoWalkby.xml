@@ -1,33 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<I c="Trait" i="trait" m="traits.sensewright" n="Trait_Hidden_NoWalkby" s="1234567890123456810">
-  <V n="trait_type" t="trait_type">PERSONALITY</V>
-  <V n="hidden" t="hidden">True</V>
-  <V n="name" t="localized_string" p="STBL">stbl.trait.hidden_no_walkby.name</V>
-  <V n="description" t="localized_string" p="STBL">stbl.trait.hidden_no_walkby.desc</V>
-  <V n="icon" t="reference">0</V>
-  <V n="conflicting_traits" t="conflicting_traits">
-    <L/>
-  </V>
-  <V n="available_for" t="available_for">
-    <U>
-      <V n="ages" t="ages">
-        <E>CHILD</E>
-        <E>TEEN</E>
-        <E>YOUNGADULT</E>
-        <E>ADULT</E>
-        <E>ELDER</E>
-      </V>
-      <V n="species" t="species">
-        <E>HUMAN</E>
-      </V>
-    </U>
-  </V>
-  <V n="loot_on_addition" t="loot_on_addition">
-    <L/>
-  </V>
-  <V n="loot_on_removal" t="loot_on_removal">
-    <L/>
-  </V>
-  <V n="suppress_walkby" t="suppress_walkby">True</V>
-  <V n="prevent_culling" t="prevent_culling">True</V>
+<I c="Trait" i="trait" m="traits.traits" n="Trait_Hidden_NoWalkby" s="1234567890123456810">
+  <L n="ages">
+    <E>BABY</E>
+    <E>INFANT</E>
+    <E>TODDLER</E>
+    <E>CHILD</E>
+    <E>TEEN</E>
+    <E>YOUNGADULT</E>
+    <E>ADULT</E>
+    <E>ELDER</E>
+  </L>
+  <L n="species">
+    <E>HUMAN</E>
+  </L>
+  <L n="conflicting_traits" />
+  <T n="buffs_add_on_spawn_only">False</T>
+  <V n="display_name" t="localized_string" p="STBL">stbl.trait.hidden_no_walkby.name</V>
+  <V n="display_name_gender_neutral" t="localized_string" p="STBL">stbl.trait.hidden_no_walkby.name</V>
+  <V n="trait_description" t="localized_string" p="STBL">stbl.trait.hidden_no_walkby.desc</V>
+  <V n="trait_origin_description" t="localized_string" p="STBL">stbl.trait.hidden_no_walkby.desc</V>
+  <E n="trait_type">HIDDEN</E>
 </I>

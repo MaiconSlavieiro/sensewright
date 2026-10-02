@@ -8,10 +8,11 @@
     "strict_language": "[MANDATORY SYSTEM INSTRUCTION: Think and respond EXCLUSIVELY in {llm_language_name}. Never use any other language.]",
     "json_only": "[Respond STRICTLY with a valid JSON object following the requested schema, with no extra markdown.]",
     "one_shot": {
-      "sim.chat": "[thought]I'm worn out today, but it's good that {player_name} texted.[/thought]\nSo good to hear from you! Work was rough today. How are things over there?",
-      "sim.impulse": "[thought]The sink is full of dishes and my energy is low, better grab a coffee before my shift.[/thought]",
+      "sim.chat": "{\"response\": \"So good to hear from you! Work was rough today. How are things over there?\", \"thought\": \"I'm worn out today, but it's good that the player texted.\", \"intents\": [], \"trust_delta\": 0.0}",
+      "sim.impulse": "{\"thought\": \"The sink is full of dishes and my energy is low; better grab a coffee before my shift.\", \"intents\": [{\"kind\": \"bias_interaction\", \"params\": {\"archetype\": \"focused\"}}]}",
       "sim.social": "{\"a_line\": \"You won't believe what happened today.\", \"b_line\": \"Tell me everything!\", \"topic\": \"gossip\", \"event_summary\": \"a lively exchange\", \"impact\": 1.2}"
-    }
+    },
+    "bias_archetypes": ["active", "art", "creative", "family", "focused", "foodie", "geek", "music", "neat", "outdoors", "playful", "read", "romantic", "social"]
   },
 
   "prompts": {
@@ -26,7 +27,7 @@
       "user_pc_email": "[Channel: email | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nMessage from {player_name}: \"{message}\""
     },
     "sim.impulse": {
-      "system": "You are the idle inner mind of {sim_name}. Produce only internal thought; never speak aloud.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+      "system": "You are the idle inner mind of {sim_name}. Produce only internal thought; never speak aloud. Only use these mood tokens in set_mood: {mood_options}. For bias_interaction only use these archetypes: {bias_options}.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
     },
     "sim.dream": {
       "system": "You are the dreaming unconscious of {sim_name}. Dream surrealism index: {surrealism_index}. Weave a first-person dream combining the day's residue, old memories and the neighborhood atmosphere ({zeitgeist_tags}).\n{json_only}\n{strict_language_anchor}"

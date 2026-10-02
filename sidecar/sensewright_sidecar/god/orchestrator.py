@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 from typing import Any, Dict, List, Optional
 
+from ..agent import normalize_intent
 from ..observability.logging import get_logger
 from ..state import AppState
 from .arcs import advance_arc, current_beat, load_active_arc, save_arc, steer_arc
@@ -11,6 +12,26 @@ from .controls import current_preset, resolve_dial, resolve_mode
 from .puppeteer import run_puppeteer
 
 logger = get_logger("god.orchestrator")
+
+
+def _narration_callback(state: AppState):
+    """Background callback: turn a god.narration result into a command intent."""
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            text = data.get("narration", "")
+            if text:
+                state.enqueue_intents([normalize_intent({
+                    "sim_id": 0,
+                    "kind": "command",
+                    "params": {"visual_type": "SPECIAL_MOMENT", "text": text},
+                    "source": "god",
+                }, default_source="god")])
+        except Exception:  # noqa: BLE001
+            logger.exception("god.narration callback failed")
+
+    return _callback
 
 
 def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, Any]:
@@ -49,17 +70,14 @@ def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, A
         beat["armed"] = True
         active_arc["beats"][int(active_arc.get("current_beat_idx", 0))] = beat
         save_arc(store, active_arc) if store else None
-        narration = state.scheduler.run_purpose(
+        # Narration is a realtime LLM call; run it in the background so the
+        # autonomy tick response is never blocked by provider latency.
+        state.scheduler.submit_bg(
             "god.narration",
             {"sim_name": "", "world_sim_tick": tick, "beat": beat.get("title", "")},
             lang,
-        ).data or {}
-        if narration.get("narration"):
-            directives.append({
-                "kind": "narration",
-                "visual_type": "SPECIAL_MOMENT",
-                "text": narration["narration"],
-            })
+            callback=_narration_callback(state),
+        )
 
     state.active_arc = active_arc
     return {

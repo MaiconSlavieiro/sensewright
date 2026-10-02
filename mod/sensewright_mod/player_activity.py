@@ -4,12 +4,12 @@
 import services
 import sims4.commands
 from sims.sim_info import SimInfo
-from sims4communitylib.utils.common_injection_utils import CommonInjectionUtils
-from sims4communitylib.mod_support.mod_identity import CommonModIdentity
 from sims4communitylib.modinfo import ModInfo
+from sims4communitylib.events.event_handling.common_event_registry import CommonEventRegistry
+from sims4communitylib.events.interaction.events.interaction_started import S4CLInteractionStartedEvent
 
 from sensewright_mod.debug_log import log_error, log_exception, log_info
-from sensewright_mod.http_client import post_player_activity, get_world_sim_tick as http_get_world_sim_tick
+from sensewright_mod.http_client import post_player_activity
 
 
 # Player manual lock state
@@ -98,33 +98,63 @@ def _on_player_interaction_end(sim_info, interaction):
     pass
 
 
-def register_player_activity_hooks():
-    """Register hooks to detect player manual interactions."""
+def _is_user_directed(interaction):
+    """Best-effort check for a player-directed interaction.
+
+    Uses the Interaction.is_user_directed property when available and falls back
+    to inspecting the interaction context source.
+    """
+    if interaction is None:
+        return False
+
     try:
-        # Hook into Sim's interaction queue to detect player-directed interactions
-        # This is a simplified version - real implementation would inject into
-        # the interaction queue processing
+        value = _safe_getattr(interaction, 'is_user_directed', False)
+        if callable(value):
+            value = value()
+        if value:
+            return True
+    except Exception:
+        pass
 
-        # Inject into Sim.push_interaction to detect player clicks
-        @CommonInjectionUtils.inject_safely_into(ModInfo.get_identity(), 'sims.sim.Sim', 'push_interaction')
-        def _injected_push_interaction(original, self, interaction, *args, **kwargs):
-            try:
-                # Check if this is a player-directed interaction
-                # Player interactions typically have a specific context
-                context = _safe_getattr(interaction, 'context', None)
-                if context is not None:
-                    source = _safe_getattr(context, 'source', None)
-                    # Player-directed interactions have source = InteractionContext.SOURCE_SCRIPT_WITH_USER_INTENT
-                    # or similar
-                    if source is not None:
-                        sim_info = _safe_getattr(self, 'sim_info', None)
-                        if sim_info is not None:
-                            _on_player_interaction_start(sim_info, interaction)
-            except Exception:
-                pass
-            return original(self, interaction, *args, **kwargs)
+    try:
+        from interactions.context import InteractionSource
+        source = _safe_getattr(_safe_getattr(interaction, 'context', None), 'source', None)
+        if source in (InteractionSource.SOURCE_PIE_MENU,
+                      InteractionSource.SOURCE_SCRIPT_WITH_USER_INTENT):
+            return True
+    except Exception:
+        pass
 
-        log_info('Player activity hooks registered')
+    return False
+
+
+class _SensewrightPlayerActivityListener(object):
+    """S4CL event listener that flags player-directed interactions.
+
+    The listener is registered at import time via the @handle_events decorator.
+    """
+
+    @staticmethod
+    @CommonEventRegistry.handle_events(ModInfo.get_identity())
+    def _handle_interaction_started(event_data: S4CLInteractionStartedEvent) -> bool:
+        try:
+            interaction = event_data.interaction
+            sim_info = event_data.sim_info
+            if sim_info is not None and _is_user_directed(interaction):
+                _on_player_interaction_start(sim_info, interaction)
+        except Exception as e:
+            log_exception('Player activity event error: {}'.format(e))
+        return True
+
+
+def register_player_activity_hooks():
+    """Player activity detection is registered via the S4CL event listener class.
+
+    The @CommonEventRegistry.handle_events decorator runs when this module is
+    imported, so this function only reports status.
+    """
+    try:
+        log_info('Player activity hooks registered (S4CL interaction event listener)')
         return True
     except Exception as e:
         log_exception('Player activity hook registration error: {}'.format(e))

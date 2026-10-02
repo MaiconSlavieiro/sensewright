@@ -84,6 +84,32 @@ def test_ui_locales_parity():
         )
 
 
+def test_one_shot_examples_are_valid_json():
+    """Few-shot examples must be valid JSON matching the parser contract.
+
+    Non-JSON examples (e.g. ``[thought]...[/thought]``) make free models ignore
+    the JSON-only instruction, so `_extract_json` fails and the deterministic
+    fallback (thought-only, no intents) silently replaces every generation.
+    """
+    content_dir = SIDECAR_LOCALES / "content"
+    required_keys = {
+        "sim.chat": {"response", "thought", "intents", "trust_delta"},
+        "sim.impulse": {"thought", "intents"},
+        "sim.social": {"a_line", "b_line", "topic", "impact"},
+    }
+    for path in sorted(content_dir.glob("*.json")):
+        data = _load_json(path)
+        one_shot = (data.get("anchors") or {}).get("one_shot") or {}
+        assert one_shot, "{}: no anchors.one_shot".format(path.name)
+        for purpose, block in one_shot.items():
+            parsed = json.loads(block)
+            assert isinstance(parsed, dict), "{}:{} is not a JSON object".format(path.name, purpose)
+            expected = required_keys.get(purpose)
+            if expected:
+                missing = expected - set(parsed)
+                assert not missing, "{}:{} missing {}".format(path.name, purpose, missing)
+
+
 def test_content_placeholder_subset():
     codes = _locale_codes()
     default = _load_json(SIDECAR_LOCALES / "manifest.json")["default_locale"]

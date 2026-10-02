@@ -16,29 +16,132 @@
     "buff.missing_player.name": "Missing {0.String}",
     "buff.missing_player.desc": "Feeling lonely and wishing a certain friend would message you.",
     "trait.hidden_no_walkby.name": "Digital Confidant",
-    "trait.hidden_no_walkby.desc": "This hidden Sim is a remote friend and never appears in person."
+    "trait.hidden_no_walkby.desc": "This hidden Sim is a remote friend and never appears in person.",
+    "buff.bias_social.name": "Social Urge",
+    "buff.bias_social.desc": "A sudden urge to talk and be near others.",
+    "buff.bias_creative.name": "Creative Spark",
+    "buff.bias_creative.desc": "Ideas begging to become art.",
+    "buff.bias_art.name": "Artist's Eye",
+    "buff.bias_art.desc": "A desire to appreciate and make art.",
+    "buff.bias_music.name": "Inner Rhythm",
+    "buff.bias_music.desc": "Music echoing in the mind.",
+    "buff.bias_active.name": "Restless Energy",
+    "buff.bias_active.desc": "The body craves movement.",
+    "buff.bias_focused.name": "Sharp Mind",
+    "buff.bias_focused.desc": "A drive to work and get things done.",
+    "buff.bias_read.name": "Bookish Mood",
+    "buff.bias_read.desc": "A good book feels irresistible.",
+    "buff.bias_outdoors.name": "Call of the Wild",
+    "buff.bias_outdoors.desc": "A longing for fresh air and nature.",
+    "buff.bias_neat.name": "Tidy Instinct",
+    "buff.bias_neat.desc": "A drive to clean and organize.",
+    "buff.bias_romantic.name": "Open Heart",
+    "buff.bias_romantic.desc": "Romantic, affectionate thoughts.",
+    "buff.bias_foodie.name": "Gourmet Craving",
+    "buff.bias_foodie.desc": "A craving to cook and savor.",
+    "buff.bias_playful.name": "Playful Streak",
+    "buff.bias_playful.desc": "A desire to play and have fun.",
+    "buff.bias_family.name": "Family Heart",
+    "buff.bias_family.desc": "A wish to care for family.",
+    "buff.bias_geek.name": "Geek Mode",
+    "buff.bias_geek.desc": "A pull toward tech and science."
   },
-  "ui": {
-    "notify.recap.banner": "Previously...",
-    "notify.onboarding.title": "Sensewright is active!",
-    "notify.onboarding.body": "Your Sims now have inner lives. Open the Web Studio or the Quick Menu to configure.",
-    "notify.typing": "{sim_name} is typing...",
-    "notify.chat.respond": "Reply Now",
-    "notify.dream.banner": "{sim_name} dreamed: {dream_narrative}",
-    "notify.trait_proposal.title": "Personality Change",
-    "notify.trait_proposal.body": "{sim_name} wants to change a core trait. Accept?",
-    "notify.scene.ready": "Scene Ready",
-    "notify.scene.start": "Start Scene",
-    "notify.scene.delay": "Postpone",
-    "notify.scene.redirect": "Change Course",
-    "notify.paused.title": "Sensewright paused",
-    "notify.paused.body": "Open the Quick Menu to resume.",
-    "studio.title": "Sensewright Web Studio",
-    "studio.tab.sims": "Sim Minds",
-    "studio.tab.director": "Director's Room",
-    "studio.tab.providers": "Providers & Diagnostics",
-    "studio.spoiler_shield": "Spoiler Shield (No Spoilers)",
-    "studio.language": "Language",
-    "studio.reload_locales": "Reload Translations"
+  "notify": {
+    "recap": {
+      "banner": "Previously..."
+    },
+    "onboarding": {
+      "title": "Sensewright is active!",
+      "body": "Your Sims now have inner lives. Open the Web Studio or the Quick Menu to configure.",
+      "hint": "In-game: type sw.panel in the console, or right-click a Sim and open the 'Sensewright...' pie menu."
+    },
+    "typing": "{sim_name} is typing...",
+    "chat": {
+      "respond": "Reply Now"
+    },
+    "dream": {
+      "banner": "{sim_name} dreamed: {dream_narrative}"
+    },
+    "trait_proposal": {
+      "title": "Personality Change",
+      "body": "{sim_name} wants to change a core trait. Accept?"
+    },
+    "scene": {
+      "ready": "Scene Ready",
+      "start": "Start Scene",
+      "delay": "Postpone",
+      "redirect": "Change Course"
+    },
+    "paused": {
+      "title": "Sensewright paused",
+      "body": "Open the Quick Menu to resume."
+    }
+  },
+  "studio": {
+    "title": "Sensewright Web Studio",
+    "tab": {
+      "sims": "Sim Minds",
+      "director": "Director's Room",
+      "providers": "Providers & Diagnostics"
+    },
+    "spoiler_shield": "Spoiler Shield (No Spoilers)",
+    "language": "Language",
+    "reload_locales": "Reload Translations"
+  },
+  "common": {
+    "back": "Back"
+  },
+  "panel": {
+    "title": "Sensewright",
+    "btn": {
+      "director_preset": "Director Preset",
+      "director_mode": "Director Mode",
+      "autonomy": "Autonomy",
+      "web_studio": "Open Web Studio",
+      "refresh": "Refresh"
+    },
+    "summary": {
+      "line1": "Tick {tick} | Speed {speed} | Zone {zone}",
+      "line2": "Seats {seats} | Intents {intents} (pending {pending}) | Out {outbound} / In {inbound}",
+      "error": "Could not read the current state."
+    },
+    "preset": {
+      "title": "Director Preset",
+      "desc": "Choose the narrative tone for your world.",
+      "off": "Off",
+      "novela": "Soap Opera",
+      "sitcom": "Sitcom",
+      "drama": "Drama",
+      "terror": "Horror",
+      "romance": "Romance",
+      "caos": "Chaos",
+      "filme_adolescente": "Teen Movie"
+    },
+    "mode": {
+      "title": "Director Mode",
+      "desc": "Choose how much the Director intervenes.",
+      "autonomous": "Autonomous",
+      "co_director": "Co-Director",
+      "sandbox": "Sandbox"
+    },
+    "autonomy": {
+      "title": "Autonomy",
+      "desc": "Choose how much freedom your Sims have.",
+      "full": "Full",
+      "reactive": "Reactive",
+      "off": "Off"
+    }
+  },
+  "chat": {
+    "title": "Chat with {sim_name}",
+    "placeholder": "Write a message...",
+    "error_failed": "The message could not be delivered. Try again later.",
+    "error_title": "Chat Error",
+    "response_header": "Reply from {sim_name} (turn {turn})",
+    "notification_title": "{sim_name} replied",
+    "deferred_title": "Message queued",
+    "deferred_text": "Your message will be delivered over {channel} as soon as possible.\n\n{message}",
+    "choose_sim_title": "Start a Chat",
+    "choose_sim_text": "Choose the Sim you want to chat with."
   }
 }

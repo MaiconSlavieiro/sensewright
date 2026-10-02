@@ -5,19 +5,19 @@ import services
 import sims4.commands
 from sims.sim_info import SimInfo
 from sims4communitylib.dialogs.common_input_text_dialog import CommonInputTextDialog
-from sims4communitylib.dialogs.common_choose_dialog import CommonChooseButtonDialog
 from sims4communitylib.dialogs.common_choose_sim_dialog import CommonChooseSimDialog
+from sims4communitylib.dialogs.common_ok_dialog import CommonOkDialog
+from sims4communitylib.dialogs.common_choice_outcome import CommonChoiceOutcome
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
-from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
-from protocolbuffers.Localization_pb2 import LocalizedString
-from ui.ui_dialog_notification import UiDialogNotification
-from ui.ui_dialog_generic import UiDialogTextInputOkCancel
+from sims4communitylib.modinfo import ModInfo
 
 from sensewright_mod.debug_log import log_error, log_exception, log_info
 from sensewright_mod.http_client import post_chat, post_hey, generate_trace_id
-from sensewright_mod.i18n import t
-from sensewright_mod.config import get_player_confidant_sim_id
-from sensewright_mod.native_hooks import get_or_create_player_confidant, add_social_motive_gain, add_fun_motive_gain
+from sensewright_mod.i18n import t, get_current_language
+from sensewright_mod.native_hooks import (
+    get_or_create_player_confidant, get_player_confidant_sim_id,
+    add_social_motive_gain, add_fun_motive_gain,
+)
 
 
 # Chat state
@@ -73,35 +73,10 @@ def _hide_typing_balloon(sim_info):
 
 
 def _send_notification_with_response_button(sim_info, title, text, callback, sim_line_header=None):
-    """Send a notification with a 'Responder' button that reopens chat."""
+    """Show the sim's chat reply with an OK button that reopens the chat."""
     try:
-        # Create notification with ui_responses
-        from ui.ui_dialog_notification import UiDialogNotification
-        from protocolbuffers.UI_pb2 import UiDialogNotification as UiDialogNotificationProto
-        from protocolbuffers.Localization_pb2 import LocalizedString
-
-        # Build the notification
-        dialog = UiDialogNotification.TunableFactory().default(
-            sim_info,
-            text=lambda **_: CommonLocalizationUtils.create_localized_string(text),
-            title=lambda **_: CommonLocalizationUtils.create_localized_string(title),
-            ui_responses=[
-                UiDialogNotificationProto.UiDialogNotificationResponse(
-                    dialog_response_id=1,
-                    text=CommonLocalizationUtils.create_localized_string(t('chat.respond_now'))
-                )
-            ]
-        )
-
-        def _on_response(dialog):
-            try:
-                if dialog.response == 1:  # Responder button clicked
-                    callback()
-            except Exception as e:
-                log_exception('Notification response error: {}'.format(e))
-
-        dialog.add_listener(_on_response)
-        dialog.show_dialog()
+        dialog = CommonOkDialog(title, text)
+        dialog.show(on_acknowledged=lambda *_: _safe_call(callback))
         return True
     except Exception as e:
         log_exception('Failed to send notification: {}'.format(e))
@@ -115,15 +90,19 @@ def _open_chat_dialog(sim_info, channel, player_id, save_id, world_sim_tick, lan
         if header_text:
             title = header_text
 
+        def _on_submit(value, outcome):
+            if outcome == CommonChoiceOutcome.CANCEL or not value:
+                _on_chat_cancelled(sim_info)
+                return
+            _on_chat_submitted(value, sim_info, channel, player_id, save_id, world_sim_tick, lang)
+
         dialog = CommonInputTextDialog(
-            title=title,
-            text=t('chat.placeholder'),
-            on_submit=lambda result: _on_chat_submitted(
-                result, sim_info, channel, player_id, save_id, world_sim_tick, lang
-            ),
-            on_cancel=lambda: _on_chat_cancelled(sim_info)
+            ModInfo.get_identity(),
+            title,
+            t('chat.placeholder'),
+            None,
         )
-        dialog.show()
+        dialog.show(sim_info=sim_info, on_submit=_on_submit)
         return True
     except Exception as e:
         log_exception('Failed to open chat dialog: {}'.format(e))
@@ -147,11 +126,14 @@ def _on_chat_submitted(input_text, sim_info, channel, player_id, save_id, world_
     session['turn_count'] = session.get('turn_count', 0) + 1
     _active_chat_sessions[sim_id] = session
 
-    # Send to sidecar
+    def _on_response(response, resp_trace_id):
+        _handle_chat_response(response, resp_trace_id, sim_info, channel, player_id, save_id, world_sim_tick, lang)
+
+    # Send to sidecar (callback is dispatched on the main thread by GAME_TICK)
     if channel == 'phone_sms':
-        post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, input_text.strip(), lang)
+        post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, input_text.strip(), lang, callback=_on_response)
     else:
-        post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, input_text.strip(), lang)
+        post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, input_text.strip(), lang, callback=_on_response)
 
 
 def _on_chat_cancelled(sim_info):
@@ -234,10 +216,9 @@ def _handle_chat_response(response, trace_id, sim_info, channel, player_id, save
 def _show_deferred_notification(sim_info, message, channel):
     """Show notification that message will be delivered later."""
     try:
-        from sims4communitylib.dialogs.common_ok_dialog import CommonOkDialog
         dialog = CommonOkDialog(
-            title=t('chat.deferred_title'),
-            text=t('chat.deferred_text', channel=channel, message=message)
+            t('chat.deferred_title'),
+            t('chat.deferred_text', channel=channel, message=message),
         )
         dialog.show()
     except Exception:
@@ -247,10 +228,9 @@ def _show_deferred_notification(sim_info, message, channel):
 def _show_error_notification(sim_info, message):
     """Show error notification."""
     try:
-        from sims4communitylib.dialogs.common_ok_dialog import CommonOkDialog
         dialog = CommonOkDialog(
-            title=t('chat.error_title'),
-            text=message
+            t('chat.error_title'),
+            message,
         )
         dialog.show()
     except Exception:
@@ -268,13 +248,11 @@ def _apply_trust_delta(sim_info, trust_delta):
         return
 
     try:
-        from sensewright_mod.native_hooks import add_relationship_bit
-        # Trust delta maps to friendship/romance change
-        # This is simplified - real implementation would use relationship track
+        # Trust delta maps to friendship change with the player confidant.
         from sims4communitylib.utils.sims.common_relationship_utils import CommonRelationshipUtils
-        current_friendship = CommonRelationshipUtils.get_relationship_level(sim_info.id, confidant_id, 'friendship')
+        current_friendship = CommonRelationshipUtils.get_friendship_level(sim_info, confidant_info)
         new_friendship = max(-100, min(100, current_friendship + trust_delta))
-        CommonRelationshipUtils.set_relationship_level(sim_info.id, confidant_id, 'friendship', new_friendship)
+        CommonRelationshipUtils.set_friendship_level(sim_info, confidant_info, new_friendship)
     except Exception as e:
         log_exception('Failed to apply trust delta: {}'.format(e))
 
@@ -316,17 +294,31 @@ def start_chat_by_sim_picker():
         if active_sim is None:
             return
 
-        def _on_sim_chosen(chosen_sim_info):
-            if chosen_sim_info is not None:
-                start_chat(chosen_sim_info, 'phone_sms')
+        from ui.ui_dialog_picker import SimPickerRow
+
+        choices = []
+        for sim_info in services.sim_info_manager().values():
+            if sim_info is None or sim_info is active_sim:
+                continue
+            if not _safe_getattr(sim_info, 'is_human', True):
+                continue
+            choices.append(SimPickerRow(sim_info.id, tag=sim_info))
+
+        if not choices:
+            log_info('Sim picker: no candidates available')
+            return
+
+        def _on_chosen(choice, outcome):
+            if outcome == CommonChoiceOutcome.CHOICE_MADE and choice is not None:
+                start_chat(choice, 'phone_sms')
 
         dialog = CommonChooseSimDialog(
-            title=t('chat.choose_sim_title'),
-            text=t('chat.choose_sim_text'),
-            on_sim_chosen=_on_sim_chosen,
-            include_sim_callback=lambda sim_info: sim_info.is_human and not sim_info.is_npc
+            t('chat.choose_sim_title'),
+            t('chat.choose_sim_text'),
+            tuple(choices),
+            mod_identity=ModInfo.get_identity(),
         )
-        dialog.show()
+        dialog.show(on_chosen=_on_chosen, sim_info=active_sim, column_count=5)
     except Exception as e:
         log_exception('Sim picker error: {}'.format(e))
 

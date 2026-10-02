@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from sensewright_sidecar.config import Config, DEFAULT_CONFIG
-from sensewright_sidecar.llm.scheduler import LLMScheduler, _extract_json
+from sensewright_sidecar.llm.scheduler import LLMScheduler, _extract_json, _recover_structured
 from sensewright_sidecar.purposes import PURPOSES, get_purpose
 
 
@@ -58,6 +58,33 @@ class TestExtractJson:
         text = 'prefix {"a": 1} middle {"b": 2} suffix'
         result = _extract_json(text)
         assert result == {"a": 1}
+
+
+class TestRecoverStructured:
+    """Tests for _recover_structured (non-JSON few-shot imitation)."""
+
+    def test_impulse_thought_block(self):
+        text = "[thought]Need coffee before my shift.[/thought]"
+        result = _recover_structured("sim.impulse", text)
+        assert result == {"thought": "Need coffee before my shift.", "intents": []}
+
+    def test_chat_thought_plus_speech(self):
+        text = "[thought]Worn out today.[/thought]\nHi! How are you doing?"
+        result = _recover_structured("sim.chat", text)
+        assert result == {
+            "response": "Hi! How are you doing?",
+            "thought": "Worn out today.",
+            "intents": [],
+            "trust_delta": 0.0,
+        }
+
+    def test_chat_thought_only_returns_empty(self):
+        # Without speech there is no chat response; fall back instead.
+        assert _recover_structured("sim.chat", "[thought]Worn out.[/thought]") == {}
+
+    def test_no_thought_block_returns_empty(self):
+        assert _recover_structured("sim.impulse", "plain prose, no block") == {}
+        assert _recover_structured("sim.impulse", "") == {}
 
 
 class TestLLMScheduler:

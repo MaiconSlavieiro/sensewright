@@ -4,12 +4,16 @@
 import services
 import sims4.commands
 import webbrowser
-from sims4communitylib.dialogs.common_choose_dialog import CommonChooseButtonDialog
+from sims4communitylib.dialogs.common_choose_response_dialog import CommonChooseResponseDialog
+from sims4communitylib.dialogs.common_ui_dialog_response import CommonUiDialogResponse
+from sims4communitylib.dialogs.common_choice_outcome import CommonChoiceOutcome
+from sims4communitylib.modinfo import ModInfo
 from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
 from protocolbuffers.Localization_pb2 import LocalizedString
 
 from sensewright_mod.debug_log import log_error, log_exception, log_info
-from sensewright_mod.http_client import post_async, get_sidecar_url
+from sensewright_mod.http_client import post_async
+from sensewright_mod.config import get_sidecar_url
 from sensewright_mod.i18n import t
 from sensewright_mod.config import get_agent_seats
 
@@ -113,23 +117,55 @@ def _send_god_control(key, value):
         return False
 
 
+def _show_button_dialog(title, text, buttons):
+    """Show a multi-button dialog via S4CL's CommonChooseResponseDialog.
+
+    `buttons` is a list of (label, callback) pairs. Each row gets a stable
+    integer value used to map the chosen row back to its callback.
+    """
+    responses = tuple(
+        CommonUiDialogResponse(index + 1, index + 1, text=label)
+        for index, (label, _callback) in enumerate(buttons)
+    )
+    callbacks = {index + 1: callback for index, (_label, callback) in enumerate(buttons)}
+
+    def _on_chosen(choice, outcome):
+        if outcome != CommonChoiceOutcome.CHOICE_MADE:
+            return
+        callback = callbacks.get(choice)
+        if callback is not None:
+            callback()
+
+    dialog = CommonChooseResponseDialog(
+        ModInfo.get_identity(),
+        title,
+        text,
+        responses,
+        per_page=10,
+    )
+    dialog.show(
+        sim_info=services.active_sim_info(),
+        on_chosen=_on_chosen,
+        include_pagination=False,
+        include_previous_button=False,
+    )
+
+
 def show_quick_menu():
     """Show the main Quick Menu panel."""
     try:
         summary = _build_panel_summary()
-
-        dialog = CommonChooseButtonDialog(
-            title=t('panel.title'),
-            text=summary,
-            buttons=[
+        _show_button_dialog(
+            t('panel.title'),
+            summary,
+            [
                 (t('panel.btn.director_preset'), _show_preset_menu),
                 (t('panel.btn.director_mode'), _show_mode_menu),
                 (t('panel.btn.autonomy'), _show_autonomy_menu),
                 (t('panel.btn.web_studio'), _open_web_studio),
                 (t('panel.btn.refresh'), show_quick_menu),
-            ]
+            ],
         )
-        dialog.show()
     except Exception as e:
         log_exception('Quick menu error: {}'.format(e))
 
@@ -144,12 +180,7 @@ def _show_preset_menu():
 
         buttons.append((t('common.back'), show_quick_menu))
 
-        dialog = CommonChooseButtonDialog(
-            title=t('panel.preset.title'),
-            text=t('panel.preset.desc'),
-            buttons=buttons
-        )
-        dialog.show()
+        _show_button_dialog(t('panel.preset.title'), t('panel.preset.desc'), buttons)
     except Exception as e:
         log_exception('Preset menu error: {}'.format(e))
 
@@ -171,12 +202,7 @@ def _show_mode_menu():
 
         buttons.append((t('common.back'), show_quick_menu))
 
-        dialog = CommonChooseButtonDialog(
-            title=t('panel.mode.title'),
-            text=t('panel.mode.desc'),
-            buttons=buttons
-        )
-        dialog.show()
+        _show_button_dialog(t('panel.mode.title'), t('panel.mode.desc'), buttons)
     except Exception as e:
         log_exception('Mode menu error: {}'.format(e))
 
@@ -198,12 +224,7 @@ def _show_autonomy_menu():
 
         buttons.append((t('common.back'), show_quick_menu))
 
-        dialog = CommonChooseButtonDialog(
-            title=t('panel.autonomy.title'),
-            text=t('panel.autonomy.desc'),
-            buttons=buttons
-        )
-        dialog.show()
+        _show_button_dialog(t('panel.autonomy.title'), t('panel.autonomy.desc'), buttons)
     except Exception as e:
         log_exception('Autonomy menu error: {}'.format(e))
 

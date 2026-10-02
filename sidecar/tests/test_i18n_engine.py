@@ -184,6 +184,17 @@ class TestI18nEngine:
         result = engine.enum("mood", "nonexistent_mood_xyz", lang="pt-BR")
         assert result == "nonexistent_mood_xyz"
 
+    def test_enum_keys_returns_canonical_moods(self):
+        engine = get_engine()
+        keys = engine.enum_keys("mood", lang="pt-BR")
+        assert "focused" in keys
+        assert "happy" in keys
+        # Same canonical keys regardless of display locale.
+        assert keys == engine.enum_keys("mood", lang=engine.default_locale())
+
+    def test_enum_keys_unknown_category_is_empty(self):
+        assert get_engine().enum_keys("not_a_category") == []
+
     def test_enum_none_returns_empty(self):
         engine = get_engine()
         result = engine.enum("mood", None, lang="pt-BR")

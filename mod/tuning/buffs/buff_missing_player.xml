@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<I c="Buff" i="buff" m="buffs.buff" n="buff_missing_player" s="1234567890123456804">
+  <E n="buff_type">NEGATIVE</E>
+  <T n="duration">120</T>
+  <T n="mood_type">0</T>
+  <T n="mood_weight">0</T>
+  <T n="visible">True</T>
+  <V n="buff_name" t="localized_string" p="STBL">stbl.buff.missing_player.name</V>
+  <V n="buff_description" t="localized_string" p="STBL">stbl.buff.missing_player.desc</V>
+  <V n="tooltip" t="localized_string" p="STBL">stbl.buff.missing_player.desc</V>
+</I>

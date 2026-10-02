@@ -17,6 +17,7 @@ dist/
 
 # Sensewright runtime / secrets
 sidecar/config.toml
+sidecar/python.txt
 sidecar/data/
 **/sidecar.log
 *.log

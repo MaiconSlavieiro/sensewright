@@ -3,8 +3,9 @@
 
 .PHONY: all sidecar mod package test install doctor clean decompile help
 
-# Default target
-all: mod package
+# Default target (package first: build_package.py emits tuning_ids.json which
+# build.py then embeds into the .ts4script)
+all: package mod
 
 # Python commands
 PY37 = py -3.7
@@ -31,7 +32,7 @@ $(DIST_DIR)/Sensewright.ts4script: $(wildcard $(MOD_DIR)/sensewright_mod/*.py) $
 	@$(PY310) $(MOD_DIR)/build.py
 
 # Build .package (requires Python 3.10+)
-$(DIST_DIR)/Sensewright.package: $(wildcard $(MOD_DIR)/tuning/**/*.xml) $(MOD_DIR)/tuning/stbl.json $(wildcard $(MOD_DIR)/sensewright_mod/locales/*.json)
+$(DIST_DIR)/Sensewright.package: $(wildcard $(MOD_DIR)/tuning/**/*.xml) $(wildcard $(MOD_DIR)/sensewright_mod/locales/*.json) $(wildcard $(MOD_DIR)/sensewright_mod/locales/ui/*.json)
 	@echo "Building .package..."
 	@$(PY310) $(MOD_DIR)/build_package.py
 
@@ -43,8 +44,8 @@ test:
 	@$(PY310) -m py_compile $(MOD_DIR)/build.py $(MOD_DIR)/build_package.py
 	@echo "All syntax checks passed!"
 
-# Install to TS4 Mods folder
-install: mod package
+# Install to TS4 Mods folder (package first so tuning_ids.json is embedded)
+install: package mod
 	@echo "Installing mod..."
 	@powershell -ExecutionPolicy Bypass -File $(SCRIPTS_DIR)/install-mod.ps1
 

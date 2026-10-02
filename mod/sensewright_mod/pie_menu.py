@@ -5,7 +5,6 @@ import services
 import sims4.commands
 from sims.sim_info import SimInfo
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
-from sims4communitylib.utils.sims.common_interaction_utils import CommonInteractionUtils
 from sims4communitylib.utils.common_injection_utils import CommonInjectionUtils
 from sims4communitylib.mod_support.mod_identity import CommonModIdentity
 from sims4communitylib.modinfo import ModInfo
@@ -15,8 +14,8 @@ from sensewright_mod.chat_ui import start_chat, start_chat_by_sim_picker
 from sensewright_mod.panel_ui import show_quick_menu
 
 
-# Mod identity
-MOD_IDENTITY = CommonModIdentity('sensewright', 'Sensewright', '2.0.0')
+# Mod identity (S4CL's identity; used for logging/attribution only)
+MOD_IDENTITY = ModInfo.get_identity()
 
 
 def _safe_getattr(obj, attr, default=None):
@@ -72,18 +71,23 @@ def _on_panel_interaction(sim_info, target_sim_info):
     return True
 
 
-# Pie menu registration via S4CL interaction registration
-def register_pie_menu_interactions():
-    """Register pie menu interactions using S4CL."""
-    try:
-        # Register the root pie menu category and actions
-        # This uses S4CL's interaction registration system
-        from sims4communitylib.utils.sims.common_interaction_registration_utils import CommonInteractionRegistrationUtils
-        from sims4communitylib.utils.sims.common_interaction_utils import CommonInteractionType
+# Pie menu registration is performed at import time by
+# `sensewright_mod.interactions` (S4CL's CommonInteractionRegistry handler).
+# This hook is kept for the service lifecycle and simply confirms the handler
+# module was imported.
+_handler_registered = False
 
-        # The actual registration happens via XML snippets in tuning/
-        # This Python function is called at startup to ensure registration
-        log_info('Pie menu interactions registered via tuning snippets')
+
+def register_pie_menu_interactions():
+    """Confirm the pie menu interaction handler module is loaded."""
+    global _handler_registered
+    if _handler_registered:
+        return True
+
+    try:
+        from sensewright_mod import interactions  # noqa: F401  (registers handler)
+        _handler_registered = True
+        log_info('Pie menu interactions registered via sensewright_mod.interactions')
         return True
     except Exception as e:
         log_exception('Pie menu registration error: {}'.format(e))

@@ -364,5 +364,35 @@ class TestPlayerActivityEndpoint:
         assert data["deep_window_open"] is True
 
 
+class TestConversationalPairDetection:
+    """The mod reports interaction class names, not semantic activities."""
+
+    def _state_with(self, activities):
+        from sensewright_sidecar.state import get_state
+        state = get_state()
+        state.update_census({
+            i + 1: {"sim_id": i + 1, "activity": activity}
+            for i, activity in enumerate(activities)
+        })
+        return state
+
+    def test_matches_interaction_class_names(self):
+        from sensewright_sidecar.services import _find_conversational_pair
+        state = self._state_with(["SocialInteraction", "Chatting"])
+        pair = _find_conversational_pair(state, 1)
+        assert pair is not None
+        assert {pair[0]["sim_id"], pair[1]["sim_id"]} == {1, 2}
+
+    def test_busy_sim_is_not_conversing(self):
+        from sensewright_sidecar.services import _find_conversational_pair
+        state = self._state_with(["SocialInteraction", "Sleeping"])
+        assert _find_conversational_pair(state, 1) is None
+
+    def test_unrelated_activity_is_not_conversing(self):
+        from sensewright_sidecar.services import _find_conversational_pair
+        state = self._state_with(["Painting", "Gardening"])
+        assert _find_conversational_pair(state, 1) is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

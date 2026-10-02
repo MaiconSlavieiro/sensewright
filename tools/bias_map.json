@@ -1,0 +1,16 @@
+{
+  "social":   {"commodity": "commodity_Trait_Autonomy_Outgoing",      "aliases": ["social_friendly", "socialize", "friendly", "talk", "social"]},
+  "creative": {"commodity": "commodity_Trait_Autonomy_Creative",      "aliases": ["creative", "paint", "paintng", "write", "writing"]},
+  "art":      {"commodity": "commodity_Trait_Autonomy_ArtLover",      "aliases": ["art", "gallery", "museum"]},
+  "music":    {"commodity": "commodity_Trait_Autonomy_MusicLover",    "aliases": ["music", "dance", "sing"]},
+  "active":   {"commodity": "commodity_Trait_Autonomy_Active",        "aliases": ["active", "fitness", "workout", "exercise", "sport"]},
+  "focused":  {"commodity": "commodity_Trait_Autonomy_Genius",        "aliases": ["focused", "focus", "work", "study", "clean", "cook"]},
+  "read":     {"commodity": "commodity_Trait_Autonomy_Bookworm",      "aliases": ["read", "reading", "book"]},
+  "outdoors": {"commodity": "commodity_Trait_Autonomy_LovesOutdoors", "aliases": ["outdoors", "nature", "fish", "garden"]},
+  "neat":     {"commodity": "commodity_Trait_Autonomy_Neat",          "aliases": ["neat", "tidy"]},
+  "romantic": {"commodity": "commodity_Trait_Autonomy_Romantic",      "aliases": ["romantic", "flirty", "date", "love"]},
+  "foodie":   {"commodity": "commodity_Trait_Autonomy_Foodie",        "aliases": ["foodie", "eat", "gourmet"]},
+  "playful":  {"commodity": "commodity_Trait_Autonomy_Goofball",      "aliases": ["playful", "play", "fun", "game"]},
+  "family":   {"commodity": "commodity_Trait_Autonomy_FamilyOriented", "aliases": ["family", "kids", "parenting"]},
+  "geek":     {"commodity": "commodity_Trait_Autonomy_Geek",          "aliases": ["geek", "video_games", "computer", "science"]}
+}

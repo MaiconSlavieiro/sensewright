@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ..config import Config
 from ..observability.logging import get_logger
@@ -27,6 +27,10 @@ CIRCUIT_BREAK_FAILURES = 3
 CIRCUIT_COOLDOWN_SECONDS = 60.0
 MODEL_COOLDOWN_FAILURES = 2
 MODEL_COOLDOWN_SECONDS = 120.0
+#: A model that answers HTTP 200 with unusable output (e.g. a reasoning model
+#: that spends its whole token budget "thinking" and never emits the requested
+#: JSON) is benched so we stop paying for the same wasted call every pulse.
+INVALID_OUTPUT_COOLDOWN_SECONDS = 300.0
 
 
 class ProviderChain:
@@ -41,6 +45,7 @@ class ProviderChain:
         self._consecutive_failures: Dict[str, int] = {}
         self._circuit_cold_until: Dict[str, float] = {}
         self._model_cooldown_until: Dict[Tuple[str, str], float] = {}
+        self._invalid_cooldown_until: Dict[Tuple[str, str], float] = {}
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _limiter(self, name: str) -> ProviderRateLimiter:
@@ -66,6 +71,17 @@ class ProviderChain:
             until = self._model_cooldown_until.get((name, model), 0.0)
             return time.time() < until
 
+    def _invalid_cooling(self, name: str, model: str) -> bool:
+        with self._lock:
+            until = self._invalid_cooldown_until.get((name, model), 0.0)
+            return time.time() < until
+
+    def _record_invalid(self, name: str, model: str) -> None:
+        with self._lock:
+            self._invalid_cooldown_until[(name, model)] = (
+                time.time() + INVALID_OUTPUT_COOLDOWN_SECONDS
+            )
+
     def _record_failure(self, name: str, model: str) -> None:
         with self._lock:
             self._consecutive_failures[name] = self._consecutive_failures.get(name, 0) + 1
@@ -86,10 +102,16 @@ class ProviderChain:
         max_tokens: int,
         temperature: float,
         timeout: float,
+        validator: Optional[Callable[[ProviderResponse], bool]] = None,
     ) -> Tuple[Optional[ProviderResponse], Optional[str], Optional[str]]:
         """Attempt each candidate route in order; return (response, provider, model).
 
         Returns ``(None, None, None)`` when every candidate fails or is skipped.
+
+        ``validator`` (optional) is applied to a 200 response; when it returns
+        False the candidate is benched and the next route is tried. This lets the
+        caller reject HTTP-successful-but-unusable generations (e.g. a reasoning
+        model that never emits JSON) instead of silently accepting them.
         """
         candidates = self._router.plan(purpose_id)
         last_error: Optional[str] = None
@@ -101,6 +123,9 @@ class ProviderChain:
                 continue
             if self._model_cooling(name, model):
                 last_error = "model {}/{} cooling".format(name, model)
+                continue
+            if self._invalid_cooling(name, model):
+                last_error = "model {}/{} benched (unusable output)".format(name, model)
                 continue
 
             client = self._client(name)
@@ -139,6 +164,14 @@ class ProviderChain:
             # Success: reconcile tokens and reset failures.
             limiter.record_tokens(response.total_tokens or est_tokens)
             self._record_success(name)
+            if validator is not None and not validator(response):
+                self._record_invalid(name, model)
+                last_error = "provider {} model {} returned unusable output".format(name, model)
+                logger.warning(
+                    "route rejected provider=%s model=%s (unusable output; benched %.0fs)",
+                    name, model, INVALID_OUTPUT_COOLDOWN_SECONDS,
+                )
+                continue
             return response, name, model
 
         logger.warning("purpose %s: all routes failed (%s)", purpose_id, last_error)

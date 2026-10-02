@@ -354,8 +354,8 @@ make decompile  # decompile TS4 scripts for reference (needs unpyc3)
 Checks:
 - Python 3.7 (`py -3.7`) and 3.10+ (`python`) availability
 - All mod source files present
-- Locale JSON validity + key parity (en vs pt-BR)
-- Tuning XML + `stbl.json` exist
+- Locale JSON validity + key parity (en-US vs pt-BR)
+- Tuning XML present + generated `dist/stbl_keys.json` and `dist/tuning_ids.json`
 - Build artifacts (`.ts4script`, `.package`) exist and are valid ZIP/DBPF
 - Sidecar directory + `python.txt` + `main.py`
 - TS4 Mods folder + installed artifacts
@@ -397,10 +397,29 @@ Checks:
 
 ---
 
-## Unverified / Known Gaps
+## Implementation Status & Known Gaps
 
-- Sidecar `requirements.txt` not present in repo (dependencies inferred from imports: `fastapi`, `uvicorn`, `pydantic`, `tomli`, `httpx`, `pytest`).
-- S4CL license confirmed as CC BY 4.0 via its README; no separate LICENSE file in `research/s4cl/`.
-- Lot 51 Core license confirmed as MIT via its `LICENSE` file.
-- Exact TS4 pack compatibility matrix not codified; spec states "Base game only, no DLC required" but some tunings may reference pack content.
-- Web Studio (`/ui`) frontend source not inspected — described from spec and router registration only.
+> **Full, per-purpose status matrix:** [`docs/status.md`](docs/status.md) tracks the gap
+> between the spec and the code (milestones M0–M8, features F01–F22, all 33 purposes,
+> adjustments A1–A11, and complementary features FC1–FC5).
+
+Highlights as of 2026-10-02 (474 sidecar tests passing; both build artifacts validated):
+
+- **Implemented and wired:** dual-process IPC, Shadow DB (working/committed/ring buffer),
+  FTS5 memory, i18n engine (4-layer cascade + gender + rotation), LLM layer (RPM/RPD/TPM,
+  circuit breaker, scheduler, tiered ContextAssembler), Hidden Confidant chat (SMS), seat
+  manager, presence capabilities, IntentBus, God Zeitgeist/Narration, Quick Menu, Web
+  Studio SPA, and the build pipeline.
+- **Partial (engine present, wiring/trigger missing):** `sim.dream`, `sim.cognition`,
+  `evo.reflect`, `evo.trait`, `god.plan`, `god.puppeteer`, `mem.consolidate`, `ops.recap`,
+  speech-policy rate limits, tier concurrency, per-model cooldown, Web Studio persistence.
+- **Fallback-only (no production trigger yet):** 18 purposes including `sim.social.close`,
+  `sim.sleep`, `sim.diary`, `sim.lifestory`, `sim.aspiration`, the remaining `world.*`
+  and `mem.*` purposes, and `ops.panel.summary`.
+- **Native hooks still pending (M5/M6):** `VisitSituation`, Diary/"Snoop", Autobiography
+  Book, `sim_GetToKnow` secret reveal, epitaph, sleep balloons, custom Mirror interaction.
+- **Not yet done:** in-game M8 acceptance tests (zone transition, Save As, Alt+F4
+  rollback, invisible autoboot), `/v1/i18n/compile-addon`, VACUUM (A9), EP guards (A10),
+  Panic Button (FC4).
+- The exact DBPF tuning group/type emitted by `build_package.py` still needs in-game
+  validation. S4CL license confirmed as CC BY 4.0; Lot 51 Core as MIT.

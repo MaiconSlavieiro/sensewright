@@ -5,7 +5,7 @@ import services
 import sims4.math
 from sims.sim_info import SimInfo
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
-from sims4communitylib.utils.sims.common_sim_state_utils import CommonSimStateUtils
+from sims4communitylib.utils.sims.common_mood_utils import CommonMoodUtils
 
 from sensewright_mod.debug_log import log_error, log_exception, safe_call
 from sensewright_mod.config import get_agent_seats
@@ -30,6 +30,19 @@ def _safe_call(func, *args, **kwargs):
         return func(*args, **kwargs)
     except Exception:
         return None
+
+
+def _coerce_int(value, default=0):
+    """Best-effort coerce a game value (e.g. FamilyFunds) into a JSON-safe int."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
 
 
 def _get_sim_info(sim_id):
@@ -201,7 +214,7 @@ def _collect_sim_delta(sim_info):
         # Is sleeping
         is_sleeping = False
         try:
-            is_sleeping = _safe_call(CommonSimStateUtils.is_sleeping, sim_info) or False
+            is_sleeping = _safe_call(CommonMoodUtils.is_sleeping, sim_info) or False
         except Exception:
             pass
 
@@ -360,9 +373,9 @@ def _collect_full_sim_census(sim_info):
 
         return {
             'sim_id': sim_id,
-            'name': _safe_getattr(sim_info, 'full_name', 'Unknown'),
+            'name': str(_safe_getattr(sim_info, 'full_name', 'Unknown') or 'Unknown'),
             'species': 'HUMAN',  # Simplified
-            'age_stage': _safe_getattr(sim_info, 'age', 'YOUNGADULT'),
+            'age_stage': str(_safe_getattr(sim_info, 'age', 'YOUNGADULT')),
             'traits': traits,
             'likes': likes,
             'dislikes': dislikes,
@@ -395,13 +408,13 @@ def collect_sims_delta(active_only=False):
             for sim_info in active_household.sim_infos:
                 target_sims.append(sim_info)
 
-        # Add instanced sims on current lot (visitors)
-        zone = services.current_zone()
-        if zone is not None:
-            for sim in zone.sims:
-                sim_info = _safe_getattr(sim, 'sim_info', None)
+        # Add instanced sims currently in the zone (visitors) via S4CL.
+        try:
+            for sim_info in CommonSimUtils.get_instanced_sim_info_for_all_sims_generator():
                 if sim_info is not None and sim_info not in target_sims:
                     target_sims.append(sim_info)
+        except Exception as e:
+            log_exception('Error collecting instanced sims: {}'.format(e))
 
         # Limit to agent_seats
         max_seats = get_agent_seats()
@@ -438,10 +451,10 @@ def collect_full_census():
         if household_manager is not None:
             for household in household_manager.values():
                 households.append({
-                    'household_id': household.id,
-                    'name': _safe_getattr(household, 'name', ''),
-                    'home_zone_id': _safe_getattr(household, 'home_zone_id', 0),
-                    'funds': _safe_getattr(household, 'funds', 0)
+                    'household_id': _coerce_int(_safe_getattr(household, 'id', 0)),
+                    'name': str(_safe_getattr(household, 'name', '') or ''),
+                    'home_zone_id': _coerce_int(_safe_getattr(household, 'home_zone_id', 0)),
+                    'funds': _coerce_int(_safe_getattr(household, 'funds', 0))
                 })
 
         # Relationships (simplified)

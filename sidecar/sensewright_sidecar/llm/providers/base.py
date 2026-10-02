@@ -98,12 +98,7 @@ class OpenAICompatProvider(Provider):
             "Content-Type": "application/json",
             "Authorization": "Bearer {}".format(self.api_key),
         }
-        payload = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": int(max_tokens),
-            "temperature": float(temperature),
-        }
+        payload = self.build_payload(messages, model, max_tokens, temperature)
         data = self._http_post_json(url, payload, headers, timeout)
         try:
             content = data["choices"][0]["message"]["content"]
@@ -117,6 +112,28 @@ class OpenAICompatProvider(Provider):
             total_tokens=int(usage.get("total_tokens", 0)),
             model=model,
         )
+
+    def build_payload(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> Dict[str, Any]:
+        """Build the request body, honouring provider-specific shaping."""
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": int(max_tokens),
+            "temperature": float(temperature),
+        }
+        # Sensewright always wants one JSON object back. Free reasoning models
+        # (e.g. OpenRouter's nemotron) otherwise spend the entire completion
+        # budget on hidden reasoning and return no JSON at all. OpenRouter
+        # accepts this flag for every model and ignores it for non-reasoners.
+        if self.name == "openrouter":
+            payload["reasoning"] = {"enabled": False}
+        return payload
 
 
 class GeminiProvider(Provider):

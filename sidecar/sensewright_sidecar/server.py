@@ -24,17 +24,29 @@ logger = get_logger("server")
 
 
 def _is_pid_alive(pid: int) -> bool:
-    """Best-effort cross-platform process liveness check."""
+    """Best-effort cross-platform process liveness check.
+
+    On Windows, ``OpenProcess`` can still succeed for a process that has already
+    terminated (the kernel object lingers while handles are open), so we also
+    query the exit code and require ``STILL_ACTIVE``.
+    """
     if pid is None or pid <= 0:
         return False
     if sys.platform == "win32":
         try:
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
             handle = kernel32.OpenProcess(0x1000, False, int(pid))
             if not handle:
                 return False
-            kernel32.CloseHandle(handle)
-            return True
+            try:
+                exit_code = ctypes.c_ulong()
+                ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                if not ok:
+                    return False
+                return exit_code.value == 259  # STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
         except Exception:
             return True
     try:
@@ -45,21 +57,33 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def _watchdog_loop() -> None:
-    """Monitor the attached game_pid; shut down cleanly when the game exits."""
+    """Monitor the attached game_pid; shut down cleanly when the game exits.
+
+    The pid is seeded from ``--game-pid``/``SENSEWRIGHT_GAME_PID`` at launch and
+    refreshed by ``POST /lifecycle/attach``. This binds the sidecar's lifetime
+    to the game: when the game process disappears (clean exit or crash), the
+    sidecar closes itself.
+    """
+    logged_pid: Optional[int] = None
     while True:
         try:
             state = get_state()
             pid = state.game_pid
-            if pid and not _is_pid_alive(int(pid)):
-                logger.info("game process %s exited; shutting down sidecar", pid)
-                try:
-                    state.save_vault.shutdown()
-                except Exception:  # noqa: BLE001
-                    pass
-                os._exit(0)  # noqa: PLR1722
+            if pid:
+                pid = int(pid)
+                if logged_pid != pid:
+                    logger.info("watchdog watching game pid %s", pid)
+                    logged_pid = pid
+                if not _is_pid_alive(pid):
+                    logger.info("game process %s exited; shutting down sidecar", pid)
+                    try:
+                        state.save_vault.shutdown()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    os._exit(0)  # noqa: PLR1722
         except Exception:  # noqa: BLE001
             pass
-        time.sleep(5.0)
+        time.sleep(3.0)
 
 
 @asynccontextmanager

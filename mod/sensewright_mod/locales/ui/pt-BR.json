@@ -16,29 +16,132 @@
     "buff.missing_player.name": "Saudade de {0.String}",
     "buff.missing_player.desc": "Sentindo-se só e desejando que um certo amigo mandasse mensagem.",
     "trait.hidden_no_walkby.name": "Confidente Digital",
-    "trait.hidden_no_walkby.desc": "Este Sim oculto é um amigo remoto e nunca aparece pessoalmente."
+    "trait.hidden_no_walkby.desc": "Este Sim oculto é um amigo remoto e nunca aparece pessoalmente.",
+    "buff.bias_social.name": "Ímpeto Social",
+    "buff.bias_social.desc": "Uma vontade súbita de conversar e estar perto de outras pessoas.",
+    "buff.bias_creative.name": "Faísca Criativa",
+    "buff.bias_creative.desc": "Ideias pedindo para virar arte.",
+    "buff.bias_art.name": "Olhar de Artista",
+    "buff.bias_art.desc": "Um desejo de apreciar e criar arte.",
+    "buff.bias_music.name": "Ritmo Interior",
+    "buff.bias_music.desc": "Música ecoando na mente.",
+    "buff.bias_active.name": "Energia no Corpo",
+    "buff.bias_active.desc": "O corpo pede movimento.",
+    "buff.bias_focused.name": "Mente Afiada",
+    "buff.bias_focused.desc": "Vontade de trabalhar e resolver as coisas.",
+    "buff.bias_read.name": "Vontade de Ler",
+    "buff.bias_read.desc": "Um bom livro parece irresistível.",
+    "buff.bias_outdoors.name": "Chamado da Natureza",
+    "buff.bias_outdoors.desc": "Vontade de ar livre e natureza.",
+    "buff.bias_neat.name": "Tudo no Lugar",
+    "buff.bias_neat.desc": "Vontade de limpar e organizar.",
+    "buff.bias_romantic.name": "Coração Aberto",
+    "buff.bias_romantic.desc": "Pensamentos românticos e afetuosos.",
+    "buff.bias_foodie.name": "Gula Gourmet",
+    "buff.bias_foodie.desc": "Vontade de cozinhar e saborear.",
+    "buff.bias_playful.name": "Tempero Brincalhão",
+    "buff.bias_playful.desc": "Vontade de brincar e se divertir.",
+    "buff.bias_family.name": "Coração de Família",
+    "buff.bias_family.desc": "Vontade de cuidar da família.",
+    "buff.bias_geek.name": "Modo Geek",
+    "buff.bias_geek.desc": "Atração por tecnologia e ciência."
   },
-  "ui": {
-    "notify.recap.banner": "Anteriormente...",
-    "notify.onboarding.title": "O Sensewright está ativo!",
-    "notify.onboarding.body": "Seus Sims agora têm vidas interiores. Abra o Web Studio ou o Menu Rápido para configurar.",
-    "notify.typing": "{sim_name} está digitando...",
-    "notify.chat.respond": "Responder Agora",
-    "notify.dream.banner": "{sim_name} sonhou: {dream_narrative}",
-    "notify.trait_proposal.title": "Mudança de Personalidade",
-    "notify.trait_proposal.body": "{sim_name} quer trocar um traço principal. Aceitar?",
-    "notify.scene.ready": "Cena Pronta",
-    "notify.scene.start": "Iniciar Cena",
-    "notify.scene.delay": "Adiar",
-    "notify.scene.redirect": "Mudar Rumo",
-    "notify.paused.title": "Sensewright pausado",
-    "notify.paused.body": "Abra o Menu Rápido para retomar.",
-    "studio.title": "Sensewright Web Studio",
-    "studio.tab.sims": "Mente dos Sims",
-    "studio.tab.director": "Sala do Diretor",
-    "studio.tab.providers": "Provedores & Diagnóstico",
-    "studio.spoiler_shield": "Escudo Anti-Spoiler (Sem Spoilers)",
-    "studio.language": "Idioma",
-    "studio.reload_locales": "Recarregar Traduções"
+  "notify": {
+    "recap": {
+      "banner": "Anteriormente..."
+    },
+    "onboarding": {
+      "title": "O Sensewright está ativo!",
+      "body": "Seus Sims agora têm vidas interiores. Abra o Web Studio ou o Menu Rápido para configurar.",
+      "hint": "No jogo: digite sw.panel no console, ou clique com o botão direito em um Sim e abra o menu 'Sensewright...'."
+    },
+    "typing": "{sim_name} está digitando...",
+    "chat": {
+      "respond": "Responder Agora"
+    },
+    "dream": {
+      "banner": "{sim_name} sonhou: {dream_narrative}"
+    },
+    "trait_proposal": {
+      "title": "Mudança de Personalidade",
+      "body": "{sim_name} quer trocar um traço principal. Aceitar?"
+    },
+    "scene": {
+      "ready": "Cena Pronta",
+      "start": "Iniciar Cena",
+      "delay": "Adiar",
+      "redirect": "Mudar Rumo"
+    },
+    "paused": {
+      "title": "Sensewright pausado",
+      "body": "Abra o Menu Rápido para retomar."
+    }
+  },
+  "studio": {
+    "title": "Sensewright Web Studio",
+    "tab": {
+      "sims": "Mente dos Sims",
+      "director": "Sala do Diretor",
+      "providers": "Provedores & Diagnóstico"
+    },
+    "spoiler_shield": "Escudo Anti-Spoiler (Sem Spoilers)",
+    "language": "Idioma",
+    "reload_locales": "Recarregar Traduções"
+  },
+  "common": {
+    "back": "Voltar"
+  },
+  "panel": {
+    "title": "Sensewright",
+    "btn": {
+      "director_preset": "Predefinição do Diretor",
+      "director_mode": "Modo do Diretor",
+      "autonomy": "Autonomia",
+      "web_studio": "Abrir Web Studio",
+      "refresh": "Atualizar"
+    },
+    "summary": {
+      "line1": "Tick {tick} | Velocidade {speed} | Zona {zone}",
+      "line2": "Assentos {seats} | Intents {intents} (pendentes {pending}) | Saída {outbound} / Entrada {inbound}",
+      "error": "Não foi possível ler o estado atual."
+    },
+    "preset": {
+      "title": "Predefinição do Diretor",
+      "desc": "Escolha o tom narrativo do seu mundo.",
+      "off": "Desligado",
+      "novela": "Novela",
+      "sitcom": "Sitcom",
+      "drama": "Drama",
+      "terror": "Terror",
+      "romance": "Romance",
+      "caos": "Caos",
+      "filme_adolescente": "Filme Adolescente"
+    },
+    "mode": {
+      "title": "Modo do Diretor",
+      "desc": "Escolha o quanto o Diretor intervém.",
+      "autonomous": "Autônomo",
+      "co_director": "Co-Diretor",
+      "sandbox": "Sandbox"
+    },
+    "autonomy": {
+      "title": "Autonomia",
+      "desc": "Escolha quanta liberdade seus Sims têm.",
+      "full": "Total",
+      "reactive": "Reativa",
+      "off": "Desligada"
+    }
+  },
+  "chat": {
+    "title": "Conversar com {sim_name}",
+    "placeholder": "Escreva uma mensagem...",
+    "error_failed": "A mensagem não pôde ser entregue. Tente novamente mais tarde.",
+    "error_title": "Erro no Chat",
+    "response_header": "Resposta de {sim_name} (turno {turn})",
+    "notification_title": "{sim_name} respondeu",
+    "deferred_title": "Mensagem na fila",
+    "deferred_text": "Sua mensagem será entregue por {channel} assim que possível.\n\n{message}",
+    "choose_sim_title": "Iniciar uma Conversa",
+    "choose_sim_text": "Escolha o Sim com quem você quer conversar."
   }
 }

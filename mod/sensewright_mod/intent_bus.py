@@ -9,7 +9,6 @@ from sensewright_mod.config import (
     get_intent_default_ttl, get_intent_max_retries
 )
 from sensewright_mod.debug_log import log_error, log_exception, log_warn
-from sensewright_mod.http_client import get_world_sim_tick as _http_get_world_sim_tick
 
 
 # Intent kinds

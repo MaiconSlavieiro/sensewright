@@ -40,6 +40,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                 "api_key": "", "models": ["openai/gpt-4o-mini"],
                 "rpm": 20, "rpd": 200, "tpm": 40000,
             },
+            "opencode": {
+                "enabled": False, "base_url": "https://opencode.ai/zen/v1",
+                "api_key": "", "models": ["space-bunny-free"],
+                "rpm": 20, "rpd": 200, "tpm": 0,
+            },
             "gemini": {
                 "enabled": False, "base_url": "https://generativelanguage.googleapis.com/v1beta",
                 "api_key": "", "models": ["gemini-2.0-flash", "gemini-1.5-flash"],
@@ -50,15 +55,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                 "api_key": "", "models": ["llama-3.3-70b-versatile"],
                 "rpm": 30, "rpd": 14400, "tpm": 6000,
             },
-            "deepseek": {
-                "enabled": False, "base_url": "https://api.deepseek.com",
-                "api_key": "", "models": ["deepseek-chat"],
-                "rpm": 60, "rpd": 10000, "tpm": 60000,
-            },
             "ollama": {
                 "enabled": False, "base_url": "http://127.0.0.1:11434",
                 "api_key": "", "models": ["llama3.1"],
                 "rpm": 0, "rpd": 0, "tpm": 0,
+            },
+            "deepseek": {
+                "enabled": False, "base_url": "https://api.deepseek.com",
+                "api_key": "", "models": ["deepseek-chat"],
+                "rpm": 60, "rpd": 10000, "tpm": 60000,
             },
         },
         "routes": {"default": {"provider": "openrouter", "model": "openai/gpt-4o-mini"}},

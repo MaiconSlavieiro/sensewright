@@ -1,0 +1,11 @@
+# Sensewright v2 sidecar — runtime dependencies
+# Mirrors the [project] dependencies in pyproject.toml.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+tomli>=2.0; python_version < "3.11"
+tomli-w>=1.0
+
+# Development / testing (optional; also declared in pyproject [project.optional-dependencies] dev)
+pytest>=8.0
+httpx>=0.27

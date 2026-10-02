@@ -6,9 +6,10 @@ import logging
 import logging.handlers
 import sims4.log
 
-from sensewright_mod.config import get_config
-
 # Mod logger using sims4.log (writes to TS4's Logs folder)
+# NOTE: this module must not import other sensewright_mod modules at module
+# level. config -> i18n -> debug_log forms the import chain; a back-edge from
+# debug_log to config would create a circular import.
 _logger = sims4.log.Logger('Sensewright', default_owner='sensewright')
 
 # Worker thread logger (plain Python logging with rotation)
@@ -87,6 +88,14 @@ def log_info(msg, *args, **kwargs):
     """Log info on main thread."""
     try:
         _logger.info(msg, *args, **kwargs)
+    except Exception:
+        pass
+
+
+def log_debug(msg, *args, **kwargs):
+    """Log debug on main thread."""
+    try:
+        _logger.debug(msg, *args, **kwargs)
     except Exception:
         pass
 

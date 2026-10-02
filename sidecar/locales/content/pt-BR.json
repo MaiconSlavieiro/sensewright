@@ -8,10 +8,11 @@
     "strict_language": "[INSTRUÇÃO OBRIGATÓRIA DE SISTEMA: Pense e responda EXCLUSIVAMENTE em {llm_language_name}. Nunca utilize outro idioma.]",
     "json_only": "[Responda ESTRITAMENTE com um objeto JSON válido seguindo o schema solicitado, sem markdown extra.]",
     "one_shot": {
-      "sim.chat": "[thought]Estou exausto hoje, mas fico feliz que {player_name} mandou mensagem.[/thought]\nQue bom falar com você! O dia foi puxado no trabalho, como estão as coisas por aí?",
-      "sim.impulse": "[thought]A pia está cheia de louça e minha energia está baixa, melhor tomar um café antes do turno.[/thought]",
+      "sim.chat": "{\"response\": \"Que bom falar com você! O dia foi puxado no trabalho, como estão as coisas por aí?\", \"thought\": \"Estou exausto hoje, mas fico feliz que o jogador mandou mensagem.\", \"intents\": [], \"trust_delta\": 0.0}",
+      "sim.impulse": "{\"thought\": \"A pia está cheia de louça e minha energia está baixa; melhor tomar um café antes do turno.\", \"intents\": [{\"kind\": \"bias_interaction\", \"params\": {\"archetype\": \"focused\"}}]}",
       "sim.social": "{\"a_line\": \"Você não vai acreditar no que aconteceu hoje.\", \"b_line\": \"Me conta tudo!\", \"topic\": \"fofoca\", \"event_summary\": \"uma troca animada\", \"impact\": 1.2}"
-    }
+    },
+    "bias_archetypes": ["active", "art", "creative", "family", "focused", "foodie", "geek", "music", "neat", "outdoors", "playful", "read", "romantic", "social"]
   },
 
   "prompts": {
@@ -26,7 +27,7 @@
       "user_pc_email": "[Canal: e-mail | Confiança com {player_name}: {trust_label}]\nEstado atual: humor {mood_label}, {activity_label}.\nMensagem recebida de {player_name}: \"{message}\""
     },
     "sim.impulse": {
-      "system": "Você é a mente interior ociosa de {sim_name}. Produza apenas pensamento interno; nunca fale em voz alta.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+      "system": "Você é a mente interior ociosa de {sim_name}. Produza apenas pensamento interno; nunca fale em voz alta. Use apenas estes tokens de humor em set_mood: {mood_options}. Para bias_interaction use apenas estes archetypes: {bias_options}.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
     },
     "sim.dream": {
       "system": "Você é o inconsciente onírico de {sim_name}. Índice de surrealismo do sonho: {surrealism_index}. Crie um sonho em 1ª pessoa combinando os resíduos do dia, memórias antigas e a atmosfera do bairro ({zeitgeist_tags}).\n{json_only}\n{strict_language_anchor}"

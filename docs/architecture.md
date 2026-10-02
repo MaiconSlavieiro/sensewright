@@ -573,9 +573,19 @@ Native TS4 execution (interactions, buffs, moodlets, sentiments, mailbox, etc.)
 
 ## 13. Unverified / Implementation Gaps
 
-- Sidecar `services/` module implementations not fully read — endpoint handlers inferred from router signatures and spec.
-- Web Studio frontend (`/ui`) source not inspected — architecture described from spec and router registration only.
-- Exact `ContextAssembler` slicing logic (token counting, priority ordering) not verified in code.
-- `SaveVault` ring buffer rotation implementation not read — described from spec.
-- `ArchetypeResolver` tuning ID mapping (XML → runtime) not fully traced.
-- S4CL / Lot 51 Core integration points (event names, service APIs) taken from spec; actual versions may differ.
+For the precise, up-to-date gap analysis (per milestone, feature, and purpose, with
+`file:line` evidence), see **[`docs/status.md`](status.md)**. In summary:
+
+- **Engine-built but unwired:** `sim.dream`, `sim.cognition`, `evo.reflect`, `evo.trait`,
+  `god.plan`, `god.puppeteer`, `mem.consolidate`, `ops.recap`.
+- **Fallback-only:** 18 of the 33 purposes have no production trigger yet.
+- **Native object coupling (M5/M6):** `VisitSituation`, Diary/Snoop, Autobiography Book,
+  `sim_GetToKnow`, epitaph, sleep balloons, and the custom Mirror interaction are pending.
+- **LLM/config:** per-model cooldown is dead code, tier concurrency is not enforced, and
+  the asymmetric budget refund is logically a no-op.
+- **Sidecar `/v1/i18n/compile-addon`** is a stub; STBL compilation currently lives only in
+  `mod/build_package.py`.
+- In-game acceptance criteria (zone transition, Save As, Alt+F4 rollback, invisible
+  autoboot) remain unvalidated outside unit tests.
+- S4CL / Lot 51 Core integration points are exercised against pinned reference clones;
+  actual game-build versions may differ.

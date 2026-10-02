@@ -2,10 +2,28 @@
 # Sensewright v2 — Build Script for .package (DBPF with Tuning XML + STBL)
 # Python 3.10+ (build machine)
 # Manifest-driven STBL compilation per REQ-I18N-07
+#
+# The DBPF container format and the STBL v5 binary format here were reverse
+# engineered from a known-working Sims 4 package (S4CL) so the resulting file
+# is byte-compatible with the game's resource loader:
+#
+#   DBPF:
+#     - 96 byte header (major/minor, index count @0x24, index size @0x2C,
+#       index version @0x3C, index offset @0x40)
+#     - resource blobs start at 0x60
+#     - index: 4 zero bytes then `count` 32-byte entries
+#         (type, group, instance_hi, instance_lo, position, size, size2,
+#          compression=0x5A42, unknown=0x0001), size = compressed_size|0x80000000
+#
+#   STBL v5 (after zlib decompression):
+#     - 21 byte header: "STBL", u16 version(5), u8 compressed(0), u32 count,
+#       u32 locale(0), 6 fixed bytes 00 00 1A 48 00 00
+#     - entries: u32 key_hash, u8 flags(0), u16 length, length bytes (utf-8)
 
 import os
 import sys
 import json
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -20,15 +38,37 @@ DIST_DIR.mkdir(exist_ok=True)
 
 OUTPUT_PACKAGE = DIST_DIR / "Sensewright.package"
 STBL_KEYS_OUTPUT = DIST_DIR / "stbl_keys.json"
+TUNING_IDS_OUTPUT = DIST_DIR / "tuning_ids.json"
 
-# DBPF constants
+# DBPF constants (TS4 / .package)
 DBPF_MAGIC = b"DBPF"
-DBPF_VERSION = 0x00000002
-DBPF_INDEX_VERSION = 0x0000000C
+DBPF_MAJOR_VERSION = 2
+DBPF_MINOR_VERSION = 1
+DBPF_HEADER_SIZE = 96
+DBPF_INDEX_VERSION = 3
+DBPF_INDEX_ENTRY_SIZE = 32
+DBPF_COMPRESSION = 0x5A42
+DBPF_COMPRESSION_UNKNOWN = 0x0001
+DBPF_SIZE_COMPRESSED_FLAG = 0x80000000
 
-# Resource types
-TYPE_XML = 0x0333406C  # XML tuning
-TYPE_STBL = 0x220557DA  # String table
+# Resource type for a string table.
+TYPE_STBL = 0x220557DA
+
+# Tuning resource types, keyed by the tuning `i="..."` attribute. Values come
+# from the game's sims4/resources.pyc (Types registry).
+TUNING_TYPES = {
+    "buff": 0x6017E896,
+    "trait": 0xCB5FDDC7,
+    "snippet": 0x7DF2169C,
+    "interaction": 0xE882D22F,
+    "pie_menu_category": 0x03E9D964,
+    "sim_data": 0x545AC67A,
+}
+DEFAULT_TUNING_TYPE = 0x545AC67A  # SimData fallback
+
+# STBL resource key encoding: group 0 for the default locale (byte 0x00),
+# 0x80000000 otherwise; instance = (locale_byte << 56) | base.
+STBL_NON_DEFAULT_GROUP = 0x80000000
 
 
 def read_file(path):
@@ -42,8 +82,8 @@ def write_file(path, data):
 
 
 def compress_zlib(data):
-    """Compress with zlib (DBPF uses zlib with no header)."""
-    return zlib.compress(data)[2:-4]  # Remove zlib header and Adler32
+    """Compress with zlib. TS4 stores a standard zlib stream (header+adler)."""
+    return zlib.compress(data)
 
 
 def fnv1_32(text):
@@ -53,6 +93,128 @@ def fnv1_32(text):
         hash_val = (hash_val * 0x01000193) & 0xFFFFFFFF
         hash_val ^= byte
     return hash_val
+
+
+def plain_fnv1_64(text):
+    """Plain FNV-1 64-bit hash (no high-bit convention)."""
+    h = 0xCBF29CE484222325
+    for byte in text.encode("utf-8"):
+        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+        h ^= byte
+    return h
+
+
+def fnv1_64(text):
+    """FNV-1 64-bit hash with high bit set (TS4 tuning instance convention)."""
+    return plain_fnv1_64(text.lower()) | 0x8000000000000000
+
+
+# Stable, mod-specific base for STBL instance keys (top byte reserved for locale).
+STBL_INSTANCE_BASE = plain_fnv1_64("sensewright.stbl") & 0x00FFFFFFFFFFFFFF
+
+
+_TUNING_NAME_RE = re.compile(r'<I\b[^>]*\bn="([^"]+)"')
+_TUNING_KIND_RE = re.compile(r'<I\b[^>]*\bi="([^"]+)"')
+_TUNING_INSTANCE_RE = re.compile(r'\bs="[^"]*"')
+
+# <V n="name" t="localized_string" p="STBL">stbl.some.key</V>
+_LOCALIZED_STRING_RE = re.compile(
+    r'<V\b([^>]*\bt\s*=\s*"localized_string"[^>]*\bp\s*=\s*"STBL"[^>]*)>'
+    r'\s*stbl\.([A-Za-z0-9_.]+)\s*</V>'
+)
+_ATTR_N_RE = re.compile(r'\bn\s*=\s*"([^"]+)"')
+
+# Symbolic tuning cross-reference: <T n="category">swtune:sw_pie_category</T>.
+# Resolved to the referenced tuning's FNV-1 64-bit instance ID at build time so
+# the XML never needs a hand-maintained numeric literal.
+_TUNING_REF_RE = re.compile(r'swtune:([A-Za-z0-9_]+)')
+
+
+def parse_tuning_name(xml_data):
+    """Extract the tuning name (`n` attribute) from a tuning XML document."""
+    if isinstance(xml_data, bytes):
+        xml_data = xml_data.decode("utf-8", errors="replace")
+    match = _TUNING_NAME_RE.search(xml_data)
+    return match.group(1) if match else None
+
+
+def parse_tuning_kind(xml_data):
+    """Extract the tuning kind (`i` attribute) from a tuning XML document."""
+    if isinstance(xml_data, bytes):
+        xml_data = xml_data.decode("utf-8", errors="replace")
+    match = _TUNING_KIND_RE.search(xml_data)
+    return match.group(1) if match else None
+
+
+def tuning_resource_type(kind):
+    if kind is None:
+        return DEFAULT_TUNING_TYPE
+    return TUNING_TYPES.get(kind, DEFAULT_TUNING_TYPE)
+
+
+def inject_tuning_instance(xml_data, instance):
+    """Rewrite the tuning XML `s` attribute to the computed instance ID."""
+    is_bytes = isinstance(xml_data, bytes)
+    text = xml_data.decode("utf-8", errors="replace") if is_bytes else xml_data
+    text = _TUNING_INSTANCE_RE.sub('s="{}"'.format(instance), text, count=1)
+    return text.encode("utf-8") if is_bytes else text
+
+
+def inject_localized_strings(xml_data, stbl_hashes):
+    """Replace `stbl.<key>` localized-string references with their numeric hash.
+
+    TS4 tuning expects localizable strings as a numeric STBL key inside a <T>
+    element (e.g. <T n="name">0xDA253654</T>), not the dotted key path.
+    """
+    is_bytes = isinstance(xml_data, bytes)
+    text = xml_data.decode("utf-8", errors="replace") if is_bytes else xml_data
+    unreplaced = []
+
+    def _replace(match):
+        attrs = match.group(1)
+        key = match.group(2)
+        name_match = _ATTR_N_RE.search(attrs)
+        if name_match is None:
+            unreplaced.append(key)
+            return match.group(0)
+        key_hash = stbl_hashes.get(key)
+        if key_hash is None:
+            unreplaced.append(key)
+            return match.group(0)
+        return '<T n="{}">0x{:08X}</T>'.format(name_match.group(1), key_hash)
+
+    text = _LOCALIZED_STRING_RE.sub(_replace, text)
+    result = text.encode("utf-8") if is_bytes else text
+    return result, unreplaced
+
+
+def collect_tuning_instances():
+    """Map every tuning `n` attribute to its FNV-1 64-bit instance ID."""
+    instances = {}
+    for xml_file in TUNING_DIR.rglob("*.xml"):
+        name = parse_tuning_name(read_file(xml_file))
+        if name:
+            instances[name] = fnv1_64(name)
+    return instances
+
+
+def inject_tuning_refs(xml_data, name_to_instance):
+    """Replace `swtune:<name>` tokens with the referenced numeric instance ID."""
+    is_bytes = isinstance(xml_data, bytes)
+    text = xml_data.decode("utf-8", errors="replace") if is_bytes else xml_data
+    unresolved = []
+
+    def _replace(match):
+        name = match.group(1)
+        instance = name_to_instance.get(name)
+        if instance is None:
+            unresolved.append(name)
+            return match.group(0)
+        return str(instance)
+
+    text = _TUNING_REF_RE.sub(_replace, text)
+    result = text.encode("utf-8") if is_bytes else text
+    return result, unresolved
 
 
 def load_manifest():
@@ -75,7 +237,7 @@ def load_ui_locale(code):
 
 
 def extract_stbl_strings(locale_data):
-    """Extract all strings from the 'stbl' namespace, flattening with dotted keys."""
+    """Extract all strings from the 'stbl' namespace, flattening dotted keys."""
     strings = {}
 
     def extract(obj, prefix=""):
@@ -94,70 +256,110 @@ def extract_stbl_strings(locale_data):
     return strings
 
 
-def build_stbl_resource(strings, locale_byte):
-    """Build STBL binary resource from flattened string dict."""
-    # STBL format:
-    # Header: 4 bytes magic (STBL), 4 bytes version, 4 bytes num_strings, 4 bytes locale
-    # Index: for each string: 4 bytes key_hash, 4 bytes offset, 4 bytes length
-    # Strings: UTF-8 null-terminated
+def build_stbl_body(strings):
+    """Build the STBL v5 binary body from a {key: text} mapping.
 
-    sorted_keys = sorted(strings.keys())
+    Entries are sorted by key hash for determinism.
+    """
+    items = sorted(
+        ((fnv1_32("sensewright:{}".format(k)), v) for k, v in strings.items()),
+        key=lambda item: item[0],
+    )
 
-    string_data = bytearray()
-    index_entries = []
+    entries = bytearray()
+    for key_hash, text in items:
+        value = text.encode("utf-8")
+        entries.extend(struct.pack("<IBH", key_hash, 0, len(value)))
+        entries.extend(value)
 
-    for key in sorted_keys:
-        value = strings[key]
-        # FNV-1 hash of "sensewright:" + key
-        hash_key = "sensewright:{}".format(key)
-        key_hash = fnv1_32(hash_key)
-        offset = len(string_data)
-        utf8_value = value.encode("utf-8")
-        string_data.extend(utf8_value)
-        string_data.append(0)  # Null terminator
-        length = len(utf8_value)
-        index_entries.append((key_hash, offset, length))
+    header = bytearray()
+    header.extend(b"STBL")
+    header.extend(struct.pack("<H", 5))          # version
+    header.extend(struct.pack("<B", 0))          # compressed
+    header.extend(struct.pack("<I", len(items)))  # number of entries
+    header.extend(struct.pack("<I", 0))          # locale (unused)
+    header.extend(b"\x00\x00\x1a\x48\x00\x00")   # fixed trailer observed in TS4 STBL v5
 
-    header = struct.pack("<4sIII", b"STBL", 1, len(sorted_keys), locale_byte)
+    return bytes(header) + bytes(entries)
+
+
+def stbl_resource_key(locale_byte):
+    """Compute the DBPF (group, instance) for an STBL of a given locale byte."""
+    group = 0 if locale_byte == 0 else STBL_NON_DEFAULT_GROUP
+    instance = ((locale_byte & 0xFF) << 56) | STBL_INSTANCE_BASE
+    return group, instance
+
+
+def build_dbpf(resources):
+    """Serialise a list of (type, group, instance, raw_data) into a DBPF file.
+
+    Every resource is stored zlib-compressed, matching the reference package.
+    """
+    resources = sorted(resources, key=lambda r: (r[0], r[1], r[2]))
+
+    blob = bytearray()
+    entries = []
+    position = DBPF_HEADER_SIZE
+    for res_type, res_group, res_instance, raw_data in resources:
+        compressed = compress_zlib(raw_data)
+        # TS4 stores the 64-bit instance as (high u32, low u32) in the index.
+        # Verified against S4CL packages: the tuning's `s="0xHIGH LOW"` maps to
+        # the first instance dword = high, second = low.
+        entries.append((
+            res_type,
+            res_group,
+            (res_instance >> 32) & 0xFFFFFFFF,
+            res_instance & 0xFFFFFFFF,
+            position,
+            len(compressed) | DBPF_SIZE_COMPRESSED_FLAG,
+            len(raw_data),
+        ))
+        blob.extend(compressed)
+        position += len(compressed)
+
+    index_offset = DBPF_HEADER_SIZE + len(blob)
+    index_size = 4 + len(entries) * DBPF_INDEX_ENTRY_SIZE
+
+    header = bytearray(DBPF_HEADER_SIZE)
+    header[0:4] = DBPF_MAGIC
+    struct.pack_into("<I", header, 0x04, DBPF_MAJOR_VERSION)
+    struct.pack_into("<I", header, 0x08, DBPF_MINOR_VERSION)
+    struct.pack_into("<I", header, 0x24, len(entries))
+    struct.pack_into("<I", header, 0x2C, index_size)
+    struct.pack_into("<I", header, 0x3C, DBPF_INDEX_VERSION)
+    struct.pack_into("<I", header, 0x40, index_offset)
 
     index = bytearray()
-    for key_hash, offset, length in index_entries:
-        index.extend(struct.pack("<III", key_hash, offset, length))
+    index.extend(struct.pack("<I", 0))  # 4-byte index prefix
+    for entry in entries:
+        index.extend(struct.pack(
+            "<IIIIIIIHH",
+            entry[0], entry[1], entry[2], entry[3],
+            entry[4], entry[5], entry[6],
+            DBPF_COMPRESSION, DBPF_COMPRESSION_UNKNOWN,
+        ))
 
-    return header + index + string_data, sorted_keys
+    return bytes(header) + bytes(blob) + bytes(index)
 
 
 def build_package():
     """Build the DBPF package with manifest-driven STBL compilation."""
     print("Building Sensewright.package...")
 
-    # Load manifest
     manifest = load_manifest()
     locales = manifest.get("locales", [])
     default_locale = manifest.get("default_locale", "en-US")
 
-    # Collect all resources
-    resources = []  # (type, group, instance, data)
+    resources = []
+    tuning_ids = {}
+    stbl_keys_by_key = {}
+    stbl_hashes = {}
 
-    # Add XML tuning files
-    for xml_file in TUNING_DIR.rglob("*.xml"):
-        rel_path = xml_file.relative_to(TUNING_DIR)
-        instance = fnv1_32(str(rel_path)) & 0xFFFFFFFFFFFFFFFF
-        group = TYPE_XML
-        data = read_file(xml_file)
-        compressed = compress_zlib(data)
-        resources.append((TYPE_XML, group, instance, compressed))
-        print("  Added XML: {} (instance: 0x{:016X})".format(rel_path, instance))
-
-    # Add STBL resources per locale in manifest
-    all_stbl_keys = {}
-
+    # ── STBL first (so we know the numeric hashes to inject into tuning XML) ──
     for loc in locales:
         code = loc.get("code")
         stbl_byte_str = loc.get("ts4_stbl_byte", "0x00")
         locale_byte = int(stbl_byte_str, 16)
-
-        print("  Processing locale: {} (STBL byte: 0x{:02X})".format(code, locale_byte))
 
         try:
             locale_data = load_ui_locale(code)
@@ -170,89 +372,74 @@ def build_package():
             print("  WARNING: No STBL strings found for {}".format(code))
             continue
 
-        stbl_data, keys = build_stbl_resource(strings, locale_byte)
-        compressed = compress_zlib(stbl_data)
+        for key in strings:
+            stbl_hashes.setdefault(key, fnv1_32("sensewright:{}".format(key)))
+            stbl_keys_by_key.setdefault(key, {})[code] = "0x{:08X}".format(stbl_hashes[key])
 
-        # Instance ID for STBL: locale byte in upper 32 bits
-        instance = (locale_byte << 32) & 0xFFFFFFFFFFFFFFFF
-        resources.append((TYPE_STBL, TYPE_STBL, instance, compressed))
-        print("  Added STBL: {} (locale: 0x{:02X}, instance: 0x{:016X}, {} strings)".format(
-            code, locale_byte, instance, len(keys)))
+        body = build_stbl_body(strings)
+        group, instance = stbl_resource_key(locale_byte)
+        resources.append((TYPE_STBL, group, instance, body))
+        print("  Added STBL: {} (locale: 0x{:02X}, group: 0x{:08X}, instance: 0x{:016X}, {} strings)".format(
+            code, locale_byte, group, instance, len(strings)))
 
-        # Record key -> hash mapping for this locale
-        for key in keys:
-            hash_key = "sensewright:{}".format(key)
-            key_hash = fnv1_32(hash_key)
-            if key not in all_stbl_keys:
-                all_stbl_keys[key] = {}
-            all_stbl_keys[key][code] = "0x{:08X}".format(key_hash)
+    # Deterministic fallback hash map from the default locale if none were built.
+    if not stbl_hashes:
+        try:
+            default_data = load_ui_locale(default_locale)
+            for key in extract_stbl_strings(default_data):
+                stbl_hashes[key] = fnv1_32("sensewright:{}".format(key))
+        except RuntimeError:
+            pass
 
-    # Build DBPF
-    resources.sort(key=lambda r: (r[0], r[1], r[2]))
+    # ── Tuning XML ──────────────────────────────────────────────────────────
+    name_to_instance = collect_tuning_instances()
+    for xml_file in sorted(TUNING_DIR.rglob("*.xml")):
+        rel_path = xml_file.relative_to(TUNING_DIR)
+        data = read_file(xml_file)
 
-    index_entries = []
-    file_data = bytearray()
-    file_offset = 0
+        name = parse_tuning_name(data)
+        kind = parse_tuning_kind(data)
+        res_type = tuning_resource_type(kind)
 
-    for res_type, res_group, res_instance, res_data in resources:
-        index_entries.append({
-            "type": res_type,
-            "group": res_group,
-            "instance": res_instance,
-            "offset": file_offset,
-            "size": len(res_data),
-            "compressed_size": len(res_data),
-            "compression": 1  # zlib
-        })
-        file_data.extend(res_data)
-        file_offset += len(res_data)
+        if name:
+            instance = fnv1_64(name)
+            data = inject_tuning_instance(data, instance)
+            tuning_ids[name] = instance
+            print("  Added XML: {} (kind: {}, type: 0x{:08X}, name: {}, instance: 0x{:016X})".format(
+                rel_path, kind, res_type, name, instance))
+        else:
+            instance = fnv1_32(str(rel_path)) & 0xFFFFFFFFFFFFFFFF
+            print("  WARNING: no n attribute in {}; using path hash instance".format(rel_path))
 
-    with open(OUTPUT_PACKAGE, "wb") as f:
-        # Header
-        f.write(DBPF_MAGIC)
-        f.write(struct.pack("<I", DBPF_VERSION))
-        f.write(struct.pack("<I", 0))  # Index offset (will fill later)
-        f.write(struct.pack("<I", len(resources)))  # Index count
-        f.write(struct.pack("<I", 0))  # Index size (will fill later)
-        f.write(struct.pack("<I", DBPF_INDEX_VERSION))
-        f.write(struct.pack("<I", 0))  # Hole offset
-        f.write(struct.pack("<I", 0))  # Hole size
-        f.write(struct.pack("<I", 0))  # User data 1
-        f.write(struct.pack("<I", 0))  # User data 2
+        data, unreplaced = inject_localized_strings(data, stbl_hashes)
+        for key in unreplaced:
+            print("  WARNING: unresolved STBL reference 'stbl.{}' in {}".format(key, rel_path))
 
-        header_size = f.tell()
+        data, unresolved_refs = inject_tuning_refs(data, name_to_instance)
+        for ref_name in unresolved_refs:
+            print("  WARNING: unresolved tuning reference 'swtune:{}' in {}".format(ref_name, rel_path))
 
-        # Write file data
-        f.write(file_data)
+        resources.append((res_type, 0, instance, data))
 
-        # Write index
-        index_offset = f.tell()
-        for entry in index_entries:
-            f.write(struct.pack("<IIIQIIB",
-                entry["type"],
-                entry["group"],
-                entry["instance"] & 0xFFFFFFFF,
-                entry["instance"] >> 32,
-                entry["offset"],
-                entry["size"],
-                entry["compression"]
-            ))
-
-        index_size = f.tell() - index_offset
-
-        # Update header with index info
-        f.seek(4)
-        f.write(struct.pack("<I", index_offset))
-        f.write(struct.pack("<I", len(resources)))
-        f.write(struct.pack("<I", index_size))
+    package_bytes = build_dbpf(resources)
+    write_file(OUTPUT_PACKAGE, package_bytes)
 
     print("Created: {} ({} bytes, {} resources)".format(
-        OUTPUT_PACKAGE, OUTPUT_PACKAGE.stat().st_size, len(resources)))
+        OUTPUT_PACKAGE, len(package_bytes), len(resources)))
 
-    # Emit stbl_keys.json
     with open(STBL_KEYS_OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(all_stbl_keys, f, indent=2, ensure_ascii=False)
+        json.dump(stbl_keys_by_key, f, indent=2, ensure_ascii=False)
     print("Emitted STBL key mapping: {}".format(STBL_KEYS_OUTPUT))
+
+    tuning_ids_payload = {
+        "version": 1,
+        "algorithm": "fnv1_64_lower_highbit",
+        "tunings": tuning_ids,
+    }
+    with open(TUNING_IDS_OUTPUT, "w", encoding="utf-8") as f:
+        json.dump(tuning_ids_payload, f, indent=2, ensure_ascii=False)
+    print("Emitted tuning ID mapping: {} ({} tunings)".format(
+        TUNING_IDS_OUTPUT, len(tuning_ids)))
 
     return True
 

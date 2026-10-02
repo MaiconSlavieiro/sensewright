@@ -245,8 +245,8 @@ make doctor
 Checks:
 - Python 3.7 (`py -3.7`) and 3.10+ (`python`) availability
 - All mod source files present
-- Locale JSON validity + key parity (en vs pt-BR)
-- Tuning XML + `stbl.json` exist
+- Locale JSON validity + key parity (en-US vs pt-BR)
+- Tuning XML present + generated `dist/stbl_keys.json` and `dist/tuning_ids.json`
 - Build artifacts (`.ts4script`, `.package`) exist and valid
 - Sidecar directory + `python.txt` + `main.py`
 - TS4 Mods folder + installed artifacts

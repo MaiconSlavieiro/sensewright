@@ -1,19 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<I c="Buff" i="buff" m="buffs.sensewright" n="buff_dream_omen" s="1234567890123456802">
-  <V n="buff_type" t="buff_type">NEGATIVE</V>
-  <V n="duration" t="duration">240</V>
-  <V n="icon" t="reference">123458</V>
-  <V n="name" t="localized_string" p="STBL">stbl.buff.dream_omen.name</V>
-  <V n="description" t="localized_string" p="STBL">stbl.buff.dream_omen.desc</V>
+<I c="Buff" i="buff" m="buffs.buff" n="buff_dream_omen" s="1234567890123456802">
+  <E n="buff_type">NEGATIVE</E>
+  <T n="duration">240</T>
+  <T n="mood_type">0</T>
+  <T n="mood_weight">0</T>
+  <T n="visible">True</T>
+  <V n="buff_name" t="localized_string" p="STBL">stbl.buff.dream_omen.name</V>
+  <V n="buff_description" t="localized_string" p="STBL">stbl.buff.dream_omen.desc</V>
   <V n="tooltip" t="localized_string" p="STBL">stbl.buff.dream_omen.desc</V>
-  <V n="commodity" t="reference">0</V>
-  <V n="commodity_change" t="commodity_change">0</V>
-  <V n="decay_rate" t="decay_rate">0</V>
-  <V n="link_on_add" t="reference">0</V>
-  <V n="link_on_remove" t="reference">0</V>
-  <V n="mood" t="reference">0</V>
-  <V n="mood_weight" t="mood_weight">0</V>
-  <V n="add_to_sim_info_panel" t="add_to_sim_info_panel">True</V>
-  <V n="show_in_ui" t="show_in_ui">True</V>
-  <V n="buff_category" t="buff_category">LIFESTYLE</V>
 </I>

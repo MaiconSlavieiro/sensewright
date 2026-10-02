@@ -322,6 +322,14 @@ class I18nEngine:
             translated = self._apply_gender(translated, gender)
         return str(translated)
 
+    def enum_keys(self, category: str, lang: Optional[str] = None) -> List[str]:
+        """Return the canonical keys of an enum category (e.g. ``mood``)."""
+        enums = self.content(lang).get("enums", {})
+        values = enums.get(category, {})
+        if not isinstance(values, dict):
+            return []
+        return sorted(str(key) for key in values.keys())
+
     def content(self, lang: Optional[str] = None) -> Dict[str, Any]:
         """Return the merged content catalog for a locale code."""
         code = self.resolve_locale(lang)

@@ -84,6 +84,41 @@ def _extract_json(text: str) -> Dict[str, Any]:
     return {}
 
 
+#: Legacy ``[thought]...[/thought]`` block some models imitate from few-shots.
+_THOUGHT_RE = re.compile(r"\[thought\](.*?)\[/thought\]", re.DOTALL)
+
+
+def _recover_structured(purpose_id: str, text: str) -> Dict[str, Any]:
+    """Salvage a generation that ignored the JSON instruction.
+
+    Free models sometimes imitate a ``[thought]...[/thought]`` few-shot example
+    instead of emitting JSON. Discarding the whole generation loses the thought
+    and every intent, so map the block back to the purpose's expected shape.
+    Returns ``{}`` when nothing usable is found.
+    """
+    if not text:
+        return {}
+    match = _THOUGHT_RE.search(text)
+    if match is None:
+        return {}
+    thought = match.group(1).strip()
+    remainder = _THOUGHT_RE.sub("", text).strip()
+    if purpose_id == "sim.chat":
+        if not remainder:
+            return {}
+        return {
+            "response": remainder,
+            "thought": thought,
+            "intents": [],
+            "trust_delta": 0.0,
+        }
+    if purpose_id in ("sim.impulse", "sim.reaction"):
+        if not thought:
+            return {}
+        return {"thought": thought, "intents": []}
+    return {"thought": thought} if thought else {}
+
+
 class LLMScheduler:
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -132,9 +167,18 @@ class LLMScheduler:
 
         messages = self._assembler.assemble(purpose_id, context, lang)
 
+        def _usable(response: ProviderResponse) -> bool:
+            # Reject HTTP-200 generations we cannot parse; the chain then benches
+            # the model and tries the next route. Without this, a reasoning model
+            # that ignores the JSON instruction would silently fall back forever.
+            return bool(
+                _extract_json(response.text)
+                or _recover_structured(purpose_id, response.text)
+            )
+
         response, provider_name, model = self._chain.run(
             purpose_id, messages, max_tokens=max_out,
-            temperature=temperature, timeout=slo,
+            temperature=temperature, timeout=slo, validator=_usable,
         )
 
         latency = time.time() - started
@@ -152,6 +196,13 @@ class LLMScheduler:
 
         data = _extract_json(response.text)
         if not data:
+            data = _recover_structured(purpose_id, response.text)
+        if not data:
+            logger.warning(
+                "llm.parse_failed purpose=%s provider=%s model=%s; using fallback "
+                "(text[:160]=%r)",
+                purpose_id, provider_name, model, (response.text or "")[:160],
+            )
             data = render_fallback(purpose_id, lang, context)
         data = sanitize_payload(data)
 
@@ -183,6 +234,13 @@ class LLMScheduler:
             lang=normalize_lang(lang), trace_id=trace_id or generate_trace_id(),
             dedup_key=dedup_key or "",
         )
+        # Reserve the dedup key at enqueue time so a slow worker cannot let
+        # duplicate jobs pile up in the queue (e.g. one impulse per tick).
+        if job.dedup_key:
+            with self._lock:
+                if job.dedup_key in self._in_flight:
+                    return
+                self._in_flight.add(job.dedup_key)
         job._callback = callback  # type: ignore[attr-defined]
         self._queue.put(job)
 
@@ -190,27 +248,21 @@ class LLMScheduler:
         while True:
             job = self._queue.get()
             try:
-                if job.dedup_key:
-                    with self._lock:
-                        if job.dedup_key in self._in_flight:
-                            continue
-                        self._in_flight.add(job.dedup_key)
-                try:
-                    result = self.run_purpose(
-                        job.purpose_id, job.context, job.lang, job.trace_id,
-                    )
-                    callback = getattr(job, "_callback", None)
-                    if callback is not None:
-                        try:
-                            callback(result)
-                        except Exception:  # noqa: BLE001
-                            logger.exception("bg callback failed for %s", job.purpose_id)
-                finally:
-                    if job.dedup_key:
-                        with self._lock:
-                            self._in_flight.discard(job.dedup_key)
+                result = self.run_purpose(
+                    job.purpose_id, job.context, job.lang, job.trace_id,
+                )
+                callback = getattr(job, "_callback", None)
+                if callback is not None:
+                    try:
+                        callback(result)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("bg callback failed for %s", job.purpose_id)
             except Exception:  # noqa: BLE001
                 logger.exception("worker loop error for %s", job.purpose_id)
+            finally:
+                if job.dedup_key:
+                    with self._lock:
+                        self._in_flight.discard(job.dedup_key)
 
     def status(self) -> Dict[str, Any]:
         return {

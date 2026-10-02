@@ -128,13 +128,88 @@ def _merge_delta(state: AppState, delta: List[Dict[str, Any]]) -> None:
     state.merge_census_delta(delta)
 
 
+def _impulse_callback(state: AppState, sim_id: int, tick: int, trace_id):
+    """Build the background callback that records an impulse result as intents."""
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            thought = data.get("thought", "")
+            store = _store(state)
+            if thought and store:
+                store.add_memory(
+                    sim_id, "thought", {"text": thought},
+                    search_text=thought, created_sim_tick=tick,
+                )
+            out: List[Dict[str, Any]] = []
+            # REQ-IMP-01: an idle impulse emits at most one non-verbal intent.
+            for raw in (data.get("intents", []) or [])[:1]:
+                if not isinstance(raw, dict):
+                    continue
+                intent = normalize_intent(raw, trace_id=trace_id, default_source="agent")
+                if intent["kind"] == "speak":
+                    # Idle impulse never speaks (REQ-IMP-01); drop the line.
+                    continue
+                # The impulse is the seat's own mind: never trust a sim_id the
+                # model may have hallucinated from another context entry.
+                intent["sim_id"] = int(sim_id)
+                out.append(intent)
+            if out:
+                state.enqueue_intents(out)
+        except Exception:  # noqa: BLE001
+            logger.exception("impulse callback failed for sim %s", sim_id)
+
+    return _callback
+
+
+def _social_callback(state: AppState, sim_a: Dict[str, Any], sim_b: Dict[str, Any]):
+    """Build the background callback that emits a social pair's speech intents."""
+
+    a_id = int(sim_a.get("sim_id", 0))
+    b_id = int(sim_b.get("sim_id", 0))
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            a_line = data.get("a_line", "")
+            b_line = data.get("b_line", "")
+            out: List[Dict[str, Any]] = []
+            if a_line:
+                out.append(normalize_intent({
+                    "sim_id": a_id, "kind": "speak", "target_sim_id": b_id,
+                    "params": {"text": a_line}, "source": "social",
+                }, default_source="social"))
+            if b_line:
+                out.append(normalize_intent({
+                    "sim_id": b_id, "kind": "speak", "target_sim_id": a_id,
+                    "params": {"text": b_line}, "source": "social",
+                }, default_source="social"))
+            if out:
+                state.enqueue_intents(out)
+        except Exception:  # noqa: BLE001
+            logger.exception("social callback failed for pair %s/%s", a_id, b_id)
+
+    return _callback
+
+
 def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge the delta, schedule autonomous LLM work in the background and
+    immediately return any intents that are ready.
+
+    The heavy LLM calls (impulse/social) must not run on the HTTP request
+    thread: a single free-provider call can take tens of seconds, which would
+    exceed the mod's request timeout and drop the returned intents. Jobs are
+    enqueued on the scheduler's background worker; their callbacks push intents
+    onto the pending IntentBus, which the next tick drains and returns.
+    """
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
     state.current_lang = lang
     tick = int(payload.get("world_sim_tick", 0))
+    save_id = int(payload.get("save_id", 0))
     active_sim_id = payload.get("active_sim_id")
     clock_speed = int(payload.get("clock_speed", 1))
+    trace_id = payload.get("trace_id")
 
     _merge_delta(state, payload.get("sims_delta") or [])
 
@@ -143,10 +218,9 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "scheduled": 0, "intents": state.drain_intents(), "social_sessions": []}
 
     intents: List[Dict[str, Any]] = []
-    social_sessions: List[Dict[str, Any]] = []
     scheduled = 0
 
-    # Recompute seats.
+    # Recompute seats (purely local, no LLM).
     catalyst_ids = list(state.catalyst_leases.keys())
     max_seats = int(state.config.gameplay("agent_seats", 12))
     lease_min = int(state.config.gameplay("lease_min_sim_minutes", 60))
@@ -157,7 +231,7 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         existing_seats=state.get_seats(),
     ))
 
-    # Run idle impulses for the active sim + a bounded set of full-tier seats.
+    # Schedule idle impulses for the active sim + a bounded set of full seats.
     seats_snapshot = state.get_seats()
     full_seats = [s for s in seats_snapshot.values() if s.get("tier") == "full" and s.get("role") == "household"]
     order = []
@@ -177,26 +251,15 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
             sim.get("mood"), sim.get("activity"), sim.get("needs"),
             sim.get("is_off_lot_duty"), sim.get("is_sleeping"), tick,
         )
-        result = state.scheduler.run_purpose("sim.impulse", ctx, lang)
-        data = result.data or {}
-        thought = data.get("thought", "")
-        if thought:
-            store = _store(state)
-            if store:
-                store.add_memory(seat["sim_id"], "thought", {"text": thought}, search_text=thought, created_sim_tick=tick)
-        raw_intents = data.get("intents", [])
-        for raw in raw_intents or []:
-            if not isinstance(raw, dict):
-                continue
-            intent = normalize_intent(raw, trace_id=payload.get("trace_id"), default_source="agent")
-            if intent["kind"] == "speak":
-                # Idle impulse never speaks (REQ-IMP-01).
-                intent["kind"] = "bias_interaction"
-                intent["params"] = {}
-            intents.append(intent)
+        # dedup_key throttles to one in-flight impulse per sim.
+        state.scheduler.submit_bg(
+            "sim.impulse", ctx, lang, trace_id=trace_id,
+            dedup_key="{}:{}:impulse".format(save_id, seat["sim_id"]),
+            callback=_impulse_callback(state, int(seat["sim_id"]), tick, trace_id),
+        )
         scheduled += 1
 
-    # Social layer: detect a conversational pair and run sim.social.
+    # Social layer: detect a conversational pair and schedule sim.social.
     pair = _find_conversational_pair(state, active_sim_id)
     if pair:
         sim_a, sim_b = pair
@@ -204,34 +267,17 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         if gate.get("ok"):
             rumor = _pick_rumor(state, sim_a, sim_b)
             ctx = build_social_context(sim_a, sim_b, tick, rumor=rumor)
-            result = state.scheduler.run_purpose("sim.social", ctx, lang)
-            data = result.data or {}
-            a_line = data.get("a_line", "")
-            b_line = data.get("b_line", "")
-            if a_line or b_line:
-                social_sessions.append({
-                    "a_sim_id": int(sim_a.get("sim_id", 0)),
-                    "b_sim_id": int(sim_b.get("sim_id", 0)),
-                    "a_line": a_line,
-                    "b_line": b_line,
-                    "topic": data.get("topic", ""),
-                    "impact": data.get("impact", 0.5),
-                })
-                # Emit speech intents for the pair.
-                intents.append(normalize_intent({
-                    "sim_id": int(sim_a.get("sim_id", 0)),
-                    "kind": "speak", "target_sim_id": int(sim_b.get("sim_id", 0)),
-                    "params": {"text": a_line}, "source": "social",
-                }, default_source="social"))
-                if b_line:
-                    intents.append(normalize_intent({
-                        "sim_id": int(sim_b.get("sim_id", 0)),
-                        "kind": "speak", "target_sim_id": int(sim_a.get("sim_id", 0)),
-                        "params": {"text": b_line}, "source": "social",
-                    }, default_source="social"))
+            state.scheduler.submit_bg(
+                "sim.social", ctx, lang, trace_id=trace_id,
+                dedup_key="{}:{}-{}:social".format(
+                    save_id, int(sim_a.get("sim_id", 0)), int(sim_b.get("sim_id", 0))),
+                callback=_social_callback(state, sim_a, sim_b),
+            )
+            scheduled += 1
 
-    # God Director runs on a slower cadence.
-    god_result = god_tick_handler(state, int(payload.get("save_id", 0)), tick, lang)
+    # God Director: plans/zeitgeist are already submitted in the background;
+    # narration is scheduled asynchronously inside god_tick.
+    god_result = god_tick_handler(state, save_id, tick, lang)
     for directive in god_result.get("directives", []):
         intents.append(normalize_intent({
             "sim_id": active_sim_id or 0,
@@ -240,23 +286,32 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
             "source": "god",
         }, default_source="god"))
 
-    # Drain pending (god/puppeteer/chat) intents + this tick's intents.
+    # Drain intents ready now (from this call and previous background jobs).
     intents.extend(state.drain_intents())
 
     return {
         "ok": True,
         "scheduled": scheduled,
         "intents": intents,
-        "social_sessions": social_sessions,
+        "social_sessions": [],
     }
 
 
+#: Substrings that mark an interaction as conversational. The mod reports the
+#: interaction class name (e.g. "SocialInteraction"), not a semantic activity,
+#: so match case-insensitively instead of requiring an exact vocabulary.
+_CONVERSATION_MARKERS = ("social", "talk", "chat", "convers")
+
+
+def _is_conversing(sim: Dict[str, Any]) -> bool:
+    activity = (sim.get("activity") or "").lower()
+    return any(marker in activity for marker in _CONVERSATION_MARKERS)
+
+
 def _find_conversational_pair(state: AppState, active_sim_id: Optional[int]):
-    candidates = []
-    for sim_id, sim in state.census_items():
-        activity = (sim.get("activity") or "").lower()
-        if activity in ("socializing", "talking", "chatting"):
-            candidates.append(sim)
+    candidates = [
+        sim for _sim_id, sim in state.census_items() if _is_conversing(sim)
+    ]
     if len(candidates) >= 2:
         return candidates[0], candidates[1]
     return None

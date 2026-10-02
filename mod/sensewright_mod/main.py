@@ -4,25 +4,22 @@
 import services
 import sims4.commands
 from lot51_core.services.events import event_service, CoreEvent
-from lot51_core.services.service_manager import service_manager
-from sims4communitylib.modinfo import ModInfo
-from sims4communitylib.utils.common_injection_utils import CommonInjectionUtils
 
 from sensewright_mod.debug_log import log_info, log_error, log_exception, get_mod_logger
 from sensewright_mod.http_client import start_worker, stop_worker, process_inbound_queue, post_lifecycle_attach
 from sensewright_mod.state_collector import collect_sims_delta, collect_full_census, get_current_game_state
 from sensewright_mod.intent_bus import get_intent_bus
-from sensewright_mod.tool_executor import execute_intents, register_archetype_mappings
-from sensewright_mod.native_hooks import (
-    get_or_create_player_confidant, register_tuning_ids,
-    _TRAIT_HIDDEN_NOWALKBY, _BUFF_DREAM_EPIPHANY, _BUFF_DREAM_SURREAL,
-    _BUFF_DREAM_OMEN, _BUFF_DREAM_NIGHTMARE
-)
+from sensewright_mod.tool_executor import execute_intents
+from sensewright_mod.tuning import register_all_tuning
+from sensewright_mod.native_hooks import get_or_create_player_confidant
 from sensewright_mod.chat_ui import cmd_sw_chat, cmd_sw_chat_picker
 from sensewright_mod.panel_ui import cmd_sw_panel
 from sensewright_mod.pie_menu import register_pie_menu_interactions, cmd_pie_chat, cmd_pie_provoke, cmd_pie_panel
+# Importing the interactions module registers the S4CL pie menu handler as an
+# import side effect (must happen before household/sims load).
+from sensewright_mod import interactions as _interactions  # noqa: F401
 from sensewright_mod.player_activity import register_player_activity_hooks, update_idle_detection, clear_all_player_locks
-from sensewright_mod.i18n import load_locales, get_current_language
+from sensewright_mod.i18n import load_locales, get_current_language, detect_and_apply_game_language, t
 
 
 # Mod service class for Lot 51 Core service manager
@@ -33,6 +30,20 @@ class SensewrightService(object):
         self._started = False
         self._last_autonomy_tick = 0
         self._autonomy_interval = 15 * 1000  # 15 sim-minutes in ticks
+        self._language_applied = False
+
+    def _ensure_language(self):
+        """Apply the game's configured language once it becomes available.
+
+        `account.locale` is assigned inside `c_api_client_connect`, which can be
+        after our start hook, so we retry on each tick until it resolves.
+        """
+        if self._language_applied:
+            return
+        language = detect_and_apply_game_language()
+        if language:
+            self._language_applied = True
+            log_info('Sensewright active language: {}'.format(language))
 
     def start(self):
         if self._started:
@@ -42,19 +53,13 @@ class SensewrightService(object):
         # Load locales
         load_locales()
 
-        # Register tuning IDs (will be populated from package)
-        # These are placeholder values - real values come from tuning XML
-        register_tuning_ids(
-            trait_hidden_nowalkby=0,  # Will be set by tuning
-            buff_dream_epiphany=0,
-            buff_dream_surreal=0,
-            buff_dream_omen=0,
-            buff_dream_nightmare=0,
-            bias_commodity_buffs={}
-        )
+        # Match the language configured in the game (retried on tick if not yet
+        # available).
+        self._ensure_language()
 
-        # Register archetype mappings (populated from tuning)
-        register_archetype_mappings({}, {}, {}, {}, {}, {})
+        # Resolve tuning IDs (Sensewright-owned + native archetypes) and register
+        # them with native_hooks / tool_executor. See tuning.py.
+        register_all_tuning()
 
         # Start HTTP worker thread
         start_worker()
@@ -83,6 +88,9 @@ class SensewrightService(object):
             return
 
         try:
+            # Apply the game language as soon as the client account is ready.
+            self._ensure_language()
+
             # Process inbound HTTP responses/intents
             process_inbound_queue()
 
@@ -109,9 +117,8 @@ class SensewrightService(object):
     def _send_autonomy_pulse(self):
         """Send autonomy tick to sidecar."""
         try:
-            from sensewright_mod.http_client import (
-                post_autonomy_tick, generate_trace_id, get_player_confidant_sim_id
-            )
+            from sensewright_mod.http_client import post_autonomy_tick, generate_trace_id
+            from sensewright_mod.native_hooks import get_player_confidant_sim_id
 
             state = get_current_game_state()
             trace_id = generate_trace_id()
@@ -136,6 +143,26 @@ class SensewrightService(object):
 
 # Global service instance
 _sensewright_service = None
+_onboarding_shown = False
+
+
+def _show_onboarding_notification():
+    """Show a one-time notification with the in-game entry points."""
+    global _onboarding_shown
+    if _onboarding_shown:
+        return
+    _onboarding_shown = True
+    try:
+        from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification
+        from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
+
+        body = '{}\n\n{}'.format(t('notify.onboarding.body'), t('notify.onboarding.hint'))
+        CommonBasicNotification(
+            CommonLocalizationUtils.create_localized_string(t('notify.onboarding.title')),
+            CommonLocalizationUtils.create_localized_string(body),
+        ).show()
+    except Exception as e:
+        log_exception('Onboarding notification failed: {}'.format(e))
 
 
 def get_service():
@@ -165,6 +192,8 @@ def _on_households_and_sims_loaded(event_service, *args, **kwargs):
         # Send session-start to sidecar
         from sensewright_mod.http_client import post_lifecycle_session_start
         state = get_current_game_state()
+        # Re-arm the sidecar watchdog (covers a sidecar restarted mid-session).
+        post_lifecycle_attach()
         post_lifecycle_session_start('player_1', state['save_id'], state['world_sim_tick'], get_current_language())
 
         # Send full census
@@ -172,6 +201,9 @@ def _on_households_and_sims_loaded(event_service, *args, **kwargs):
         sims, households, relationships = collect_full_census()
         post_census('player_1', state['save_id'], state['world_sim_tick'],
                     sims, households, relationships, state['installed_packs'])
+
+        # Surface the in-game entry points to the player.
+        _show_onboarding_notification()
 
         log_info('Session started, census sent')
     except Exception as e:
@@ -228,37 +260,14 @@ def _on_game_save(event_service, *args, **kwargs):
 
 @event_service.handler(CoreEvent.LOADING_SCREEN_LIFTED)
 def _on_loading_screen_lifted(event_service, *args, **kwargs):
-    """Called when loading screen is lifted."""
+    """Called when loading screen is lifted (fallback start point)."""
     try:
-        # Good time to ensure sidecar is responsive
+        # Idempotent: start() returns early if already started. This is a
+        # safety net in case HOUSEHOLDS_AND_SIMS_LOADED does not fire.
+        get_service().start()
         log_info('Loading screen lifted')
     except Exception as e:
         log_exception('Loading screen lifted error: {}'.format(e))
-
-
-# Register service with Lot 51 Core service manager
-def _register_service():
-    try:
-        service_manager.register_service(lambda: get_service(), init_critical=True, early_load=True)
-        log_info('Sensewright service registered with Lot 51 Core')
-    except Exception as e:
-        log_exception('Service registration error: {}'.format(e))
-
-
-# Initialize on module load
-_register_service()
-
-# Also register via S4CL if available
-try:
-    from sims4communitylib.events.zone_spin_up_events import CommonZoneSpinUpEvent
-    from sims4communitylib.events.event_registry import CommonEventRegistry
-
-    @CommonEventRegistry.handle_events(ModInfo.get_identity())
-    def _on_zone_spin_up(event_data):
-        if isinstance(event_data, CommonZoneSpinUpEvent):
-            get_service().start()
-except Exception:
-    pass  # S4CL not available or different version
 
 
 log_info('Sensewright v2 mod loaded')

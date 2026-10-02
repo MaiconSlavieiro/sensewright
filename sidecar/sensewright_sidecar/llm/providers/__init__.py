@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from .base import GeminiProvider, OpenAICompatProvider, Provider
 
 #: Providers that use the OpenAI-compatible endpoint.
-_OPENAI_COMPAT = ("openrouter", "groq", "deepseek", "ollama")
+_OPENAI_COMPAT = ("openrouter", "opencode", "groq", "deepseek", "ollama")
 
 #: Providers with a bespoke client.
 _SPECIAL = {
@@ -18,10 +18,14 @@ def build_provider(name: str, config: Dict[str, Any]) -> Optional[Provider]:
     """Construct a provider client from a config dict, or None for unknown ids."""
     name = (name or "").lower()
     if name in _SPECIAL:
-        return _SPECIAL[name](config)
-    if name in _OPENAI_COMPAT:
-        return OpenAICompatProvider(config)
-    return None
+        provider = _SPECIAL[name](config)
+    elif name in _OPENAI_COMPAT:
+        provider = OpenAICompatProvider(config)
+    else:
+        return None
+    # Tag the instance so provider-specific request shaping can key off it.
+    provider.name = name
+    return provider
 
 
 def available_provider_names() -> tuple:

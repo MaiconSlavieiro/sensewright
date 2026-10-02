@@ -8,8 +8,10 @@ from sims.sim_info import SimInfo
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
 from sims4communitylib.utils.sims.common_sim_state_utils import CommonSimStateUtils
 
-from sensewright_mod.debug_log import log_error, log_exception, safe_call
-from sensewright_mod.native_hooks import apply_buff, add_relationship_bit, set_trait, remove_trait
+from sensewright_mod.debug_log import log_error, log_exception, log_warn, safe_call, worker_log_info
+from sensewright_mod.native_hooks import (
+    apply_buff, apply_mood, add_relationship_bit, set_trait, remove_trait, has_buff
+)
 
 
 # Archetype mappings (semantic category -> tuning IDs)
@@ -22,6 +24,67 @@ _ARCHETYPE_ARCHETYPE = {}  # For bias_interaction commodity buffs
 
 # Commodity buff mappings for bias_interaction
 _BIAS_COMMODITY_BUFFS = {}
+
+# Synonym map: the LLM free-associates mood words (English and localized
+# inflections); map them onto the canonical English keys used by
+# _ARCHETYPE_MOOD so a stray "tired"/"focada"/"neutral" still resolves.
+_MOOD_ALIASES = {
+    "ok": "fine", "okay": "fine", "neutral": "fine", "normal": "fine",
+    "calm": "fine", "content": "fine", "bem": "fine",
+    "feliz": "happy", "glad": "happy", "cheerful": "happy", "good": "happy",
+    "triste": "sad", "unhappy": "sad", "down": "sad",
+    "irritado": "angry", "irritada": "angry", "irritated": "angry",
+    "mad": "angry", "furious": "angry", "annoyed": "angry", "raiva": "angry",
+    "tenso": "tense", "tensa": "tense", "stressed": "tense", "worried": "tense",
+    "anxious": "tense", "nervous": "tense",
+    "paquerador": "flirty", "flirtatious": "flirty", "romantic": "flirty",
+    "inspirado": "inspired", "inspirada": "inspired", "inspired": "inspired",
+    "focado": "focused", "focada": "focused", "concentrado": "focused",
+    "concentrada": "focused", "focused": "focused", "concentrated": "focused",
+    "confuso": "dazed", "confusa": "dazed", "dazed": "dazed", "confused": "dazed",
+    "entediado": "bored", "entediada": "bored", "bored": "bored", "lazy": "bored",
+    "sonolento": "sleepy", "sonolenta": "sleepy", "sleepy": "sleepy",
+    "tired": "sleepy", "exhausted": "sleepy", "drowsy": "sleepy",
+    "cansado": "sleepy", "cansada": "sleepy", "sleeping": "sleepy",
+    "desconfortavel": "uncomfortable", "uncomfortable": "uncomfortable",
+    "confiante": "confident", "confident": "confident",
+    "energizado": "energized", "energizada": "energized", "energized": "energized",
+    "excited": "energized", "animado": "energized", "animada": "energized",
+    "playful": "playful", "brincalhao": "playful",
+    "embarrassed": "embarrassed", "envergonhado": "embarrassed",
+    "scared": "scared", "assustado": "scared", "assustada": "scared",
+}
+
+
+#: Archetype -> mood bridge used by bias_interaction until the M5 Commodity
+#: Buffs ship; a mood nudges native autonomy toward matching activities.
+_BIAS_ARCHETYPE_MOODS = {
+    "social": "happy", "social_friendly": "happy", "socialize": "happy",
+    "friendly": "happy", "talk": "happy",
+    "flirty": "flirty", "romantic": "flirty", "date": "flirty",
+    "creative": "inspired", "paint": "inspired", "paintng": "inspired",
+    "write": "inspired", "writing": "inspired", "music": "inspired",
+    "active": "energized", "fitness": "energized", "workout": "energized",
+    "exercise": "energized", "dance": "energized",
+    "focus": "focused", "work": "focused", "study": "focused",
+    "clean": "focused", "cook": "focused", "read": "focused",
+    "rest": "sleepy", "sleep": "sleepy", "nap": "sleepy",
+    "relax": "fine", "eat": "fine", "hungry": "uncomfortable",
+    "play": "playful", "fun": "playful", "game": "playful",
+}
+
+
+def _normalize_token(text):
+    """Lowercase + strip accents so localized inflections match aliases."""
+    if not text:
+        return ""
+    token = text.strip().lower()
+    try:
+        import unicodedata
+        token = unicodedata.normalize("NFKD", token).encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        pass
+    return token
 
 # Whitelisted world commands for 'command' kind
 _WHITELISTED_COMMANDS = frozenset([
@@ -60,8 +123,24 @@ class ArchetypeResolver(object):
 
     @staticmethod
     def resolve_mood(mood_name):
-        """Resolve mood name to buff tuning ID."""
-        return _ARCHETYPE_MOOD.get(mood_name.lower())
+        """Resolve a mood name (canonical, synonym or localized) to a buff ID.
+
+        The LLM is not guaranteed to answer with the canonical token, so accept
+        synonyms and accented forms (e.g. "tired" -> sleepy, "focada" ->
+        focused) before giving up.
+        """
+        token = _normalize_token(mood_name)
+        if not token:
+            return None
+        if token in _ARCHETYPE_MOOD:
+            return _ARCHETYPE_MOOD[token]
+        canonical = _MOOD_ALIASES.get(token)
+        if canonical is not None:
+            return _ARCHETYPE_MOOD.get(canonical)
+        for key, value in _ARCHETYPE_MOOD.items():
+            if key in token or token in key:
+                return value
+        return None
 
     @staticmethod
     def resolve_activity(activity_name):
@@ -127,7 +206,14 @@ class GameLever(object):
 
     @staticmethod
     def _execute_speak(sim_id, params, thought):
-        """Show a speech balloon / thought bubble."""
+        """Surface a Sim's line diegetically.
+
+        The game exposes no per-Sim `show_speech_balloon`/`show_thought_balloon`
+        API (verified against the decompiled `sims.sim.Sim`), so we first use one
+        of those if another mod provides it and otherwise fall back to a real
+        S4CL notification carrying the line. This replaces the previous silent
+        no-op that dropped every `speak` intent.
+        """
         text = params.get('text', '')
         tone = params.get('tone', 'neutral')
         balloon_type = params.get('balloon_type', 'speech')  # 'speech' or 'thought'
@@ -136,27 +222,34 @@ class GameLever(object):
         if sim_info is None:
             return False, {'error': 'sim_not_found'}
 
+        # Fall back to the embedded thought when no explicit text is present.
+        if not text and thought:
+            text = thought
+        if not text:
+            return False, {'error': 'no_text'}
+
         sim = CommonSimUtils.get_sim_instance(sim_info)
-        if sim is None:
-            return False, {'error': 'sim_not_instanced'}
+        if sim is not None:
+            try:
+                if balloon_type == 'thought' and hasattr(sim, 'show_thought_balloon'):
+                    sim.show_thought_balloon(text)
+                    return True, {'balloon_shown': True, 'type': 'thought'}
+                if hasattr(sim, 'show_speech_balloon'):
+                    sim.show_speech_balloon(text)
+                    return True, {'balloon_shown': True, 'type': 'speech'}
+            except Exception as e:
+                log_exception('Speak balloon error: {}'.format(e))
 
         try:
-            # Use the sim's show_dialog or balloon system
-            from ui.ui_dialog_notification import UiDialogNotification
-            from protocolbuffers.Localization_pb2 import LocalizedString
+            from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification
+            from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
 
-            # For thought balloons, use the balloon system
-            if balloon_type == 'thought':
-                # Show thought balloon
-                sim.show_thought_balloon(text)
-            else:
-                # Show speech balloon / notification
-                # This is simplified - real implementation would use proper dialog
-                pass
-
-            return True, {'balloon_shown': True}
+            title = CommonLocalizationUtils.create_localized_string(sim_info.full_name)
+            body = CommonLocalizationUtils.create_localized_string(text)
+            CommonBasicNotification(title, body).show()
+            return True, {'notification_shown': True, 'tone': tone}
         except Exception as e:
-            log_exception('Speak execution error: {}'.format(e))
+            log_exception('Speak notification error: {}'.format(e))
             return False, {'error': 'speak_failed'}
 
     @staticmethod
@@ -186,12 +279,12 @@ class GameLever(object):
 
     @staticmethod
     def _execute_set_mood(sim_id, params):
-        """Apply a mood buff to sim."""
+        """Apply a mood to sim (Types.MOOD statistic)."""
         mood = params.get('mood', '')
         duration = params.get('duration_sim_minutes', 60)
 
-        buff_id = ArchetypeResolver.resolve_mood(mood)
-        if buff_id is None:
+        mood_id = ArchetypeResolver.resolve_mood(mood)
+        if mood_id is None:
             return False, {'error': 'unknown_mood', 'mood': mood}
 
         sim_info = services.sim_info_manager().get(sim_id)
@@ -199,33 +292,50 @@ class GameLever(object):
             return False, {'error': 'sim_not_found'}
 
         try:
-            apply_buff(sim_info, buff_id, duration_sim_minutes=duration)
-            return True, {'buff_applied': buff_id}
+            applied = apply_mood(sim_info, mood_id)
+            if applied:
+                return True, {'mood_applied': mood_id}
+            return False, {'error': 'mood_failed', 'mood': mood, 'mood_id': mood_id}
         except Exception as e:
             log_exception('Set mood error: {}'.format(e))
-            return False, {'error': 'buff_failed'}
+            return False, {'error': 'mood_failed'}
 
     @staticmethod
     def _execute_bias_interaction(sim_id, params):
-        """Apply a hidden commodity buff to bias autonomy."""
+        """Bias native autonomy.
+
+        Preferred path: apply the registered hidden commodity buff for the
+        archetype. Until the M5 Commodity Buffs exist in the package, fall back
+        to the working mood lever: a mood steers native autonomy toward matching
+        objects (inspired -> creative, energized -> active, focused -> work).
+        """
         archetype = params.get('archetype', '')
         weight = params.get('weight', 1.0)
         duration = params.get('duration_sim_minutes', 480)  # 8 hours default
-
-        buff_id = ArchetypeResolver.get_bias_commodity_buff(archetype)
-        if buff_id is None:
-            return False, {'error': 'unknown_archetype', 'archetype': archetype}
 
         sim_info = services.sim_info_manager().get(sim_id)
         if sim_info is None:
             return False, {'error': 'sim_not_found'}
 
-        try:
-            apply_buff(sim_info, buff_id, duration_sim_minutes=duration)
-            return True, {'bias_buff_applied': buff_id, 'weight': weight}
-        except Exception as e:
-            log_exception('Bias interaction error: {}'.format(e))
-            return False, {'error': 'bias_failed'}
+        buff_id = ArchetypeResolver.get_bias_commodity_buff(archetype)
+        if buff_id is not None:
+            try:
+                apply_buff(sim_info, buff_id, duration_sim_minutes=duration)
+                if has_buff(sim_info, buff_id):
+                    return True, {'bias_buff_applied': buff_id, 'weight': weight}
+                return False, {'error': 'bias_buff_not_applied', 'buff_id': buff_id}
+            except Exception as e:
+                log_exception('Bias interaction error: {}'.format(e))
+                return False, {'error': 'bias_failed'}
+
+        # Bridge: map the archetype to a mood via the working mood lever.
+        mood_key = _BIAS_ARCHETYPE_MOODS.get(_normalize_token(archetype))
+        if mood_key is not None:
+            mood_id = ArchetypeResolver.resolve_mood(mood_key)
+            if mood_id is not None and apply_mood(sim_info, mood_id):
+                return True, {'bias_mood_applied': mood_key, 'weight': weight}
+
+        return False, {'error': 'unknown_archetype', 'archetype': archetype}
 
     @staticmethod
     def _execute_prefer_target(sim_id, target_sim_id, params):
@@ -284,7 +394,17 @@ class GameLever(object):
 
     @staticmethod
     def _execute_command(params):
-        """World lever escape hatch - whitelisted commands only."""
+        """World lever escape hatch - whitelisted commands only.
+
+        Also handles God-director narration directives, which arrive as a
+        ``command`` intent carrying ``visual_type``/``text`` rather than a
+        whitelisted ``command`` name.
+        """
+        narration = params.get('text') or ''
+        visual_type = params.get('visual_type')
+        if narration and not params.get('command'):
+            return GameLever._execute_narration(narration, visual_type)
+
         command = params.get('command', '')
         args = params.get('args', {})
 
@@ -326,12 +446,30 @@ class GameLever(object):
             log_exception('Command execution error: {}'.format(e))
             return False, {'error': 'command_failed'}
 
+    @staticmethod
+    def _execute_narration(text, visual_type=None):
+        """Surface a God-director line diegetically as an S4CL notification."""
+        try:
+            from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification
+            from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
+
+            title = CommonLocalizationUtils.create_localized_string(
+                visual_type or 'Sensewright')
+            body = CommonLocalizationUtils.create_localized_string(text)
+            CommonBasicNotification(title, body).show()
+            return True, {'narration_shown': True, 'visual_type': visual_type}
+        except Exception as e:
+            log_exception('Narration error: {}'.format(e))
+            return False, {'error': 'narration_failed'}
+
 
 def execute_intents(intents):
     """Execute a list of intents, returning results."""
     results = []
     for intent in intents:
         success, result = GameLever.execute_intent(intent)
+        worker_log_info('intent {} [{}] sim={} target={} -> success={} {}'.format(
+            intent.id, intent.kind, intent.sim_id, intent.target_sim_id, success, result))
         results.append({
             'intent_id': intent.id,
             'success': success,

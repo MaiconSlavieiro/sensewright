@@ -83,6 +83,7 @@ class ContextAssembler:
         zeitgeist = context.get("zeitgeist_tags") or []
         if isinstance(zeitgeist, str):
             zeitgeist = [zeitgeist]
+        bias_archetypes = (engine.content(lang).get("anchors") or {}).get("bias_archetypes") or []
 
         return {
             "sim_name": sim_name,
@@ -103,6 +104,8 @@ class ContextAssembler:
             "catalyst_name": context.get("catalyst_name", ""),
             "agent_name": context.get("agent_name", ""),
             "puppeteer_objective": context.get("puppeteer_objective", ""),
+            "mood_options": ", ".join(engine.enum_keys("mood", lang)),
+            "bias_options": ", ".join(str(a) for a in bias_archetypes),
         }
 
     def _memories_text(self, memories: Any, lang: str) -> str:

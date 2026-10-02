@@ -39,9 +39,11 @@ function Write-Success($msg) {
 switch ($Task) {
     'build' {
         Write-Log 'Building .ts4script and .package...'
-        & python "$ModDir\build.py"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # Package first: build_package.py emits dist/tuning_ids.json, which
+        # build.py then embeds into the .ts4script.
         & python "$ModDir\build_package.py"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & python "$ModDir\build.py"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Write-Success 'Build complete!'
     }

@@ -13,7 +13,9 @@ DEFAULT_CONFIG = {
         "host": "127.0.0.1",
         "port": 8765,
         "health_timeout": 0.5,
-        "request_timeout": 10.0,
+        # Interactive endpoints (chat/profile) can hit a slow free provider;
+        # autonomy is scheduled server-side and returns immediately.
+        "request_timeout": 60.0,
     },
     "mod": {
         "agent_seats": 12,

@@ -99,24 +99,24 @@ free_only = false
         assert "openrouter" in providers
         assert "gemini" in providers
 
-    def test_enabled_providers_filters(self):
-        config = load_config()
+    def test_enabled_providers_filters(self, tmp_path):
+        config = load_config(str(tmp_path / "nonexistent.toml"))
         # By default none are enabled
         assert config.enabled_providers() == []
 
-    def test_provider_lookup(self):
-        config = load_config()
+    def test_provider_lookup(self, tmp_path):
+        config = load_config(str(tmp_path / "nonexistent.toml"))
         provider = config.provider("openrouter")
         assert provider.get("base_url") == "https://openrouter.ai/api/v1"
         assert provider.get("models") == ["openai/gpt-4o-mini"]
 
-    def test_route_for_returns_default_when_missing(self):
-        config = load_config()
+    def test_route_for_returns_default_when_missing(self, tmp_path):
+        config = load_config(str(tmp_path / "nonexistent.toml"))
         route = config.route_for("unknown.purpose")
         assert route == config.route_for("default")
 
-    def test_route_for_returns_specific(self):
-        config = load_config()
+    def test_route_for_returns_specific(self, tmp_path):
+        config = load_config(str(tmp_path / "nonexistent.toml"))
         route = config.route_for("default")
         assert route.get("provider") == "openrouter"
         assert route.get("model") == "openai/gpt-4o-mini"

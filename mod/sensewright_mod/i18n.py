@@ -9,7 +9,7 @@ import threading
 import zipfile
 import hashlib
 
-from sensewright_mod.debug_log import log_error, log_exception, log_debug
+from sensewright_mod.debug_log import log_error, log_exception, log_debug, worker_log_info
 
 
 # Regex for gender inflection macro {g:masc|fem|neutral}
@@ -148,8 +148,8 @@ class I18nEngine:
         if self._zip_path:
             try:
                 with zipfile.ZipFile(self._zip_path, "r") as zf:
-                    if "locales/manifest.json" in zf.namelist():
-                        with zf.open("locales/manifest.json") as f:
+                    if "sensewright_mod/locales/manifest.json" in zf.namelist():
+                        with zf.open("sensewright_mod/locales/manifest.json") as f:
                             base = json.load(f)
             except Exception as e:
                 log_exception("Failed to load manifest from zip: {}".format(e))
@@ -223,9 +223,16 @@ class I18nEngine:
     def resolve_locale(self, requested):
         """Map an arbitrary language code/client token to a registered locale code.
 
-        Order: exact code -> base_subtag prefix -> client tokens (word boundary)
-        -> default locale. Never returns empty string unless no locales exist.
+        Order: active language (when `requested` is None) -> exact code ->
+        base_subtag prefix -> client tokens (word boundary) -> default locale.
+        Never returns empty string unless no locales exist.
         """
+        if not requested:
+            # No explicit language: honour the active language selected via
+            # set_language() (e.g. detected from the game client) before
+            # falling back to the manifest default. Without this, every t()
+            # call rendered in the default locale regardless of detection.
+            requested = self._current_lang
         if not requested:
             return self.default_locale()
         wanted = str(requested).strip().lower()
@@ -271,7 +278,7 @@ class I18nEngine:
 
             # 2. Bundle from .ts4script zip
             if self._zip_path:
-                zip_path = "locales/{}/{}.json".format(kind, code)
+                zip_path = "sensewright_mod/locales/{}/{}.json".format(kind, code)
                 try:
                     with zipfile.ZipFile(self._zip_path, "r") as zf:
                         if zip_path in zf.namelist():
@@ -475,6 +482,62 @@ def set_language(lang):
 
 def get_current_language():
     return get_engine().get_current_language()
+
+
+def get_game_client_language():
+    """Return The Sims 4 client locale token (e.g. 'por_br', 'eng_us').
+
+    `services.get_locale()` returns `client.account.locale`, the locale the
+    player configured in-game. `account.locale` is assigned during
+    `c_api_client_connect`, so it can still be None very early in the session.
+    We also read the account directly as a fallback. Returns None when the
+    client/account is not available yet.
+    """
+    try:
+        import services
+    except Exception as e:
+        log_debug("i18n: services module unavailable: {}".format(e))
+        return None
+
+    try:
+        client_locale = services.get_locale()
+        if client_locale:
+            return str(client_locale)
+    except Exception as e:
+        log_debug("i18n: services.get_locale() failed: {}".format(e))
+
+    try:
+        client = services.get_first_client()
+        account = getattr(client, 'account', None)
+        client_locale = getattr(account, 'locale', None)
+        if client_locale:
+            return str(client_locale)
+    except Exception as e:
+        log_debug("i18n: client.account.locale failed: {}".format(e))
+
+    return None
+
+
+def detect_and_apply_game_language():
+    """Switch the engine to the locale configured in the game.
+
+    Maps the TS4 client token through the manifest's `ts4_client_tokens`
+    (4-layer cascade) and stores it as the active language, so the in-game UI,
+    STBL selection and the `lang` sent to the sidecar/LLM all match the game.
+    Returns the resolved locale code, or None when the game locale is not
+    available yet (caller may retry).
+    """
+    engine = get_engine()
+    client_locale = get_game_client_language()
+    if not client_locale:
+        return None
+
+    resolved = engine.resolve_locale(client_locale)
+    engine.set_language(resolved)
+    worker_log_info(
+        "game locale '{}' -> active language '{}'".format(client_locale, resolved)
+    )
+    return resolved
 
 
 def t(key, lang=None, **kwargs):
