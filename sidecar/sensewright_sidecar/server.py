@@ -6,7 +6,8 @@ import os
 import sys
 import threading
 import time
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,11 +62,17 @@ def _watchdog_loop() -> None:
         time.sleep(5.0)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    threading.Thread(target=_watchdog_loop, name="sensewright-watchdog", daemon=True).start()
+    yield
+
+
 def create_app() -> FastAPI:
     config = get_config()
     setup_logging(config.log_level)
 
-    app = FastAPI(title="Sensewright Sidecar", version=__version__)
+    app = FastAPI(title="Sensewright Sidecar", version=__version__, lifespan=_lifespan)
 
     # Local-only service; allow loopback + the in-game Web Studio origin.
     app.add_middleware(
@@ -85,10 +92,6 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(webui_router)
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        threading.Thread(target=_watchdog_loop, name="sensewright-watchdog", daemon=True).start()
 
     return app
 

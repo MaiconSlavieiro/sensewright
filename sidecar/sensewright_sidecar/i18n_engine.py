@@ -223,7 +223,7 @@ class I18nEngine:
                 loaded = self._read_json(path)
                 if loaded:
                     # Merge overlay over bundle (overlay is listed first).
-                    data = {**data, **loaded}
+                    data = {**loaded, **data}
             self._file_cache[key] = data
             return data
 
