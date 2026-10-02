@@ -21,21 +21,21 @@ DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "logs
 
 _configured = False
 
-#: The trace id currently in flight. Thread-local so concurrent requests in the
-#: sidecar do not trample each other.
-import threading  # noqa: E402
+#: The trace id currently in flight. A contextvar so it propagates from the
+#: FastAPI middleware into the threadpool thread that runs a sync handler.
+from contextvars import ContextVar  # noqa: E402
 
-_trace_local = threading.local()
+_trace_var: ContextVar = ContextVar("sensewright_trace_id", default="-")
 
 
 def set_trace_id(trace_id: str) -> None:
-    """Set the trace id for the current thread (used by middleware)."""
-    _trace_local.trace_id = trace_id
+    """Set the trace id for the current request context."""
+    _trace_var.set(trace_id)
 
 
 def get_trace_id() -> str:
-    """Return the current thread's trace id, or ``"-"`` if unset."""
-    return getattr(_trace_local, "trace_id", "-")
+    """Return the current context's trace id, or ``"-"`` if unset."""
+    return _trace_var.get()
 
 
 class _TraceFilter(logging.Filter):
