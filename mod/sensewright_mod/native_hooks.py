@@ -34,6 +34,9 @@ _BUFF_MISSING_PLAYER = 0
 # Commodity buffs for bias_interaction
 _BIAS_COMMODITY_BUFFS = {}
 
+# Native mood tuning id -> Sensewright emotion buff id (set_mood channel)
+_MOOD_BUFFS = {}
+
 
 def _safe_getattr(obj, attr, default=None):
     try:
@@ -67,6 +70,12 @@ def register_missing_player_buff(buff_id):
     """Register the 'missing player' moodlet tuning ID."""
     global _BUFF_MISSING_PLAYER
     _BUFF_MISSING_PLAYER = buff_id
+
+
+def register_mood_buffs(mood_buffs):
+    """Register the native-mood-id -> emotion-buff-id map (set_mood channel)."""
+    global _MOOD_BUFFS
+    _MOOD_BUFFS = dict(mood_buffs or {})
 
 
 def get_missing_player_buff():
@@ -419,6 +428,15 @@ def apply_mood(sim_info, mood_id):
     """
     if sim_info is None or mood_id is None or mood_id == 0:
         return False
+
+    # Primary path: apply the registered emotion buff for this mood. TS4 derives
+    # a Sim's mood from active buffs, so this is the only reliable way to hold it.
+    try:
+        buff_id = _MOOD_BUFFS.get(int(mood_id))
+        if buff_id and apply_buff(sim_info, buff_id, 90):
+            return True
+    except Exception:
+        pass
 
     try:
         from sims4communitylib.utils.sims.common_sim_state_utils import CommonSimStateUtils

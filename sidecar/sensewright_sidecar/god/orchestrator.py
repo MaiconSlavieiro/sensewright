@@ -26,7 +26,17 @@ def _plan_callback(state: AppState, tick: int):
             data = result.data or {}
             beats = data.get("beats", []) or []
             if not beats:
-                return
+                # Models sometimes return a theme without beats (or the 0-key
+                # fallback supplies one). Synthesize a single default beat so the
+                # narrative always starts instead of re-planning forever (1.1/1.2).
+                theme = str(data.get("theme") or "").strip()
+                if not theme:
+                    return
+                beats = [{
+                    "title": theme,
+                    "catalyst_role": data.get("catalyst_role") or "catalyst",
+                    "scene_hint": theme,
+                }]
             arc = create_arc(
                 data.get("theme", ""), beats, data.get("cast", []) or [], tick,
             )

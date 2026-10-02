@@ -58,7 +58,28 @@ _OWNED_NAMES = {
     "bias_read": "buff_bias_read",
     "bias_romantic": "buff_bias_romantic",
     "bias_social": "buff_bias_social",
+    # Emotion buffs that actually hold a mood (mood_type + mood_weight). The
+    # native mood statistic cannot be set directly, so set_mood applies these.
+    "mood_buff_fine": "buff_mood_fine",
+    "mood_buff_happy": "buff_mood_happy",
+    "mood_buff_sad": "buff_mood_sad",
+    "mood_buff_angry": "buff_mood_angry",
+    "mood_buff_tense": "buff_mood_tense",
+    "mood_buff_flirty": "buff_mood_flirty",
+    "mood_buff_inspired": "buff_mood_inspired",
+    "mood_buff_focused": "buff_mood_focused",
+    "mood_buff_dazed": "buff_mood_dazed",
+    "mood_buff_bored": "buff_mood_bored",
+    "mood_buff_uncomfortable": "buff_mood_uncomfortable",
+    "mood_buff_confident": "buff_mood_confident",
+    "mood_buff_energized": "buff_mood_energized",
 }
+
+#: Semantic mood keys that have a dedicated emotion buff.
+_MOOD_BUFF_KEYS = (
+    "fine", "happy", "sad", "angry", "tense", "flirty", "inspired",
+    "focused", "dazed", "bored", "uncomfortable", "confident", "energized",
+)
 
 _tuning_ids_cache = None
 _tuning_ids_loaded = False
@@ -154,6 +175,8 @@ def _native_mood_map():
             "bored": int(M.BORED),
             "embarrassed": int(M.EMBARRASSED),
             "scared": int(M.SCARED),
+            # TS4 has no "sleepy" mood; dazed is the closest physical state.
+            "sleepy": int(M.DAZED),
         }
     except Exception as e:
         log_debug("tuning: mood enums unavailable: {}".format(e))
@@ -204,7 +227,7 @@ def _native_weather_map():
 def register_all_tuning():
     """Resolve and register all tuning IDs with native_hooks / tool_executor."""
     from sensewright_mod.native_hooks import (
-        register_tuning_ids, register_missing_player_buff
+        register_mood_buffs, register_missing_player_buff, register_tuning_ids
     )
     from sensewright_mod.tool_executor import register_archetype_mappings
 
@@ -233,8 +256,9 @@ def register_all_tuning():
         if key.startswith("bias_")
     }
 
+    native_moods = _native_mood_map()
     register_archetype_mappings(
-        mood_map=_native_mood_map(),
+        mood_map=native_moods,
         activity_map={},
         sentiment_map=_native_sentiment_map(),
         weather_map=_native_weather_map(),
@@ -242,5 +266,15 @@ def register_all_tuning():
         bias_buffs=bias_buffs,
     )
 
-    log_info("tuning: registered owned ids (trait={}, dream_buffs={}/{}/{}/{}, missing_player={}, bias_buffs={})".format(
-        trait, epiphany, surreal, omen, nightmare, missing_player, len(bias_buffs)))
+    # Mood -> emotion buff. set_mood applies the buff so the Sim visibly holds
+    # the emotion (the mood statistic itself cannot be set directly).
+    mood_buffs = {}
+    for key in _MOOD_BUFF_KEYS:
+        native_id = native_moods.get(key)
+        buff_id = resolve_owned_id("mood_buff_{}".format(key))
+        if native_id and buff_id:
+            mood_buffs[int(native_id)] = buff_id
+    register_mood_buffs(mood_buffs)
+
+    log_info("tuning: registered owned ids (trait={}, dream_buffs={}/{}/{}/{}, missing_player={}, bias_buffs={}, mood_buffs={})".format(
+        trait, epiphany, surreal, omen, nightmare, missing_player, len(bias_buffs), len(mood_buffs)))

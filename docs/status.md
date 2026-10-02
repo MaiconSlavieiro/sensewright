@@ -54,8 +54,8 @@ types) is coded blind and awaits the Phase 5 in-game checklist.
 | Sidecar test suite | `python -m pytest -q` in `sidecar/` | **523 passed**, 1 warning |
 | Mod syntax (Python 3.7) | `py -3.7 -m py_compile` on `mod/sensewright_mod/*.py` | **OK** (20 files) |
 | Build script syntax (3.10+) | `python -m py_compile mod/build.py mod/build_package.py` | **OK** |
-| `.package` build | `python mod/build_package.py` | **OK** — 31 resources (19 buffs, 7 interactions, 1 trait, 1 object, 1 situation, 2 STBL) |
-| `.ts4script` build | `python mod/build.py` | **OK** — 83,139 bytes, Python 3.7 magic number `42 0d 0d 0a` verified |
+| `.package` build | `python mod/build_package.py` | **OK** — 44 resources (32 buffs, 7 interactions, 1 trait, 1 object, 1 situation, 2 STBL) |
+| `.ts4script` build | `python mod/build.py` | **OK** — 84,686 bytes, Python 3.7 magic number `42 0d 0d 0a` verified |
 | Secret scan of the diff | `git diff` for `sk-…`/`api_key=` | **Clean** |
 | `.gitignore` | `git check-ignore` | `sidecar/config.toml` and `dist/` ignored |
 
@@ -365,4 +365,26 @@ covered by tests. No schema change; the HTTP wire remains additive and compatibl
   lifecycle legacy memory + life story, `apply_react` beat insertion/`ARC_DONE`,
   `handle_beat_ended`, neighborhood/diary handlers and routes → **523 green tests**.
 - Verification: `python -m pytest -q` (523), `py -3.7 -m py_compile` on the Mod (20 files),
-  `python mod/build_package.py` (31 resources), `python mod/build.py` (83,139 bytes).
+  `python mod/build_package.py` (44 resources), `python mod/build.py` (84,686 bytes).
+
+### Follow-up after the first in-game run (logs 2026-10-02 18:04–18:11)
+
+Log validation (mod `Sensewright_Worker.log` + sidecar `sensewright-sidecar.log` +
+`slot_1488584711.working.db`): the mod loaded and executed (autoboot, 123 intents, 104 profiles,
+130 `thought` memories), but nothing was visible in-game. Root causes and fixes:
+
+- **Only 7 of 33 purposes had prompt templates**, so everything else fell back to the Sim
+  roleplay `_default` prompt. Confirmed `render_prompt('god.plan',...)` returned "You are
+  {sim_name}, a Sim…", so `god.plan` returned no `beats` (10 runs, **0 arcs persisted**).
+  Added `system` prompts for all remaining purposes + one-shot JSON examples (en-US & pt-BR).
+- **`god.plan` resilience:** when the model returns a theme without beats, synthesize a
+  default beat so the arc/narrative always starts.
+- **`set_mood` failed 100%** (`mood_failed`/`unknown_mood`): TS4 cannot set the mood statistic
+  directly. Added **13 `buff_mood_*` emotion buffs** (`mood_type` + `mood_weight`) plus a
+  native-mood→buff map; `set_mood` now applies them (and `sleepy` maps to Dazed).
+- **Deployed:** rebuilt and reinstalled (44 resources / 42 tunings). Verified the installed
+  sidecar serves `/v1/god/beat-ended`, `/v1/world/neighborhood` and `/v1/memory/diary`.
+
+Expected visible results after relaunch: `sim.reaction` emits spoken lines (notifications),
+God Director arcs form and narrate, impulse moods become real moodlets, and the mirror/diary/
+mailbox interactions are available (they were never installed before).

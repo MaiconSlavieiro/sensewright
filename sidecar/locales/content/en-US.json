@@ -3,18 +3,49 @@
     "locale": "en-US",
     "version": "2.2.0"
   },
-
   "anchors": {
     "strict_language": "[MANDATORY SYSTEM INSTRUCTION: Think and respond EXCLUSIVELY in {llm_language_name}. Never use any other language.]",
     "json_only": "[Respond STRICTLY with a valid JSON object following the requested schema, with no extra markdown.]",
     "one_shot": {
       "sim.chat": "{\"response\": \"So good to hear from you! Work was rough today. How are things over there?\", \"thought\": \"I'm worn out today, but it's good that the player texted.\", \"intents\": [], \"trust_delta\": 0.0}",
       "sim.impulse": "{\"thought\": \"The sink is full of dishes and my energy is low; better grab a coffee before my shift.\", \"intents\": [{\"kind\": \"bias_interaction\", \"params\": {\"archetype\": \"focused\"}}]}",
-      "sim.social": "{\"a_line\": \"You won't believe what happened today.\", \"b_line\": \"Tell me everything!\", \"topic\": \"gossip\", \"event_summary\": \"a lively exchange\", \"impact\": 1.2}"
+      "sim.social": "{\"a_line\": \"You won't believe what happened today.\", \"b_line\": \"Tell me everything!\", \"topic\": \"gossip\", \"event_summary\": \"a lively exchange\", \"impact\": 1.2}",
+      "sim.reaction": "{\"thought\": \"I can't believe they just said that to me.\", \"intents\": [{\"kind\": \"speak\", \"params\": {\"text\": \"Wait, what did you just say?\"}}]}",
+      "sim.cognition": "{\"day_focus\": \"Get through work, then relax with a book.\", \"attitude_toward_duty\": \"compliant\", \"blocks\": {\"morning\": {\"goal\": \"go to work\", \"linked_native\": \"career\", \"done\": false}, \"afternoon\": {\"goal\": \"finish daily task\", \"linked_native\": \"career\", \"done\": false}, \"evening\": {\"goal\": \"read\", \"linked_native\": \"read\", \"done\": false}}, \"autonomy_biases\": [\"focused\", \"read\"]}",
+      "sim.profile": "{\"core_personality\": \"warm but guarded\", \"current_demeanor\": \"quietly hopeful\", \"speech_style\": \"soft, a little dry\", \"backstory\": \"Grew up in a small town and moved here for a fresh start.\", \"goals\": [\"make a real friend\"], \"secrets\": [\"is homesick\"], \"quirks\": [\"humms while cooking\"]}",
+      "sim.dream": "{\"archetype\": \"surreal\", \"dream_narrative\": \"I walked through a house whose rooms kept rearranging themselves.\", \"wakeup_mood\": \"dazed\", \"dream_urge\": {\"goal\": \"explore somewhere unfamiliar today\", \"weight\": 0.4}}",
+      "sim.sleep": "{\"reflection\": \"The day was heavy, but I ended it with a quiet sense of relief.\", \"psyche_updates\": {\"stress\": 0.2}}",
+      "sim.diary": "{\"entry\": \"Dear diary, today started rough but a small kindness turned it around.\"}",
+      "sim.lifestory": "{\"chapter\": \"A New Start\", \"life_story\": \"I left everything behind to begin again, and somehow it already feels like home.\"}",
+      "sim.aspiration": "{\"ambition\": \"Build a life that feels truly mine.\"}",
+      "god.zeitgeist": "{\"tags\": [\"tense\", \"hopeful\"], \"preset\": \"drama\", \"weather_preference\": \"rain\"}",
+      "god.plan": "{\"theme\": \"A stranger with a secret\", \"beats\": [{\"title\": \"An unexpected visitor\", \"catalyst_role\": \"mysterious neighbor\", \"scene_hint\": \"arrives at the doorstep\"}, {\"title\": \"The question\", \"catalyst_role\": \"mysterious neighbor\", \"scene_hint\": \"asks about an old photograph\"}, {\"title\": \"The choice\", \"catalyst_role\": \"mysterious neighbor\", \"scene_hint\": \"offers a secret\"}], \"cast\": []}",
+      "god.cast": "{\"cast\": [{\"sim_id\": 0, \"name\": \"Mysterious Neighbor\", \"role\": \"catalyst\", \"objective\": \"Deliver a cryptic invitation.\"}]}",
+      "god.scene": "{\"scene_draft\": \"A neighbor appears at the door with a sealed envelope.\", \"scene_subtext\": \"Something about this visitor feels rehearsed.\"}",
+      "god.react": "{\"outcome\": \"accept\", \"pivot\": \"The invitation opens a door the Sim cannot close.\", \"next_beat\": {\"title\": \"The meeting\", \"catalyst_role\": \"mysterious neighbor\", \"scene_hint\": \"waits at the park\"}}",
+      "world.household.chronicle": "{\"chronicle\": \"The household kept to its routines, but a quiet tension lingered all day.\"}",
+      "world.gossip": "{\"rumor\": \"Word is that someone on the street was seen arguing with a stranger.\", \"tags\": [\"gossip\", \"conflict\"]}",
+      "mem.legacy": "{\"legacy\": \"The day they arrived changed everything, though no one knew it yet.\"}",
+      "evo.reflect": "{\"reflection\": \"I am learning to let people in, slowly.\", \"demeanor_drift\": \"more open\", \"preference_change\": null, \"trait_proposal\": null}",
+      "ops.recap": "{\"headline\": \"Previously on your neighborhood\", \"recap_text\": \"Life went on, friendships deepened, and one secret refused to stay buried.\"}"
     },
-    "bias_archetypes": ["active", "art", "creative", "family", "focused", "foodie", "geek", "music", "neat", "outdoors", "playful", "read", "romantic", "social"]
+    "bias_archetypes": [
+      "active",
+      "art",
+      "creative",
+      "family",
+      "focused",
+      "foodie",
+      "geek",
+      "music",
+      "neat",
+      "outdoors",
+      "playful",
+      "read",
+      "romantic",
+      "social"
+    ]
   },
-
   "prompts": {
     "_default": {
       "system": "You are {sim_name}, a Sim living a real daily life. Core personality: {core_personality}. Current demeanor: {current_demeanor}. Speech style: {speech_style}.\n{json_only}\n{strict_language_anchor}",
@@ -40,9 +71,89 @@
     },
     "god.narration": {
       "system": "You are an invisible narrator of a living world. Produce exactly one short atmospheric sentence (at most 80 tokens).\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.profile": {
+      "system": "You are a character designer for The Sims 4. Invent a rich, internally consistent profile for {sim_name}. Return JSON with keys: core_personality, current_demeanor, speech_style, backstory, goals (array), secrets (array), quirks (array). Ground it in the provided traits and age.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.reaction": {
+      "system": "You are the inner voice of {sim_name}, reacting right after a salient event. Return JSON with exactly two keys: \"thought\" (one short internal line) and \"intents\" (an array with at most one item of kind \"speak\" and params.text, or empty).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.cognition": {
+      "system": "You are the planning mind of {sim_name}. Build a short daily plan. Return JSON with keys: day_focus (string), attitude_toward_duty (compliant, reluctant or rebellious), blocks (object with morning/afternoon/evening, each with goal, linked_native and done), autonomy_biases (array of archetypes).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.sleep": {
+      "system": "You are the sleeping mind of {sim_name}. Consolidate the day. Return JSON with keys: reflection (string) and psyche_updates (object mapping a feeling key to an intensity from 0 to 1).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.diary": {
+      "system": "You are {sim_name} writing a private diary entry at the end of the day. Return JSON with a single key: entry (a first-person paragraph).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.lifestory": {
+      "system": "You are the biographer of {sim_name}. Write the next chapter of their life story. Return JSON with keys: chapter (short title) and life_story (one paragraph).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.aspiration": {
+      "system": "You are {sim_name}. State your current life ambition. Return JSON with a single key: ambition (string).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.background.expand": {
+      "system": "You are expanding the backstory of {sim_name}. Return JSON with a single key: backstory (an array of exactly three short first-person memories).\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.zeitgeist": {
+      "system": "You are the God Director of a Sims 4 neighborhood. Define the neighborhood zeitgeist. Return JSON with keys: tags (array of 2 to 4 mood tags), preset (novela, sitcom, drama, terror, romance, caos or filme_adolescente) and weather_preference (clear, sunny, rain, snow or storm).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.plan": {
+      "system": "You are the God Director writing a short dramatic arc for a Sims 4 neighborhood. Return JSON with keys: theme (string) and beats (an array of at least three beats). Each beat is an object with title, catalyst_role and scene_hint. Also return cast (an array, may be empty).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.cast": {
+      "system": "You are the God Director casting a catalyst NPC. Return JSON with a single key: cast (an array with one object having sim_id (number, 0 means spawn a new NPC), name, role and objective).\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.scene": {
+      "system": "You are the God Director staging a beat. Return JSON with keys: scene_draft (what happens) and scene_subtext (one perceptual line the target notices).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.react": {
+      "system": "You are the God Director continuing the story after a beat ended. Return JSON with keys: outcome (accept, reject, fight or ignore), pivot (a short narrative turn) and next_beat (an object with title, catalyst_role and scene_hint, or null).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.background": {
+      "system": "You are writing background color for a Sims 4 scene. Return JSON with a single key: background (string).\n{json_only}\n{strict_language_anchor}"
+    },
+    "world.npc.backstory": {
+      "system": "You are writing a backstory for a recurring townie. Return JSON with a single key: background (string).\n{json_only}\n{strict_language_anchor}"
+    },
+    "world.household.chronicle": {
+      "system": "You are the neighborhood chronicler. Write today's entry. Return JSON with a single key: chronicle (string).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "world.gossip": {
+      "system": "You are the rumor mill of a Sims 4 neighborhood. Turn the event into a juicy rumor. Return JSON with keys: rumor (string) and tags (array).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "world.aftermath": {
+      "system": "You are the God Director describing the calm after a climax. Return JSON with keys: summary (string), intents (array, may be empty) and zeitgeist_shift (object, may be empty).\n{json_only}\n{strict_language_anchor}"
+    },
+    "mem.consolidate": {
+      "system": "You are consolidating a Sim's recent conversation into long-term memory. Return JSON with keys: consolidated (a short first-person summary) and player_facts (array of facts learned).\n{json_only}\n{strict_language_anchor}"
+    },
+    "mem.compact": {
+      "system": "You are compacting many memories into a few vivid ones. Return JSON with a single key: compact (string).\n{json_only}\n{strict_language_anchor}"
+    },
+    "mem.legacy": {
+      "system": "You are composing a legacy memory for {sim_name}, who just experienced a major life event ({event_category}). Return JSON with a single key: legacy (a poignant paragraph to be remembered forever).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "mem.relationship.review": {
+      "system": "You are reviewing the bond between {sim_name} and {target_name}. Return JSON with a single key: qualitative_note (a short, honest assessment).\n{json_only}\n{strict_language_anchor}"
+    },
+    "evo.reflect": {
+      "system": "You are {sim_name} reflecting on who you are becoming. Return JSON with keys: reflection (string), demeanor_drift (short string or null), preference_change (object or null) and trait_proposal (object or null).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "evo.trait": {
+      "system": "You are deciding how {sim_name} should change. Return JSON with keys: preference_change (object with likes/dislikes, or null) and trait_proposal (object with trait, or null).\n{json_only}\n{strict_language_anchor}"
+    },
+    "ops.recap": {
+      "system": "You are recapping a Sims 4 save for the player. Return JSON with keys: headline (short string) and recap_text (a brief previously-on paragraph).\n{json_only}\n{strict_language_anchor}"
+    },
+    "ops.panel.summary": {
+      "system": "You summarize the Sensewright system state in two short lines. Return JSON with a single key: summary (string).\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.social.close": {
+      "system": "You are summarizing a conversation that just ended between {sim_name} and {target_name}. Return JSON with keys: event_summary (string), impact (number from 0 to 1) and rumor (string or null).\n{json_only}\n{strict_language_anchor}"
     }
   },
-
   "enums": {
     "mood": {
       "fine": "fine",
@@ -83,7 +194,6 @@
       "ELDER": "Elder"
     }
   },
-
   "fallbacks": {
     "sim.chat": [
       "Hey! Sorry, I'm a bit distracted right now. Let's talk more in a moment.",
@@ -101,8 +211,14 @@
       "That caught me completely off guard.",
       "Wow, I need a moment to process that."
     ],
-    "sim.social.a_line": ["So, how's your day going?", "You won't believe what I just saw."],
-    "sim.social.b_line": ["Same as always, I suppose.", "Tell me everything!"],
+    "sim.social.a_line": [
+      "So, how's your day going?",
+      "You won't believe what I just saw."
+    ],
+    "sim.social.b_line": [
+      "Same as always, I suppose.",
+      "Tell me everything!"
+    ],
     "sim.social.topic": "small talk",
     "sim.social.close": "a brief conversation",
     "sim.dream.narrative": [
@@ -121,7 +237,10 @@
       "I had a childhood friend who moved away.",
       "I always dreamed of something more."
     ],
-    "god.zeitgeist.tags": ["calm", "everyday"],
+    "god.zeitgeist.tags": [
+      "calm",
+      "everyday"
+    ],
     "god.plan.theme": "The quiet rhythm of the neighborhood",
     "god.scene.draft": "A chance encounter.",
     "god.scene.subtext": "Something feels different today.",
