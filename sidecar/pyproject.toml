@@ -1,0 +1,29 @@
+[project]
+name = "sensewright-sidecar"
+version = "2.0.0"
+description = "Sensewright v2 sidecar — local FastAPI companion for The Sims 4 AI Companion & World Director"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["sensewright_sidecar*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

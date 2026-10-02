@@ -1,0 +1,121 @@
+# Sensewright v2 — config.toml
+# Copy this file to `sidecar/config.toml` and adjust.
+# Layer 1 (llm.providers.*)  = credentials & technical limits ONLY.
+# Layer 2 (llm.routes.*, llm.tiers.*) = routing by purpose & generation budgets.
+# Zero-key operation: if every provider is disabled/empty, the Sidecar answers
+# every one of the 33 purposes with a deterministic localized fallback.
+
+[server]
+host = "127.0.0.1"
+port = 8765
+log_level = "INFO"
+
+[llm]
+# When true, blocks any request to a paid model at the client level.
+free_only = true
+# Embeddings backend: "none" (FTS5 BM25 only) | "local" (future).
+embeddings = "none"
+
+# ────────────────────────────────────────────────────────────────
+# Layer 1 — Providers, secrets & technical rate limits
+# ────────────────────────────────────────────────────────────────
+[llm.providers.openrouter]
+enabled = false
+base_url = "https://openrouter.ai/api/v1"
+api_key = ""
+models = ["openai/gpt-4o-mini", "meta-llama/llama-3.1-8b-instruct:free"]
+rpm = 20        # requests per minute (0 = unlimited)
+rpd = 200       # requests per day   (0 = unlimited)
+tpm = 40000     # tokens per minute  (0 = unlimited)
+
+[llm.providers.gemini]
+enabled = false
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+api_key = ""
+models = ["gemini-2.0-flash", "gemini-1.5-flash"]
+rpm = 15
+rpd = 1500
+tpm = 1000000
+
+[llm.providers.groq]
+enabled = false
+base_url = "https://api.groq.com/openai/v1"
+api_key = ""
+models = ["llama-3.3-70b-versatile"]
+rpm = 30
+rpd = 14400
+tpm = 6000
+
+[llm.providers.deepseek]
+enabled = false
+base_url = "https://api.deepseek.com"
+api_key = ""
+models = ["deepseek-chat"]
+rpm = 60
+rpd = 10000
+tpm = 60000
+
+[llm.providers.ollama]
+enabled = false
+base_url = "http://127.0.0.1:11434"
+api_key = ""
+models = ["llama3.1"]
+rpm = 0
+rpd = 0
+tpm = 0
+
+# ────────────────────────────────────────────────────────────────
+# Layer 2 — Routing by purpose (purpose -> provider/model)
+# Fallback chain order: the first enabled provider with a free model wins.
+# ────────────────────────────────────────────────────────────────
+[llm.routes.default]
+provider = "openrouter"
+model = "openai/gpt-4o-mini"
+
+# Tier budgets & SLOs (Wall-Clock). See requirements REQ-SCHED-*.
+[llm.tiers.interactive]
+slo_seconds = 3.0
+max_input_tokens = 1500
+max_output_tokens = 250
+concurrency = 4
+
+[llm.tiers.realtime]
+slo_seconds = 12.0
+max_input_tokens = 700
+max_output_tokens = 220
+concurrency = 2
+thinking_budget = 0
+
+[llm.tiers.bg]
+slo_seconds = 60.0
+max_input_tokens = 1500
+max_output_tokens = 400
+concurrency = 1
+
+[llm.tiers.deep]
+slo_seconds = 300.0
+max_input_tokens = 4000
+max_output_tokens = 600
+concurrency = 1
+
+# ────────────────────────────────────────────────────────────────
+# Gameplay defaults (editable in-game via Quick Menu / Web Studio)
+# ────────────────────────────────────────────────────────────────
+[gameplay]
+agent_seats = 12
+lease_min_sim_minutes = 60
+hearing_radius_m = 20.0
+max_lines_per_minute = 12
+min_interval_between_lines_seconds = 30
+player_lock_seconds = 15
+short_term_buffer_turns = 8
+silence_consolidate_seconds = 300
+
+[god]
+director_mode = "AUTONOMOUS"   # AUTONOMOUS | CO_DIRECTOR | SANDBOX
+preset = "novela"               # novela|sitcom|drama|caos|terror|romance|filme_adolescente|off
+intervention_frequency = 0.5
+intensity = 0.5
+mood_influence = 0.5
+autonomy_degree = 0.5
+chaos_degree = 0.5
