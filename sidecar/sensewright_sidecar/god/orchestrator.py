@@ -85,8 +85,8 @@ def direct_scene(
     if catalyst_sim_ids and target_sim_ids:
         catalyst_id = int(catalyst_sim_ids[0])
         target_id = int(target_sim_ids[0])
-        catalyst_name = state.census.get(catalyst_id, {}).get("name", "Catalyst")
-        target_name = state.census.get(target_id, {}).get("name", "Target")
+        catalyst_name = (state.get_census(catalyst_id) or {}).get("name", "Catalyst")
+        target_name = (state.get_census(target_id) or {}).get("name", "Target")
         result = run_puppeteer(
             state, catalyst_id, catalyst_name, target_id, target_name,
             prompt_text or "Strike up a conversation.", lang, tick,

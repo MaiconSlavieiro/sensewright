@@ -57,12 +57,14 @@ class ProviderChain:
         return self._clients[name]
 
     def _is_cold(self, name: str) -> bool:
-        until = self._circuit_cold_until.get(name, 0.0)
-        return time.time() < until
+        with self._lock:
+            until = self._circuit_cold_until.get(name, 0.0)
+            return time.time() < until
 
     def _model_cooling(self, name: str, model: str) -> bool:
-        until = self._model_cooldown_until.get((name, model), 0.0)
-        return time.time() < until
+        with self._lock:
+            until = self._model_cooldown_until.get((name, model), 0.0)
+            return time.time() < until
 
     def _record_failure(self, name: str, model: str) -> None:
         with self._lock:

@@ -66,6 +66,43 @@ class AppState:
     def working_store(self):
         return self.save_vault.working_store()
 
+    # ── census (thread-safe accessors) ───────────────────────────────────
+    def update_census(self, sims: Dict[int, Dict[str, Any]]) -> None:
+        """Replace census entries for the given sim ids (thread-safe)."""
+        with self._lock:
+            for sim_id, sim in sims.items():
+                self.census[int(sim_id)] = sim
+
+    def merge_census_delta(self, delta: List[Dict[str, Any]]) -> None:
+        """Merge volatile delta fields into the census (thread-safe)."""
+        with self._lock:
+            for sim in delta:
+                if not isinstance(sim, dict):
+                    continue
+                sim_id = int(sim.get("sim_id", 0))
+                if not sim_id:
+                    continue
+                entry = self.census.setdefault(sim_id, {"sim_id": sim_id})
+                for key, value in sim.items():
+                    if value is not None:
+                        entry[key] = value
+
+    def get_census(self, sim_id: int) -> Dict[str, Any]:
+        with self._lock:
+            return dict(self.census.get(int(sim_id), {}))
+
+    def census_items(self) -> List[tuple]:
+        with self._lock:
+            return [(sid, dict(sim)) for sid, sim in self.census.items()]
+
+    def set_seats(self, seats: Dict[int, Dict[str, Any]]) -> None:
+        with self._lock:
+            self.seats = seats
+
+    def get_seats(self) -> Dict[int, Dict[str, Any]]:
+        with self._lock:
+            return dict(self.seats)
+
     # ── IntentBus ────────────────────────────────────────────────────────
     def enqueue_intents(self, intents: List[Dict[str, Any]]) -> None:
         with self._lock:

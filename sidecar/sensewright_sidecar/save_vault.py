@@ -175,12 +175,14 @@ class SaveVault:
         return {"committed_tick": world_sim_tick, "snapshot_rev": snapshot_rev.get("world_sim_tick", world_sim_tick)}
 
     def _rotate_ring_buffer(self, save_id: int, committed: str) -> None:
-        """Shift rev1->rev2, rev2->rev3, then snapshot current committed -> rev1."""
+        """Shift the ring buffer: rev2->rev3, rev1->rev2, committed->rev1."""
         rev1, rev2, rev3 = (
             self.rev_path(save_id, 1), self.rev_path(save_id, 2), self.rev_path(save_id, 3)
         )
+        if os.path.exists(rev3):
+            os.remove(rev3)
         if os.path.exists(rev2):
-            os.remove(rev2)
+            os.rename(rev2, rev3)
         if os.path.exists(rev1):
             os.rename(rev1, rev2)
         _copy_db(committed, rev1)
@@ -220,25 +222,10 @@ class SaveVault:
             logger.info("restored ring-buffer snapshot at tick %s", best_tick)
             return
 
-        # Fallback: surgical rewind.
+        # Fallback: surgical rewind (delegated to the store, under its lock).
         store = SqliteStore(working)
         store.initialize()
-        conn = store._connect()
-        with conn:
-            conn.execute(
-                "DELETE FROM memories WHERE created_sim_tick > ?", (int(world_sim_tick),)
-            )
-            conn.execute(
-                "UPDATE sims SET updated_sim_tick = ? WHERE updated_sim_tick > ?",
-                (int(world_sim_tick), int(world_sim_tick)),
-            )
-            conn.execute(
-                "UPDATE relationships SET updated_sim_tick = ? WHERE updated_sim_tick > ?",
-                (int(world_sim_tick), int(world_sim_tick)),
-            )
-            conn.commit()
-        store.set_tick(world_sim_tick)
-        store.set_committed_tick(world_sim_tick)
+        store.rewind_to_tick(world_sim_tick)
         store.close()
         logger.info("surgical rewind to tick %s", world_sim_tick)
 

@@ -99,13 +99,14 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
     sims = payload.get("sims") or []
     hydrated = 0
     store = _store(state)
+    census_update: Dict[int, Dict[str, Any]] = {}
     for sim in sims:
         if not isinstance(sim, dict):
             continue
         sim_id = int(sim.get("sim_id", 0))
         if not sim_id:
             continue
-        state.census[sim_id] = sim
+        census_update[sim_id] = sim
         hydrated += 1
         if store is not None:
             existing = store.get_sim_profile(sim_id)
@@ -118,21 +119,13 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
                     generated_at_tick=int(payload.get("world_sim_tick", 0)),
                 )
                 store.upsert_sim_profile(sim_id, profile, int(payload.get("world_sim_tick", 0)))
+    state.update_census(census_update)
     return {"ok": True, "hydrated_count": hydrated}
 
 
 # ── autonomy ─────────────────────────────────────────────────────────────
 def _merge_delta(state: AppState, delta: List[Dict[str, Any]]) -> None:
-    for sim in delta:
-        if not isinstance(sim, dict):
-            continue
-        sim_id = int(sim.get("sim_id", 0))
-        if not sim_id:
-            continue
-        entry = state.census.setdefault(sim_id, {"sim_id": sim_id})
-        for key, value in sim.items():
-            if value is not None:
-                entry[key] = value
+    state.merge_census_delta(delta)
 
 
 def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,24 +151,25 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     max_seats = int(state.config.gameplay("agent_seats", 12))
     lease_min = int(state.config.gameplay("lease_min_sim_minutes", 60))
     manager = SeatManager()
-    state.seats = manager.assign(
-        state.census, None, active_sim_id, catalyst_ids,
+    state.set_seats(manager.assign(
+        dict(state.census_items()), None, active_sim_id, catalyst_ids,
         list(state.conversations.keys()), tick, max_seats, lease_min,
-        existing_seats=state.seats,
-    )
+        existing_seats=state.get_seats(),
+    ))
 
     # Run idle impulses for the active sim + a bounded set of full-tier seats.
-    full_seats = [s for s in state.seats.values() if s.get("tier") == "full" and s.get("role") == "household"]
+    seats_snapshot = state.get_seats()
+    full_seats = [s for s in seats_snapshot.values() if s.get("tier") == "full" and s.get("role") == "household"]
     order = []
-    if active_sim_id and int(active_sim_id) in state.seats:
-        order.append(state.seats[int(active_sim_id)])
+    if active_sim_id and int(active_sim_id) in seats_snapshot:
+        order.append(seats_snapshot[int(active_sim_id)])
     for seat in full_seats:
         if seat["sim_id"] not in [s["sim_id"] for s in order]:
             order.append(seat)
     order = order[:MAX_IMPULSES_PER_TICK]
 
     for seat in order:
-        sim = state.census.get(seat["sim_id"], {})
+        sim = state.get_census(seat["sim_id"])
         if sim.get("is_sleeping") or sim.get("is_off_lot_duty"):
             continue
         ctx = build_impulse_context(
@@ -259,7 +253,7 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _find_conversational_pair(state: AppState, active_sim_id: Optional[int]):
     candidates = []
-    for sim_id, sim in state.census.items():
+    for sim_id, sim in state.census_items():
         activity = (sim.get("activity") or "").lower()
         if activity in ("socializing", "talking", "chatting"):
             candidates.append(sim)
@@ -290,7 +284,7 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     message = payload.get("message", "")
     tick = int(payload.get("world_sim_tick", 0))
 
-    sim = state.census.get(sim_id, {"sim_id": sim_id, "name": ""})
+    sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
     if is_deferred(sim, channel):
         return {
             "response": render_fallback("sim.chat", lang, {"sim_name": sim.get("name", "")}).get("response", ""),
@@ -356,9 +350,9 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
             profile["psyche_blocks"] = blocks
             store.upsert_sim_profile(sim_id, profile, tick)
         # Trigger a reaction (speak intent at the causer).
-        sim = state.census.get(sim_id, {"sim_id": sim_id, "name": ""})
+        sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
         target_id = payload.get("target_sim_id")
-        target = state.census.get(int(target_id or 0), {"name": ""})
+        target = state.get_census(int(target_id or 0)) or {"name": ""}
         ctx = build_reaction_context(
             sim_id, sim.get("name", ""), target_id, target.get("name", ""),
             category, impact, salience, tick,
@@ -379,7 +373,7 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     lang = normalize_lang(payload.get("lang"))
     sim_id = int(payload.get("sim_id", 0))
     store = _store(state)
-    sim = state.census.get(sim_id, {"name": ""})
+    sim = state.get_census(sim_id) or {"name": ""}
     force_interactive = bool(payload.get("force_interactive", False))
 
     profile = None
@@ -409,7 +403,7 @@ def handle_evolve(payload: Dict[str, Any]) -> Dict[str, Any]:
     lang = normalize_lang(payload.get("lang"))
     sim_id = int(payload.get("sim_id", 0))
     store = _store(state)
-    sim = state.census.get(sim_id, {"name": ""})
+    sim = state.get_census(sim_id) or {"name": ""}
     profile = (store.get_sim_profile(sim_id) or {}).get("profile") if store else None
     ctx = build_reflect_context(sim_id, sim.get("name", ""), profile or {}, 0, int(payload.get("world_sim_tick", 0)))
     result = state.scheduler.run_purpose("evo.reflect", ctx, lang)
@@ -485,7 +479,7 @@ def handle_controls_post(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ── seats / player activity / health / status ────────────────────────────
 def handle_seats_get() -> Dict[str, Any]:
     state = get_state()
-    return SeatManager.snapshot(state.seats, int(state.config.gameplay("agent_seats", 12)))
+    return SeatManager.snapshot(state.get_seats(), int(state.config.gameplay("agent_seats", 12)))
 
 
 def handle_seats_post(payload: Dict[str, Any]) -> Dict[str, Any]:

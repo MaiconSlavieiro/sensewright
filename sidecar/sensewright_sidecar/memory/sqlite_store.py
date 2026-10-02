@@ -537,6 +537,31 @@ class SqliteStore:
             conn.commit()
 
     # ── maintenance ──────────────────────────────────────────────────────
+    def rewind_to_tick(self, tick: int) -> None:
+        """Surgically roll back rows created/updated after ``tick`` (REQ-MEM-04).
+
+        Deletes only raw memories created after the target tick and clamps the
+        ``updated_sim_tick`` of sims/relationships. Consolidated, diary, legacy
+        and compact memories are never touched by this surgical path.
+        """
+        tick = int(tick)
+        with self._lock:
+            conn = self._connect()
+            with conn:
+                conn.execute(
+                    "DELETE FROM memories WHERE created_sim_tick > ?", (tick,)
+                )
+                conn.execute(
+                    "UPDATE sims SET updated_sim_tick = ? WHERE updated_sim_tick > ?",
+                    (tick, tick),
+                )
+                conn.execute(
+                    "UPDATE relationships SET updated_sim_tick = ? WHERE updated_sim_tick > ?",
+                    (tick, tick),
+                )
+        self.set_tick(tick)
+        self.set_committed_tick(tick)
+
     def vacuum(self) -> None:
         """Reclaim space after a compaction (REQ-MEM-06 / A9)."""
         with self._lock:

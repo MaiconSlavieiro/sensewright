@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pydantic>=2.6",
     "tomli>=2.0; python_version < '3.11'",
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]

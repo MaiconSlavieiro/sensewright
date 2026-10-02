@@ -37,7 +37,8 @@ class ProviderRateLimiter:
         self.rpd = max(0, int(rpd))     # requests per day   (0 = unlimited)
         self.tpm = max(0, int(tpm))     # tokens per minute  (0 = unlimited)
         self._lock = threading.Lock()
-        self._requests: Deque[float] = deque()          # request timestamps
+        self._requests: Deque[float] = deque()           # minute window timestamps
+        self._daily_requests: Deque[float] = deque()     # day window timestamps
         self._tokens: Deque[Tuple[float, int]] = deque()  # (timestamp, tokens)
 
     def _prune(self, now: float) -> None:
@@ -45,6 +46,8 @@ class ProviderRateLimiter:
         day_ago = now - 86400.0
         while self._requests and self._requests[0] < minute_ago:
             self._requests.popleft()
+        while self._daily_requests and self._daily_requests[0] < day_ago:
+            self._daily_requests.popleft()
         while self._tokens and self._tokens[0][0] < minute_ago:
             self._tokens.popleft()
 
@@ -54,6 +57,8 @@ class ProviderRateLimiter:
             now = time.time()
             self._prune(now)
             if self.rpm and len(self._requests) >= self.rpm:
+                return False
+            if self.rpd and len(self._daily_requests) >= self.rpd:
                 return False
             if self.tpm and estimated_tokens > 0:
                 used_tokens = sum(t for _, t in self._tokens)
@@ -67,6 +72,7 @@ class ProviderRateLimiter:
             now = time.time()
             self._prune(now)
             self._requests.append(now)
+            self._daily_requests.append(now)
 
     def record_tokens(self, tokens: int) -> None:
         """Record reconciled token usage (TPM accounting)."""
@@ -93,9 +99,11 @@ class ProviderRateLimiter:
             now = time.time()
             self._prune(now)
             used_tokens = sum(t for _, t in self._tokens)
-            return {
-                "requests_last_minute": len(self._requests),
-                "tokens_last_minute": used_tokens,
-                "rpm_limit": self.rpm,
-                "tpm_limit": self.tpm,
-            }
+        return {
+            "requests_last_minute": len(self._requests),
+            "requests_last_day": len(self._daily_requests),
+            "tokens_last_minute": used_tokens,
+            "rpm_limit": self.rpm,
+            "rpd_limit": self.rpd,
+            "tpm_limit": self.tpm,
+        }
