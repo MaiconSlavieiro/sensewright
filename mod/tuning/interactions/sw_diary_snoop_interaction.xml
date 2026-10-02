@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<I c="SensewrightDiarySnoopInteraction" i="interaction" m="sensewright_mod.object_interactions" n="sw_diary_snoop_interaction" s="0">
+  <V t="disabled" n="_saveable" />
+  <T n="category">0</T>
+  <V n="display_name" t="localized_string" p="STBL">stbl.pie_menu.diary_snoop</V>
+  <T n="allow_autonomous">False</T>
+  <T n="allow_user_directed">True</T>
+  <U n="progress_bar_enabled">
+    <T n="bar_enabled">False</T>
+  </U>
+  <E n="target_type">OBJECT</E>
+</I>

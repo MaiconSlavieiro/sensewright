@@ -64,7 +64,7 @@ if ($package) {
 
 # Copy sidecar (runtime files + package + locales + config + python.txt)
 Write-Host "Installing sidecar..." -ForegroundColor Green
-foreach ($f in @('main.py', 'pyproject.toml', 'requirements.txt', 'README.md')) {
+foreach ($f in @('main.py', 'pyproject.toml', 'requirements.txt', 'README.md', 'config.example.toml')) {
     $src = Join-Path $SidecarDir $f
     if (Test-Path $src) { Copy-Item $src -Destination $InstallSidecarDir -Force }
 }

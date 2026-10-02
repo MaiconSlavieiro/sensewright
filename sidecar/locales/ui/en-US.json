@@ -44,7 +44,10 @@
     "buff.bias_family.name": "Family Heart",
     "buff.bias_family.desc": "A wish to care for family.",
     "buff.bias_geek.name": "Geek Mode",
-    "buff.bias_geek.desc": "A pull toward tech and science."
+    "buff.bias_geek.desc": "A pull toward tech and science.",
+    "pie_menu.diary_read": "Read Diary...",
+    "pie_menu.diary_snoop": "Snoop in Diary...",
+    "pie_menu.mailbox": "Neighborhood Stories..."
   },
   "notify": {
     "recap": {
@@ -75,6 +78,19 @@
     "paused": {
       "title": "Sensewright paused",
       "body": "Open the Quick Menu to resume."
+    },
+    "mirror": {
+      "reflect_title": "A Moment of Reflection",
+      "reflect_body": "You pause and look inward. Something settles into place."
+    },
+    "diary": {
+      "read_title": "Your Diary",
+      "snoop_title": "Someone's Diary",
+      "empty": "The pages are still blank."
+    },
+    "mailbox": {
+      "title": "Neighborhood Stories",
+      "empty": "No neighborhood stories yet."
     }
   },
   "studio": {

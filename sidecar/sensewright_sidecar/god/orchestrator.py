@@ -10,8 +10,10 @@ from ..state import AppState
 from .arcs import (
     advance_arc, create_arc, current_beat, load_active_arc, save_arc, steer_arc,
 )
+from .cast import run_cast
 from .controls import current_preset, resolve_dial, resolve_mode
 from .puppeteer import run_puppeteer
+from .react import apply_react, run_react
 
 logger = get_logger("god.orchestrator")
 
@@ -84,8 +86,11 @@ def _narration_callback(state: AppState):
     return _callback
 
 
-def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, Any]:
-    """Drive the God Director loop: plan arcs, advance beats, emit directives."""
+def god_tick(
+    state: AppState, save_id: int, tick: int, lang: str,
+    active_sim_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Drive the God Director loop: plan arcs, assign cast, advance beats."""
     store = state.working_store()
     directives: List[Dict[str, Any]] = []
     active_arc = state.active_arc or (load_active_arc(store) if store else None)
@@ -138,6 +143,20 @@ def god_tick(state: AppState, save_id: int, tick: int, lang: str) -> Dict[str, A
             lang, dedup_key="{}:{}:god:scene".format(save_id, beat_idx),
             callback=_scene_callback(state, active_arc, beat_idx),
         )
+
+        # P16: assign a catalyst (reuse a townie, or emit spawn_npc for the Mod).
+        if not active_arc.get("cast"):
+            cast_result = run_cast(
+                state, save_id, beat, tick, lang,
+                target_sim_id=active_sim_id, arc=active_arc,
+            )
+            if cast_result.get("cast"):
+                active_arc["cast"] = cast_result["cast"]
+                beat["cast"] = cast_result["cast"][0]
+                active_arc["beats"][beat_idx] = beat
+            if cast_result.get("intents"):
+                state.enqueue_intents(cast_result["intents"])
+            save_arc(store, active_arc) if store else None
 
     state.active_arc = active_arc
     return {
@@ -193,3 +212,15 @@ def steer(
         save_arc(store, updated)
     state.active_arc = updated
     return {"ok": True, "updated_arc": updated}
+
+
+def beat_ended(
+    state: AppState,
+    save_id: int,
+    tick: int,
+    decision: str,
+    agent_sim_id: Optional[int],
+    lang: str,
+) -> Dict[str, Any]:
+    """Handle /v1/god/beat-ended: branch the arc after a catalyst interaction (P19)."""
+    return run_react(state, save_id, tick, decision, agent_sim_id, lang)

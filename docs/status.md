@@ -1,307 +1,368 @@
-# Sensewright v2 — Status de Implementação (M0 → M8)
+# Sensewright v2 — Implementation Status (M0 → M8)
 
-> **Data:** 2026-10-02
+> **Date:** 2026-10-02
 > **Branch:** `v2-remake`
-> **Base de referência:** [`sensewright-v2-requirements.md`](../sensewright-v2-requirements.md)
-> **Objetivo:** registrar com precisão o que **já está implementado e verificado** e o que
-> **ainda falta de fato** do plano total (22 features, 33 propósitos, ajustes A1–A11 e
-> features complementares FC1–FC5).
+> **Reference base:** [`requirements.md`](requirements.md)
+> **Purpose:** to precisely record what **is already implemented and verified** and what
+> **is genuinely still missing** from the full plan (22 features, 33 purposes, adjustments
+> A1–A11, and complementary features FC1–FC5).
 
-Este documento é a fonte de verdade sobre a lacuna entre a especificação e o código.
-Referências no formato `arquivo:linha`.
+This document is the source of truth for the gap between the specification and the code.
+References use the `file:line` format.
 
 ---
 
-## 1. Resumo executivo
+## 1. Executive summary
 
-O projeto tem uma **fundação sólida e testada**: os dois processos (Mod Python 3.7 e
-Sidecar FastAPI) conversam, o ciclo transacional de save funciona, o motor i18n
-manifest-driven está completo, a camada LLM (limites triplos, circuit breaker, scheduler
-single-queue, ContextAssembler por tier) existe, e o build gera `.ts4script` (bytecode 3.7)
-e `.package` (DBPF + STBL) válidos.
+The project has a **solid, tested foundation**: both processes (Mod Python 3.7 and Sidecar
+FastAPI) talk to each other, the transactional save cycle works, the manifest-driven i18n
+engine is complete, the LLM layer (triple limits, circuit breaker, single-queue scheduler,
+tiered ContextAssembler) exists, and the build produces valid `.ts4script` (bytecode 3.7) and
+`.package` (DBPF + STBL).
 
-O que **falta de fato** não é fundação, é **fiação (wiring) e gatilhos**:
+What is **genuinely missing** is not foundation, it is **wiring and triggers**:
 
-- **18 dos 33 propósitos** só possuem fallback determinístico — não têm gatilho nem
-  handler de produção (ex.: `sim.dream`, `sim.cognition`, `god.cast`, `world.gossip`,
+- **18 of the 33 purposes** only have a deterministic fallback — they have no trigger or
+  production handler (e.g., `sim.dream`, `sim.cognition`, `god.cast`, `world.gossip`,
   `mem.compact`, `mem.legacy`, `ops.panel.summary`).
-- **Três propósitos parciais** (`sim.dream`, `sim.cognition`, `evo.reflect`) têm motor e
-  prompt prontos, mas **nada os dispara** e o resultado não é aplicado de volta ao perfil.
-- **God Director**: arcos/beats são planejados mas nunca consumidos; `god.cast`,
-  `god.scene` e `god.react` não existem; `god.puppeteer` não spawna/aborda NPC e não
-  injeta o objetivo assimétrico em `sim.social`.
-- **World Layer**: o modelo de rumor está pronto e testado, mas **nenhum código de
-  produção cria/espalha rumores**; crônica, caixa de correio e aftermath ausentes.
-- **Hooks nativos (M5/M6)**: faltam Diário/"Bisbilhotar", Livro de Autobiografia,
-  `VisitSituation` (NPC tocando a campainha), Epitáfio na Lápide, balões de sono e a
-  interação "Refletir" no espelho.
-- **Speech Policy (F11)**: `max_lines_per_minute` e `min_interval_between_lines` estão
-  definidos mas **não são aplicados**; o roteamento visual em 4 canais está incompleto.
-- **Settings/Concurrency (F15/F16)**: cooldown por modelo (120 s) é código morto;
-  concorrência por tier não é aplicada; o "refund assimétrico" é logicamente inócuo.
+- **Three partial purposes** (`sim.dream`, `sim.cognition`, `evo.reflect`) have the engine and
+  prompt ready, but **nothing triggers them** and the result is not applied back to the profile.
+- **God Director**: arcs/beats are planned but never consumed; `god.cast`, `god.scene`, and
+  `god.react` do not exist; `god.puppeteer` does not spawn/approach an NPC and does not inject
+  the asymmetric objective into `sim.social`.
+- **World Layer**: the rumor model is ready and tested, but **no production code creates or
+  spreads rumors**; chronicle, mailbox, and aftermath are missing.
+- **Native hooks (M5/M6)**: missing Diary/"Snoop", Autobiography Book, `VisitSituation` (NPC
+  ringing the doorbell), Tombstone Epitaph, sleep balloons, and the "Reflect" interaction on
+  the mirror.
+- **Speech Policy (F11)**: `max_lines_per_minute` and `min_interval_between_lines` are defined
+  but **not enforced**; the 4-channel visual routing is incomplete.
+- **Settings/Concurrency (F15/F16)**: the per-model cooldown (120 s) is dead code; per-tier
+  concurrency is not enforced; the "asymmetric refund" is logically inert.
 
-Tudo o que existe hoje é coberto por **508 testes** (sidecar) e compila nos dois
-interpretadores corretos.
+Everything that exists today is covered by **523 tests** (sidecar) and compiles under both
+correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle events, `spawn_npc`,
+`god.react`/`beat-ended`, mirror/diary/mailbox hooks, sleep balloons, object/situation build
+types) is coded blind and awaits the Phase 5 in-game checklist.
 
 ---
 
-## 2. Validação executada nesta revisão
+## 2. Validation performed in this review
 
-| Verificação | Comando | Resultado |
+| Check | Command | Result |
 |---|---|---|
-| Suíte de testes do sidecar | `python -m pytest -q` em `sidecar/` | **508 passed**, 1 warning |
-| Sintaxe do Mod (Python 3.7) | `py -3.7 -m py_compile` em `mod/sensewright_mod/*.py` | **OK** (16 arquivos) |
-| Sintaxe dos scripts de build (3.10+) | `python -m py_compile mod/build.py mod/build_package.py` | **OK** |
-| Build `.package` | `python mod/build_package.py` | **OK** — 25 recursos (19 buffs, 3 interactions, 1 trait, 2 STBL) |
-| Build `.ts4script` | `python mod/build.py` | **OK** — 69.488 bytes, magic number Python 3.7 `42 0d 0d 0a` verificado |
-| Varredura de segredos no diff | `git diff` por `sk-…`/`api_key=` | **Limpo** |
-| `.gitignore` | `git check-ignore` | `sidecar/config.toml` e `dist/` ignorados |
+| Sidecar test suite | `python -m pytest -q` in `sidecar/` | **523 passed**, 1 warning |
+| Mod syntax (Python 3.7) | `py -3.7 -m py_compile` on `mod/sensewright_mod/*.py` | **OK** (20 files) |
+| Build script syntax (3.10+) | `python -m py_compile mod/build.py mod/build_package.py` | **OK** |
+| `.package` build | `python mod/build_package.py` | **OK** — 31 resources (19 buffs, 7 interactions, 1 trait, 1 object, 1 situation, 2 STBL) |
+| `.ts4script` build | `python mod/build.py` | **OK** — 83,139 bytes, Python 3.7 magic number `42 0d 0d 0a` verified |
+| Secret scan of the diff | `git diff` for `sk-…`/`api_key=` | **Clean** |
+| `.gitignore` | `git check-ignore` | `sidecar/config.toml` and `dist/` ignored |
 
-> A validação é **unitária/estática**. Os critérios de aceitação do M8 (transição de lote,
-> *Save As*, *Alt+F4*, autoboot invisível) **exigem execução dentro do The Sims 4** e ainda
-> não foram realizados.
+> Validation is **unit/static**. The M8 acceptance criteria (batch transition, *Save As*,
+> *Alt+F4*, invisible autoboot) **require execution inside The Sims 4** and have not yet been
+> performed.
 
 ---
 
-## 3. Marcos M0 → M8
+## 3. Milestones M0 → M8
 
-| Marco | Foco | Status | Observação |
+| Milestone | Focus | Status | Note |
 |---|---|---|---|
-| **M0** | Fundação, IPC & Save Vault | ✅ **Completo** | Thread isolation, dual-clock, SaveVault (working/committed/ring buffer), `/v1/lifecycle/*`. |
-| **M1** | Roteamento, TPM & Idioma | 🟡 **Parcial** | Limites triplos, circuit breaker 60 s, `free_only`, 6 provedores e i18n completos. **Falta**: cooldown por modelo 120 s (`chain.py:28-29` é código morto). |
-| **M2** | Scheduler, ContextAssembler & Intents | 🟡 **Parcial** | Scheduler single-queue, SLO, teto de input, dedup e config em 2 camadas OK. **Falta**: enforcement de concorrência por tier; refund assimétrico inócuo. |
-| **M3** | Cognição, Sonhos & FTS5 | 🟡 **Parcial** | FTS5 (BM25) e tabelas completas; motores de sonho/cognição e prompts existem. **Falta**: gatilhos de sono, `apply_cognition`, decay/prune de psique, VACUUM. |
-| **M4** | God Director & Catalisadores | 🟡 **Parcial** | `god.zeitgeist`, `god.narration`, `god.plan` (submetido) e lease/puppeteer básico. **Falta**: construir/consultar arcos, `god.cast`/`god.scene`/`god.react`/`god.background`, spawn de NPC, `BackgroundScheduler`. |
-| **M5** | Levers, ArchetypeResolver & Hooks | 🟡 **Parcial** | Buffs/moodlets/sentimentos/traços e 14 bias buffs. **Falta**: mapas de atividade/archetype vazios, `VisitSituation`, gostos/desgostos, espelho. |
-| **M6** | Chat Hidden SimInfo, Diário & Mundo | 🟡 **Parcial** | Hidden SimInfo + canais de chat (SMS) + loop encadeado básico. **Falta**: `pc_chat`/`pc_email` navegáveis, Diário/"Bisbilhotar", caixa de correio, SMS de fofoca. |
-| **M7** | UI Dual & Logs | 🟡 **Parcial** | Quick Menu + Web Studio SPA real; `trace_id` e rotação 10 MB × 3. **Falta**: wiring de vários controles do Web Studio; `trace_id` se perde em jobs `bg`. |
-| **M8** | Validação In-Game & Release | ❌ **Não iniciado** | Só há validação unitária. `/v1/i18n/compile-addon` é stub. Critérios de aceitação não executados. |
+| **M0** | Foundation, IPC & Save Vault | ✅ **Complete** | Thread isolation, dual-clock, SaveVault (working/committed/ring buffer), `/v1/lifecycle/*`. |
+| **M1** | Routing, TPM & Language | 🟡 **Partial** | Triple limits, 60 s circuit breaker, `free_only`, 6 providers, and i18n complete. **Missing**: per-model 120 s cooldown (`chain.py:28-29` is dead code). |
+| **M2** | Scheduler, ContextAssembler & Intents | 🟡 **Partial** | Single-queue scheduler, SLO, input ceiling, dedup, and 2-layer config OK. **Missing**: per-tier concurrency enforcement; asymmetric refund inert. |
+| **M3** | Cognition, Dreams & FTS5 | 🟡 **Partial** | FTS5 (BM25) and full tables; dream/cognition engines and prompts exist. **Missing**: sleep triggers, `apply_cognition`, psyche decay/prune, VACUUM. |
+| **M4** | God Director & Catalysts | 🟡 **Partial** | `god.zeitgeist`, `god.narration`, `god.plan` (submitted), and basic lease/puppeteer. **Missing**: build/query arcs, `god.cast`/`god.scene`/`god.react`/`god.background`, NPC spawn, `BackgroundScheduler`. |
+| **M5** | Levers, ArchetypeResolver & Hooks | 🟡 **Partial** | Buffs/moodlets/sentiments/traits and 14 bias buffs. **Missing**: empty activity/archetype maps, `VisitSituation`, likes/dislikes, mirror. |
+| **M6** | Chat Hidden SimInfo, Diary & World | 🟡 **Partial** | Hidden SimInfo + chat channels (SMS) + basic chained loop. **Missing**: navigable `pc_chat`/`pc_email`, Diary/"Snoop", mailbox, gossip SMS. |
+| **M7** | Dual UI & Logs | 🟡 **Partial** | Quick Menu + real Web Studio SPA; `trace_id` and 10 MB × 3 rotation. **Missing**: wiring of several Web Studio controls; `trace_id` is lost in `bg` jobs. |
+| **M8** | In-Game Validation & Release | ❌ **Not started** | Only unit validation. `/v1/i18n/compile-addon` is a stub. Acceptance criteria not executed. |
 
 ---
 
 ## 4. Features F01 → F22
 
-| Feature | Status | Evidência / lacuna principal |
+| Feature | Status | Evidence / main gap |
 |---|---|---|
-| **F01** Chat multicanal, Hidden SimInfo & UI contínua | 🟡 Parcial | Hidden SimInfo completo (`native_hooks.py:85-160`); UI encadeada básica (`chat_ui.py:75-209`). Falta canal `pc_chat`/`pc_email`, Wants nativos (fallback via moodlet `native_hooks.py:340-363`), deferral local inerte. |
-| **F02** Profile Generation & bootstrap | ✅ Completo | `normalize_profile` (`agent/profile.py:31`), hidratação via census (`services.py:111-121`), 2 estágios (template + `bg`). |
-| **F03** Initiative / Impulse | 🟡 Parcial | Impulso `idle` e poda de fala OK (`services.py:146-153`). Guarda de sobrevivência calculada mas **não aplicada** (schedule vazio em `agent/impulse.py:81`; sem filtro no executor). |
-| **F04** Social Layer & diálogo assimétrico | 🟡 Parcial | Pre-flight simétrico OK (`agent/social.py:17-43`). **Assimétrico não roteado**: `build_social_context` nunca recebe `puppeteer` (`services.py:269`); limite de falas/min não aplicado; CHILD não bloqueado. |
-| **F05** IntentBus | ✅ Completo | Shape canônico, TTL, `expires_on`, `retry_count`/`max_retries` (`intent_bus.py:37,44,272`), freeze na pausa. |
-| **F06** SeatManager | ✅ Completo | Prioridade estrita, lease anti-thrashing, evicção por distância (`agent/seats.py:18-133`). Ressalva: pool pode exceder `max_seats` com muitos leases protegidos. |
-| **F07** Cognição híbrida & Motor Onírico | 🟡 Parcial | Fórmula de surrealismo e `dream`/`cognition` prontos (`agent/dreams.py`, `agent/cognition.py`). **Nenhum gatilho de sono**; balões de sono e tokens de tooltip ausentes; `apply_cognition` nunca chamado. |
-| **F08** Personality & Psique | 🟡 Parcial | Salience por metadados + reforço ligados (`services.py:393-406`). **Falta**: decay exponencial por `sim_tick` e prune nunca chamados; limite de Life Story (20 linhas/2 000 chars) não aplicado. |
-| **F09** Evolution, Demeanor & Gostos | 🟡 Parcial | `evo.reflect` responde, mas `apply_reflection` **não é chamado** (`services.py:456-471`); sem escritor de gostos/desgostos; proposta de swap não emitida. |
-| **F10** Memory, FTS5 & Shadow DB | ✅ Núcleo / 🟡 Periferia | Núcleo completo e testado. Periferia: prune de 180 dias sem agendamento, "Save As" não lê `previous_save_id`, VACUUM ausente. |
-| **F11** Speech Policy (Pre-Flight) & roteamento | 🟡 Parcial / ❌ | `hearing_radius` OK; `max_lines_per_minute`/`min_interval` **não aplicados**. Canais: card compacto `SPEECH` ausente; banner/portrait parciais. |
-| **F12** Presence Policy & Capability Matrix | 🟡 Parcial | Capacidades e exclusão de BABY OK (`agent/presence.py:19-45`). **`hard_blocked_social` (CHILD flirty/intimate) definido mas nunca chamado**; tier `off` morto. |
-| **F13** Coordinator & arbitragem | 🟡 Parcial | Prioridades/constantes e 3 leases (`coordinator.py:23-30`). `SANDBOX_OVERRIDE` não atribuído; expiração de lease não checada. |
-| **F14** God Director & `god.puppeteer` | 🟡 Parcial | 7 presets/5 dials definidos, mas só `intervention_frequency` influencia (`orchestrator.py:54`). `CO_DIRECTOR` ≡ `AUTONOMOUS`; casting/spawn ausente; sem `BackgroundScheduler`. |
-| **F15** LLM Provider Chain, TPM & idioma | 🟡 Parcial | RPM/RPD/TPM, circuit breaker, `free_only`, 6 provedores — OK. Falta cooldown por modelo. |
-| **F16** ModelRouter, Tiers & ContextAssembler | 🟡 Parcial | SLO/teto/dedup/2 camadas OK. Concorrência por tier não aplicada; refund assimétrico inócuo; `thinking_budget` só vira `temperature=0`. |
-| **F17** Tools, Levers, ArchetypeResolver & Hooks | 🟡 Parcial | 9 intents com `_safe_call`; buffs/moodlets/sentimentos/traços. Mapas de atividade/archetype **vazios** (`tuning.py:229,232`); várias linhas da matriz nativa ausentes. |
-| **F18** Sistema i18n & STBL | ✅ Motor / 🟡 Export | Cascata 4 níveis, manifesto, gênero, rotação, hot-reload e compilador no Mod — OK. `/v1/i18n/compile-addon` é stub. |
-| **F19** Observability & rotação | 🟡 Parcial | `trace_id` propagado e rotação 10 MB × 3 OK. Worker `bg` perde o `trace_id` (ContextVar não herdado). |
-| **F20** Build, Deploy & autoboot | ✅ Completo | `.ts4script` 3.7 + `.package` DBPF/STBL; autoboot `CREATE_NO_WINDOW` (`http_client.py:94-155`). |
-| **F21** UI dual (Quick Menu + Web Studio) | 🟡 Parcial | Quick Menu OK; Web Studio SPA real (`webui/`). Wiring incompleto: salvar perfil/keys e botões de cena não persistem. |
-| **F22** World Layer & epidemiologia de rumores | 🟡 Parcial | Modelo `RumorNode` completo e testado (`world/rumors.py`). **Nenhuma chamada de produção** cria/espalha rumor; crônica/mailbox/aftermath ausentes. |
+| **F01** Multi-channel chat, Hidden SimInfo & continuous UI | 🟡 Partial | Hidden SimInfo complete (`native_hooks.py:85-160`); basic chained UI (`chat_ui.py:75-209`). Missing `pc_chat`/`pc_email` channel, native Wants (fallback via moodlet `native_hooks.py:340-363`), inert local deferral. |
+| **F02** Profile Generation & bootstrap | ✅ Complete | `normalize_profile` (`agent/profile.py:31`), hydration via census (`services.py:111-121`), 2 stages (template + `bg`). |
+| **F03** Initiative / Impulse | 🟡 Partial | `idle` impulse and speech pruning OK (`services.py:146-153`). Survival guard computed but **not applied** (empty schedule in `agent/impulse.py:81`; no filter in the executor). |
+| **F04** Social Layer & asymmetric dialogue | 🟡 Partial | Symmetric pre-flight OK (`agent/social.py:17-43`). **Asymmetric is not routed**: `build_social_context` never receives `puppeteer` (`services.py:269`); lines/min limit not enforced; CHILD not blocked. |
+| **F05** IntentBus | ✅ Complete | Canonical shape, TTL, `expires_on`, `retry_count`/`max_retries` (`intent_bus.py:37,44,272`), freeze on pause. |
+| **F06** SeatManager | ✅ Complete | Strict priority, anti-thrashing lease, distance eviction (`agent/seats.py:18-133`). Caveat: pool can exceed `max_seats` with many protected leases. |
+| **F07** Hybrid cognition & Dream Engine | 🟡 Partial | Surrealism formula and `dream`/`cognition` ready (`agent/dreams.py`, `agent/cognition.py`). **No sleep trigger**; sleep balloons and tooltip tokens missing; `apply_cognition` never called. |
+| **F08** Personality & Psyche | 🟡 Partial | Salience by metadata + reinforcement wired (`services.py:393-406`). **Missing**: exponential decay per `sim_tick` and prune never called; Life Story limit (20 lines / 2,000 chars) not enforced. |
+| **F09** Evolution, Demeanor & Likes | 🟡 Partial | `evo.reflect` responds, but `apply_reflection` **is not called** (`services.py:456-471`); no likes/dislikes writer; swap proposal not emitted. |
+| **F10** Memory, FTS5 & Shadow DB | ✅ Core / 🟡 Periphery | Core complete and tested. Periphery: 180-day prune unscheduled, "Save As" doesn't read `previous_save_id`, VACUUM missing. |
+| **F11** Speech Policy (Pre-Flight) & routing | 🟡 Partial / ❌ | `hearing_radius` OK; `max_lines_per_minute`/`min_interval` **not enforced**. Channels: compact `SPEECH` card missing; banner/portrait partial. |
+| **F12** Presence Policy & Capability Matrix | 🟡 Partial | Capabilities and BABY exclusion OK (`agent/presence.py:19-45`). **`hard_blocked_social` (CHILD flirty/intimate) defined but never called**; `off` tier dead. |
+| **F13** Coordinator & arbitration | 🟡 Partial | Priorities/constants and 3 leases (`coordinator.py:23-30`). `SANDBOX_OVERRIDE` not assigned; lease expiration not checked. |
+| **F14** God Director & `god.puppeteer` | 🟡 Partial | 7 presets/5 dials defined, but only `intervention_frequency` influences (`orchestrator.py:54`). `CO_DIRECTOR` ≡ `AUTONOMOUS`; casting/spawn missing; no `BackgroundScheduler`. |
+| **F15** LLM Provider Chain, TPM & language | 🟡 Partial | RPM/RPD/TPM, circuit breaker, `free_only`, 6 providers — OK. Missing per-model cooldown. |
+| **F16** ModelRouter, Tiers & ContextAssembler | 🟡 Partial | SLO/ceiling/dedup/2 layers OK. Per-tier concurrency not applied; asymmetric refund inert; `thinking_budget` only becomes `temperature=0`. |
+| **F17** Tools, Levers, ArchetypeResolver & Hooks | 🟡 Partial | 9 intents with `_safe_call`; buffs/moodlets/sentiments/traits. Activity/archetype maps **empty** (`tuning.py:229,232`); several native matrix rows missing. |
+| **F18** i18n System & STBL | ✅ Engine / 🟡 Export | 4-level cascade, manifest, gender, rotation, hot-reload, and Mod compiler — OK. `/v1/i18n/compile-addon` is a stub. |
+| **F19** Observability & rotation | 🟡 Partial | `trace_id` propagated and 10 MB × 3 rotation OK. `bg` worker loses `trace_id` (ContextVar not inherited). |
+| **F20** Build, Deploy & autoboot | ✅ Complete | `.ts4script` 3.7 + `.package` DBPF/STBL; autoboot `CREATE_NO_WINDOW` (`http_client.py:94-155`). |
+| **F21** Dual UI (Quick Menu + Web Studio) | 🟡 Partial | Quick Menu OK; real Web Studio SPA (`webui/`). Incomplete wiring: saving profile/keys and scene buttons don't persist. |
+| **F22** World Layer & rumor epidemiology | 🟡 Partial | `RumorNode` model complete and tested (`world/rumors.py`). **No production call** creates/spreads a rumor; chronicle/mailbox/aftermath missing. |
 
 ---
 
-## 5. Catálogo dos 33 propósitos
+## 5. Catalog of the 33 purposes
 
-Estados: **Full** = fiação + consumo completos · **Parcial** = pipeline existe mas sem
-gatilho/aplicação · **Fallback-only** = apenas `fallbacks.py` + declaração em
-`purposes.py` (nenhum gatilho de produção) · **Ausente** = não implementado.
+States: **Full** = complete wiring + consumption · **Partial** = pipeline exists but no
+trigger/application · **Fallback-only** = only `fallbacks.py` + declaration in
+`purposes.py` (no production trigger) · **Missing** = not implemented.
 
-> Todos os 33 possuem fallback determinístico 0-key (garantia de projeto), portanto
-> "Fallback-only" significa *o serviço responde, mas nunca é acionado com dados reais*.
+> All 33 have a deterministic 0-key fallback (project guarantee), so "Fallback-only" means
+> *the service responds, but is never triggered with real data*.
 
-| ID | Propósito | Status | Evidência / lacuna |
+> **Note:** A purpose (Pxx) can be ✅ Full while its parent feature (Fxx) is still 🟡
+> Partial, because the feature encompasses additional integration work (e.g., in-game
+> hooks, native UI, sleep balloons) beyond the sidecar pipeline itself.
+
+| ID | Purpose | Status | Evidence / gap |
 |---|---|---|---|
 | P01 | `sim.chat` | ✅ Full | `services.py:333-382` |
-| P02 | `sim.profile` | ✅ Full | `services.py:426-453` (ignora `profile` postado) |
-| P03 | `sim.impulse` | ✅ Full | `services.py:245-260` (guarda de sobrevivência inerte) |
+| P02 | `sim.profile` | ✅ Full | `services.py:426-453` — generation-only by design; the endpoint generates a profile, it does not accept one from the client (Web Studio profile editing is plan.md 4.1). |
+| P03 | `sim.impulse` | ✅ Full | `services.py:245-260` (inert survival guard) |
 | P04 | `sim.reaction` | ✅ Full | `services.py:386-422` |
-| P05 | `sim.social` | ✅ Full | `services.py:262-276` (assimétrico não roteado) |
-| P06 | `sim.social.close` | ⚪ Fallback-only | Sem handler; `social_sessions` sempre `[]` (`services.py:296`) |
-| P07 | `sim.dream` | ✅ Full | Gatilho de sono (`services._process_sleep_transitions`) + motor/prompt/fallback + `dream_urge` no perfil |
-| P08 | `sim.cognition` | ✅ Full | Encadeado pós-sonho; `apply_cognition` persiste `daily_plan`/biases (`services._cognition_callback`) |
-| P09 | `sim.sleep` | ✅ Full | Gatilho no despertar (se evento saliente); memória + reforço de psique |
-| P10 | `sim.diary` | 🟡 Parcial | Gatilho fim-do-dia + memória `diary`; falta Tooltip/Snoop in-game (`P2`) |
-| P11 | `sim.lifestory` | ⚪ Fallback-only | Limites de Life Story aplicados (`enforce_life_story`), mas sem gatilho de 7 dias |
-| P12 | `sim.aspiration` | ⚪ Fallback-only | Sem handler/gatilho |
-| P13 | `sim.background.expand` | ⚪ Fallback-only | Sem handler; `sim_GetToKnow` ausente |
+| P05 | `sim.social` | ✅ Full | `services.py:262-276` (asymmetric not routed) |
+| P06 | `sim.social.close` | ⚪ Fallback-only | No handler; `social_sessions` always `[]` (`services.py:296`) |
+| P07 | `sim.dream` | ✅ Full | Sleep trigger (`services._process_sleep_transitions`) + engine/prompt/fallback + `dream_urge` in the profile |
+| P08 | `sim.cognition` | ✅ Full | Chained post-dream; `apply_cognition` persists `daily_plan`/biases (`services._cognition_callback`) |
+| P09 | `sim.sleep` | ✅ Full | Wake trigger (if salient event); memory + psyche reinforcement |
+| P10 | `sim.diary` | 🟡 Partial | End-of-day trigger + `diary` memory; missing in-game Tooltip/Snoop (`P2`) |
+| P11 | `sim.lifestory` | ⚪ Fallback-only | Life Story limits applied (`enforce_life_story`), but no 7-day trigger |
+| P12 | `sim.aspiration` | ⚪ Fallback-only | No handler/trigger |
+| P13 | `sim.background.expand` | ⚪ Fallback-only | No handler; `sim_GetToKnow` missing |
 | P14 | `god.zeitgeist` | ✅ Full | `god/zeitgeist.py:20`, `services.py:517` |
-| P15 | `god.plan` | ✅ Full | Callback `_plan_callback` cria e persiste o arco (`create_arc` + `save_arc`) |
-| P16 | `god.cast` | ⚪ Fallback-only | Sem casting/reuso de townie/spawn |
-| P17 | `god.scene` | ✅ Full | Beat armado → `god.scene` grava `scene_draft`/`scene_subtext` no beat |
-| P18 | `god.puppeteer` | 🟡 Parcial | Lease + fala inicial (`god/puppeteer.py`); sem spawn/abordagem/objetivo assimétrico/continuação |
-| P19 | `god.react` | ⚪ Fallback-only | `advance_arc` sem caller (`god/arcs.py:36`) |
+| P15 | `god.plan` | ✅ Full | `_plan_callback` creates and persists the arc (`create_arc` + `save_arc`) |
+| P16 | `god.cast` | ⚪ Fallback-only | No casting/townie reuse/spawn |
+| P17 | `god.scene` | ✅ Full | Beat armed → `god.scene` writes `scene_draft`/`scene_subtext` to the beat |
+| P18 | `god.puppeteer` | 🟡 Partial | Lease + opening line (`god/puppeteer.py`); no spawn/approach/asymmetric objective/continuation |
+| P19 | `god.react` | ⚪ Fallback-only | `advance_arc` without caller (`god/arcs.py:36`) |
 | P20 | `god.narration` | ✅ Full | `god/orchestrator.py:17-80` |
-| P21 | `god.background` | ⚪ Fallback-only | `set_sim_background` sem caller |
-| P22 | `world.npc.backstory` | ⚪ Fallback-only | Sem gatilho |
-| P23 | `world.household.chronicle` | 🟡 Parcial | Gatilho fim-do-dia + persistência; falta Caixa de Correio in-game (`P2`) |
-| P24 | `world.gossip` | ✅ Full | Criação em evento público saliente + contágio ao fim de `sim.social` + SMS (`_create_rumor_from_event`/`_spread_rumor`) |
-| P25 | `world.aftermath` | ⚪ Fallback-only | Constante/flag sem uso |
-| P26 | `mem.consolidate` | 🟡 Parcial | Endpoint funciona (`services.py:474`); **sem gatilho automático** (300 s/zona) |
-| P27 | `mem.compact` | 🟡 Parcial | Gatilho automático (>= 20 consolidadas) + arquivamento de 15 + VACUUM (`services._maybe_compact`); falta exposição no painel |
-| P28 | `mem.legacy` | ⚪ Fallback-only | Sem gatilho de morte/casamento/nascimento |
-| P29 | `mem.relationship.review` | ⚪ Fallback-only | `qualitative_note` nunca escrito |
-| P30 | `evo.reflect` | ✅ Full | `handle_evolve` + `_reflect_callback` aplicam e persistem `current_demeanor` |
-| P31 | `evo.trait` | 🟡 Parcial | Helpers prontos; sem `run_purpose`/emissão |
-| P32 | `ops.recap` | 🟡 Parcial | Submetido no bootstrap (`services.py:61`); `recap_job_id` sempre `None`; resultado descartado |
-| P33 | `ops.panel.summary` | ⚪ Fallback-only | Sem caller |
+| P21 | `god.background` | ⚪ Fallback-only | `set_sim_background` without caller |
+| P22 | `world.npc.backstory` | ⚪ Fallback-only | No trigger |
+| P23 | `world.household.chronicle` | 🟡 Partial | End-of-day trigger + persistence; missing in-game Mailbox (`P2`) |
+| P24 | `world.gossip` | ✅ Full | Creation on salient public event + contagion at the end of `sim.social` + SMS (`_create_rumor_from_event`/`_spread_rumor`) |
+| P25 | `world.aftermath` | ⚪ Fallback-only | Constant/flag unused |
+| P26 | `mem.consolidate` | 🟡 Partial | Endpoint works (`services.py:474`); **no automatic trigger** (300 s/zone) |
+| P27 | `mem.compact` | 🟡 Partial | Automatic trigger (≥ 20 consolidated) + archive 15 + VACUUM (`services._maybe_compact`); missing panel exposure |
+| P28 | `mem.legacy` | ⚪ Fallback-only | No death/marriage/birth trigger |
+| P29 | `mem.relationship.review` | ⚪ Fallback-only | `qualitative_note` never written |
+| P30 | `evo.reflect` | ✅ Full | `handle_evolve` + `_reflect_callback` apply and persist `current_demeanor` |
+| P31 | `evo.trait` | 🟡 Partial | Helpers ready; no `run_purpose`/emission |
+| P32 | `ops.recap` | 🟡 Partial | Submitted at bootstrap (`services.py:61`); `recap_job_id` always `None`; result discarded |
+| P33 | `ops.panel.summary` | ⚪ Fallback-only | No caller |
 
-**Total: 14 Full · 16 Parciais · 3 Fallback-only.**
+**Total: 14 Full · 7 Partial · 12 Fallback-only.**
 
 ---
 
-## 6. Ajustes A1–A11 e Features Complementares
+## 6. Adjustments A1–A11 and Complementary Features
 
-| Item | Status | Evidência / lacuna |
+| Item | Status | Evidence / gap |
 |---|---|---|
-| **A1** Autoboot em 3 camadas | 🟡 Parcial | Camadas 2 (Popen) e degradada existem; **launcher externo ausente**; orientação manual só na doc. |
-| **A2** Restrições Python 3.7 extras | ✅ Completo | Sem walrus/match/union/future/`cached_property` no Mod. |
-| **A3** Freeze detalhado na pausa | ✅ Completo | `intent_bus.py:173-180`; sidecar congela (`services.py:216-218`). |
-| **A4** Wants → moodlet | 🟡 Parcial | Moodlet "Saudade" implementado (`native_hooks.py:340-363`); Wants nativos ausentes. |
-| **A5** `queue_interaction` → `bias_activity` | ✅ Resolvido | Intent canônico é `bias_interaction` (`intent_bus.py:16`). |
-| **A6** `retry_count` no IntentBus | ✅ Completo | `intent_bus.py:37,58,272`; `agent/intents.py:65-66`. |
-| **A7** Pool de 4 buffs de sonho | ✅ Completo | `mod/tuning/buffs/buff_dream_*.xml`; seleção em `native_hooks.py:212-233`. |
-| **A8** Interação "Refletir" no espelho | ❌ Ausente | Só a chave de locale existe; sem classe/XML. |
-| **A9** VACUUM após `mem.compact` | ❌ Ausente | `MemoryStore.vacuum()` existe mas nunca chamado (`sqlite_store.py:565`). |
-| **A10** Guard de Expansion Packs | ❌ Ausente | Mod envia `installed_packs` (`state_collector.py:490`); sidecar ignora. |
-| **A11** Priorização de hooks | 🟡 Parcial | Alta prioridade parcial; itens médios/baixos ausentes. |
-| **FC1** Onboarding Wizard | 🟡 Parcial | Notificação única (`main.py:149-206`); sem as 3 opções (Quick/Web/Jogar). |
-| **FC2** Export/Import de Sim | ❌ Ausente | Backlog (M8+). |
-| **FC3** Dashboard de custo/consumo | ❌ Ausente | Aba 3 só mostra RPM/RPD/TPM atuais. |
-| **FC4** Panic Button (Ctrl+Shift+S) | ❌ Ausente | `IntentBus.clear_all` definido e nunca chamado (`intent_bus.py:283`). |
-| **FC5** Camada de compatibilidade (MCCC/Whims) | ❌ Ausente | Backlog. |
+| **A1** 3-layer autoboot | 🟡 Partial | Layers 2 (Popen) and degraded exist; **external launcher missing**; manual guidance only in the docs. |
+| **A2** Extra Python 3.7 constraints | ✅ Complete | No walrus/match/union/future/`cached_property` in the Mod. |
+| **A3** Detailed freeze on pause | ✅ Complete | `intent_bus.py:173-180`; sidecar freezes (`services.py:216-218`). |
+| **A4** Wants → moodlet | 🟡 Partial | "Missing" moodlet implemented (`native_hooks.py:340-363`); native Wants missing. |
+| **A5** `queue_interaction` → `bias_activity` | ✅ Resolved | Canonical intent is `bias_interaction` (`intent_bus.py:16`). |
+| **A6** `retry_count` in IntentBus | ✅ Complete | `intent_bus.py:37,58,272`; `agent/intents.py:65-66`. |
+| **A7** Pool of 4 dream buffs | ✅ Complete | `mod/tuning/buffs/buff_dream_*.xml`; selection in `native_hooks.py:212-233`. |
+| **A8** "Reflect" interaction on the mirror | ❌ Missing | Only the locale key exists; no class/XML. |
+| **A9** VACUUM after `mem.compact` | ❌ Missing | `MemoryStore.vacuum()` exists but is never called (`sqlite_store.py:565`). |
+| **A10** Expansion Pack guard | ❌ Missing | Mod sends `installed_packs` (`state_collector.py:490`); sidecar ignores it. |
+| **A11** Hook prioritization | 🟡 Partial | High priority partial; medium/low items missing. |
+| **FC1** Onboarding Wizard | 🟡 Partial | Single notification (`main.py:149-206`); no 3 options (Quick/Web/Play). |
+| **FC2** Sim Export/Import | ❌ Missing | Backlog (M8+). |
+| **FC3** Cost/usage dashboard | ❌ Missing | Tab 3 only shows current RPM/RPD/TPM. |
+| **FC4** Panic Button (Ctrl+Shift+S) | ❌ Missing | `IntentBus.clear_all` defined and never called (`intent_bus.py:283`). |
+| **FC5** Compatibility layer (MCCC/Whims) | ❌ Missing | Backlog. |
 
 ---
 
-## 7. Gaps priorizados (o que falta implementar de fato)
+## 7. Prioritized gaps (what genuinely remains to implement)
 
-### P0 — Destravar o núcleo narrativo (maior impacto, menor esforço) — ✅ CONCLUÍDO
+> **Detailed execution plan:** [`plan.md`](plan.md) (phases P1 residual → P2/P4 → M8,
+> with dependencies, risks, and the in-game checklist).
 
-1. ✅ **Gatilhos de sono** (Mod → Sidecar): `_process_sleep_transitions` detecta as bordas
-   de `is_sleeping` no pulso de autonomia e dispara `sim.dream` → `sim.cognition`
-   (`apply_cognition` persiste `daily_plan`/biases) e, no despertar, `sim.sleep` (se
-   evento saliente) + `evo.reflect`.
-2. ✅ **Aplicar `evo.reflect`**: `handle_evolve` e `_reflect_callback` chamam
-   `apply_reflection` e persistem `current_demeanor` (`services.py`).
-3. ✅ **Decay/prune de psique** no despertar (`decay_blocks`, por delta de sim-dias) e
-   **limite de Life Story** (`agent.profile.enforce_life_story`, 20 linhas / 2 000 chars).
-4. ✅ **Speech Policy enforcement**: `agent/speech.py` (janela de 60 s + intervalo mínimo)
-   aplicado no gate de `sim.social`; `hard_blocked_social` (CHILD) no pre-flight e na
-   emissão; `physical_actions_allowed` calculado com `schedule_blocks` reais e aplicado
-   no callback de `sim.impulse`.
-5. ✅ **`world.gossip` + contágio social**: `_create_rumor_from_event` cria e persiste o
-   rumor em evento público saliente (com testemunhas), `_spread_rumor` contamina ao fim
-   de `sim.social` e o Mod exibe o SMS diegético (`tool_executor.py`).
+### P0 — Unblock the narrative core (highest impact, lowest effort) — ✅ DONE
 
-### P1 — God Director completo e World Layer (parcial)
+1. ✅ **Sleep triggers** (Mod → Sidecar): `_process_sleep_transitions` detects `is_sleeping`
+   edges in the autonomy pulse and fires `sim.dream` → `sim.cognition`
+   (`apply_cognition` persists `daily_plan`/biases) and, on wake, `sim.sleep` (if salient
+   event) + `evo.reflect`.
+2. ✅ **Apply `evo.reflect`**: `handle_evolve` and `_reflect_callback` call
+   `apply_reflection` and persist `current_demeanor` (`services.py`).
+3. ✅ **Psyche decay/prune** on wake (`decay_blocks`, by sim-day delta) and **Life Story limit**
+   (`agent.profile.enforce_life_story`, 20 lines / 2,000 chars).
+4. ✅ **Speech Policy enforcement**: `agent/speech.py` (60 s window + minimum interval)
+   applied at the `sim.social` gate; `hard_blocked_social` (CHILD) in pre-flight and on
+   emission; `physical_actions_allowed` computed with real `schedule_blocks` and applied in
+   the `sim.impulse` callback.
+5. ✅ **`world.gossip` + social contagion**: `_create_rumor_from_event` creates and persists
+   the rumor on a salient public event (with witnesses), `_spread_rumor` contaminates at the
+   end of `sim.social`, and the Mod displays the diegetic SMS (`tool_executor.py`).
 
-6. 🟡 **Consumir `god.plan`** ✅ (`_plan_callback` → `create_arc` + `save_arc`) e
-   **`god.scene`** ✅ (`_scene_callback` grava `scene_draft`/`scene_subtext` no beat).
-   **`god.cast`** (spawn de NPC) e **`god.background`** ainda pendentes.
-7. ❌ **`god.puppeteer` de verdade**: spawn/`VisitSituation`, abordagem, injeção e
-   ramificação pós-reação (depende do Mod / validação in-game).
-8. 🟡 **`sim.diary`** ✅ e **`mem.compact`** ✅ (gatilho + VACUUM) com handlers.
+### P1 — Complete God Director and World Layer (partial)
+
+6. 🟡 **Consume `god.plan`** ✅ (`_plan_callback` → `create_arc` + `save_arc`) and
+   **`god.scene`** ✅ (`_scene_callback` writes `scene_draft`/`scene_subtext` to the beat).
+   **`god.cast`** (NPC spawn) and **`god.background`** still pending.
+7. ❌ **Real `god.puppeteer`**: spawn/`VisitSituation`, approach, injection, and
+   post-reaction branching (depends on the Mod / in-game validation).
+8. 🟡 **`sim.diary`** ✅ and **`mem.compact`** ✅ (trigger + VACUUM) with handlers.
    **`sim.social.close`, `mem.legacy`, `mem.relationship.review`, `ops.panel.summary`**
-   ainda pendentes.
-9. ❌ **`BackgroundScheduler`** com prioridade `PLAYER > HOUSEHOLD > ACTIVE > RELATED`.
-10. 🟡 **Crônica da família** ✅ (`_maybe_end_of_day` → `append_chronicle`).
-    **Caixa de Correio** in-game e **`world.aftermath`** pendentes.
+   still pending.
+9. ❌ **`BackgroundScheduler`** with priority `PLAYER > HOUSEHOLD > ACTIVE > RELATED`.
+10. 🟡 **Family chronicle** ✅ (`_maybe_end_of_day` → `append_chronicle`).
+    In-game **Mailbox** and **`world.aftermath`** pending.
 
-### P2 — Hooks nativos (M5/M6) — pendente (exige validação in-game)
+### P2 — Native hooks (M5/M6) — pending (requires in-game validation)
 
-11. `VisitSituation` (NPC catalisador pela calçada/campainha).
-12. Diário com *TooltipComponent* + interação **"Bisbilhotar"**; Livro de Autobiografia.
-13. `sim_GetToKnow` revelando `secrets[]`/`background`.
-14. Epitáfio na Lápide; balões de sono; interação custom "Refletir" no Espelho (A8).
+11. `VisitSituation` (catalyst NPC via the sidewalk/doorbell).
+12. Diary with *TooltipComponent* + **"Snoop"** interaction; Autobiography Book.
+13. `sim_GetToKnow` revealing `secrets[]`/`background`.
+14. Tombstone Epitaph; sleep balloons; custom "Reflect" interaction on the Mirror (A8).
 
-### P3 — LLM, Config & Observabilidade — ✅ CONCLUÍDO
+### P3 — LLM, Config & Observability — ✅ DONE
 
-15. ✅ Cooldown por modelo 120 s em `chain.py` (`_record_failure` por `(provider, model)`).
-16. ✅ Enforcement de concorrência por tier no `LLMScheduler` (semáforo não bloqueante;
-    excesso degrada para o fallback determinístico).
-17. ✅ Refund assimétrico corrigido: debita no envio; estorna apenas o Game Budget na
-    falha e liquida com o uso real no sucesso.
-18. ✅ `installed_packs` no Census → `AppState.installed_packs` + exposto em `/v1/status`
-    (base para os guards de EP).
-19. ✅ `trace_id` propagado para os jobs `bg`/`deep` (`set_trace_id` no worker).
-20. ✅ VACUUM após `mem.compact` (A9), chamado a cada 20 consolidadas.
+15. ✅ Per-model 120 s cooldown in `chain.py` (`_record_failure` per `(provider, model)`).
+16. ✅ Per-tier concurrency enforcement in `LLMScheduler` (non-blocking semaphore; excess
+    degrades to the deterministic fallback).
+17. ✅ Asymmetric refund fixed: debit on send; refund only the Game Budget on failure and
+    settle with actual usage on success.
+18. ✅ `installed_packs` in the Census → `AppState.installed_packs` + exposed in `/v1/status`
+    (basis for EP guards).
+19. ✅ `trace_id` propagated to `bg`/`deep` jobs (`set_trace_id` in the worker).
+20. ✅ VACUUM after `mem.compact` (A9), called every 20 consolidated memories.
 
-### P4 — UI, Release & Backlog — pendente
+### P4 — UI, Release & Backlog — pending
 
-21. Web Studio: persistir perfil/keys/casting/beats (hoje o backend ignora).
-22. `/v1/i18n/compile-addon` real (gerar `Sensewright_Locale_<code>.package`).
-23. Panic Button (FC4), Onboarding Wizard (FC1), Dashboard de custo (FC3).
-24. **M8 in-game**: transição de lote, *Save As*, *Alt+F4* rollback, autoboot invisível.
-25. Export/Import de Sim (FC2) e camada de compatibilidade (FC5).
-
----
-
-## 8. Notas de higiene do repositório
-
-- `sidecar/python.txt` é um arquivo de configuração **local** (aponta para o interpretador
-  3.10+ do usuário). Foi adicionado ao `.gitignore` e removido do índice para não
-  versionar caminhos absolutos de máquina; crie-o manualmente após o clone.
-- `research/s4cl/` e `research/lot51_core/` são clones de referência e permanecem
-  ignorados (não redistribuídos).
+21. Web Studio: persist profile/keys/casting/beats (the backend ignores them today).
+22. Real `/v1/i18n/compile-addon` (generate `Sensewright_Locale_<code>.package`).
+23. Panic Button (FC4), Onboarding Wizard (FC1), cost dashboard (FC3).
+24. **M8 in-game**: lot transition, *Save As*, *Alt+F4* rollback, invisible autoboot.
+25. Sim Export/Import (FC2) and compatibility layer (FC5).
 
 ---
 
-## 9. Changelog de implementação (2026-10-02)
+## 8. Repository hygiene notes
 
-Ondas P0, P3 e parte de P1 implementadas e cobertas por testes. Nenhuma alteração de
-schema; o Wire HTTP permanece compatível.
+- `sidecar/python.txt` is a **local** configuration file (points to the user's 3.10+
+  interpreter). It is listed in `.gitignore` so machine-absolute paths are not versioned;
+  if present in the working tree it is ignored by Git. Create it manually after cloning.
+- `research/s4cl/` and `research/lot51_core/` are reference clones and remain ignored (not
+  redistributed).
 
-### Novos módulos (sidecar)
+---
 
-- `agent/sleep.py` — detecção de bordas `sleep_start`/`wake` (P07-P09).
-- `agent/speech.py` — política de fala (linhas/min + intervalo mínimo) (F11).
-- `agent/profile.enforce_life_story` — limite de Life Story (REQ-PSY-03).
+## 9. Implementation changelog (2026-10-02)
 
-### Fiação principal (`services.py`)
+Waves P0, P3, and part of P1 implemented and covered by tests. No schema change; the HTTP
+wire remains compatible.
 
-- `_process_sleep_transitions` / `_on_sleep_start` / `_on_wake`: dispara
-  `sim.dream` → `sim.cognition` (`apply_cognition`) e, no despertar, `sim.sleep` +
-  `evo.reflect` (`apply_reflection`); aplica decay de psique.
-- `_maybe_end_of_day`: crônica da família + diário do Sim ativo (P23/P10).
-- `_create_rumor_from_event` / `_spread_rumor`: gossip e contágio (P24).
-- `_impulse_callback` passa a respeitar `physical_actions_allowed` (REQ-IMP-03);
-  o gate de `sim.social` respeita a speech policy e o CHILD hard-block.
-- `_maybe_compact` + `SqliteStore.consolidated_memory_ids`: compactação e VACUUM (P27/A9).
-- `handle_census` guarda `installed_packs`; `/v1/status` os expõe (A10).
+### New modules (sidecar)
+
+- `agent/sleep.py` — `sleep_start`/`wake` edge detection (P07-P09).
+- `agent/speech.py` — speech policy (lines/min + minimum interval) (F11).
+- `agent/profile.enforce_life_story` — Life Story limit (REQ-PSY-03).
+
+### Main wiring (`services.py`)
+
+- `_process_sleep_transitions` / `_on_sleep_start` / `_on_wake`: fires
+  `sim.dream` → `sim.cognition` (`apply_cognition`) and, on wake, `sim.sleep` +
+  `evo.reflect` (`apply_reflection`); applies psyche decay.
+- `_maybe_end_of_day`: family chronicle + active Sim diary (P23/P10).
+- `_create_rumor_from_event` / `_spread_rumor`: gossip and contagion (P24).
+- `_impulse_callback` now respects `physical_actions_allowed` (REQ-IMP-03);
+  the `sim.social` gate respects the speech policy and the CHILD hard-block.
+- `_maybe_compact` + `SqliteStore.consolidated_memory_ids`: compaction and VACUUM (P27/A9).
+- `handle_census` stores `installed_packs`; `/v1/status` exposes them (A10).
 
 ### God Director (`god/orchestrator.py`)
 
-- `_plan_callback` cria/persiste o arco (`god.plan`, P15).
-- `_scene_callback` grava `scene_draft`/`scene_subtext` no beat armado (`god.scene`, P17).
+- `_plan_callback` creates/persists the arc (`god.plan`, P15).
+- `_scene_callback` writes `scene_draft`/`scene_subtext` to the armed beat (`god.scene`, P17).
 
 ### LLM (`llm/`)
 
-- `chain.py`: cooldown por modelo (120 s) efetivamente aplicado.
-- `scheduler.py`: concorrência por tier (semáforo não bloqueante), refund assimétrico
-  correto e `trace_id` nos jobs `bg`/`deep`.
-- `sqlite_store.py`: `consolidated_memory_ids`; `vacuum()` agora é chamado.
+- `chain.py`: per-model cooldown (120 s) effectively enforced.
+- `scheduler.py`: per-tier concurrency (non-blocking semaphore), correct asymmetric refund,
+  and `trace_id` on `bg`/`deep` jobs.
+- `sqlite_store.py`: `consolidated_memory_ids`; `vacuum()` is now called.
 
 ### Mod (`mod/sensewright_mod/tool_executor.py`)
 
-- `world.gossip` passa a exibir o rumor como notificação diegética (SMS/fofoca).
+- `world.gossip` now displays the rumor as a diegetic notification (SMS/gossip).
 
-### Testes
+### Tests
 
-- `sidecar/tests/test_p0_lifecycle.py` (19 testes), `test_p3_resilience.py` (8) e
-  `test_p1_god_world.py` (7) → **508 testes verdes**.
-- Verificação: `python -m pytest -q` (508), `py -3.7 -m py_compile` no Mod,
-  `python mod/build.py` (69.683 bytes) e `python mod/build_package.py` (25 recursos).
+- `sidecar/tests/test_p0_lifecycle.py` (19 tests), `test_p3_resilience.py` (8), and
+  `test_p1_god_world.py` (7) → **508 green tests**.
+- Verification: `python -m pytest -q` (508), `py -3.7 -m py_compile` on the Mod,
+  `python mod/build.py` (69,683 bytes), and `python mod/build_package.py` (25 resources).
 
-### Ainda pendente
+### Still pending
 
-P1 residual (`god.cast`/`god.react`/`god.puppeteer` completo, `BackgroundScheduler`,
-`world.aftermath`, mailbox, `ops.panel.summary`, `mem.legacy`,
-`mem.relationship.review`, `sim.social.close`), P2 (hooks nativos — exige TS4) e
-P4 (Web Studio, compile-addon, M8 in-game, FC2/FC5).
+P1 residual (complete `god.puppeteer`, `BackgroundScheduler`, `world.aftermath`,
+`ops.panel.summary`, `mem.relationship.review`, `sim.social.close`), the remaining P2 hooks
+(`sim_GetToKnow`, Autobiography Book, Tombstone Epitaph) and P4 (Web Studio, compile-addon,
+M8 in-game, FC2/FC5).
+
+---
+
+## 10. Implementation changelog — P2/P3 wave (2026-10-02)
+
+Wired the Mod event sources / God Director contracts and the tangible UI hooks. All Mod
+hooks are coded **blind** and must be validated in-game (Phase 5); the sidecar side is
+covered by tests. No schema change; the HTTP wire remains additive and compatible.
+
+### Sidecar
+
+- `schemas.INTENT_KINDS` / `agent.intents.PHYSICAL_KINDS`: new `spawn_npc` kind (2.4).
+- `services.handle_event`: lifecycle categories (`death`/`marriage`/`birth`, from
+  `constants.LEGACY_CATEGORIES`) now fire `mem.legacy` synchronously → decay-immune
+  `legacy` memory + `sim.lifestory` chapter (2.1/1.8, P28/P11).
+- `god/cast.py` (new): `run_cast` reuses a compatible non-player townie or emits a
+  `spawn_npc` intent; integrated into `god_tick` (1.1, P16).
+- `god/react.py` (new) + `POST /v1/god/beat-ended`: `run_react` / `apply_react` fold the
+  agent's accept/reject/fight decision, insert a `next_beat`, `advance_arc`, and mark
+  `ARC_DONE` (1.2/2.9, P19).
+- `GET|POST /v1/world/neighborhood`: chronicles + zeitgeist + a Sim's known rumors (3.9).
+- `GET|POST /v1/memory/diary`: latest saved diary entry for the Tooltip/Snoop (3.4).
+- `god_tick` now receives `active_sim_id` so casting targets the active Sim.
+
+### Mod (`mod/sensewright_mod/`, Python 3.7)
+
+- `lifecycle_hooks.py` (new): S4CL `S4CLSimDiedEvent`, `S4CLSimPregnancyEndedEvent`
+  (birth) and relationship-bit marriage detection → `post_events` (2.1).
+- `visit_situation.py` (new) + `spawn_npc` handler in `tool_executor.py`: picks/creates a
+  townie, spawns them via S4CL, starts the custom/native VisitSituation and routes them to
+  the target (2.4/3.3).
+- `catalyst_tracker.py` (new): detects conversation end across autonomy pulses and posts
+  `/v1/god/beat-ended` with an inferred decision (2.9).
+- `object_interactions.py` (new): mirror "Reflect" (`/v1/evolve`, A8/3.2), diary read +
+  "Snoop" (`/v1/memory/diary`, 3.4), mailbox "Neighborhood Stories"
+  (`/v1/world/neighborhood`, 3.9); diary TooltipComponent injection (best-effort).
+- `native_hooks.apply_dream_buff`: injects `dream_narrative` as the buff reason + best-effort
+  sleep balloon (3.8).
+- New tuning XML: `sw_mirror_reflect_interaction`, `sw_diary_read_interaction`,
+  `sw_diary_snoop_interaction`, `sw_mailbox_interaction`, `sw_visit_situation` (situation),
+  `sw_diary_object` (object).
+- `build_package.py`: `object` (0xB61DE6B4) and `situation` (0xFBC3AEEB) tuning types (3.1).
+- New UI/STBL keys (en-US + pt-BR): `pie_menu.diary_read/diary_snoop/mailbox` and
+  `notify.mirror.*`, `notify.diary.*`, `notify.mailbox.*`.
+
+### Tests
+
+- `sidecar/tests/test_p2_infra.py` (15 tests): `spawn_npc` contract, `run_cast` reuse/spawn,
+  lifecycle legacy memory + life story, `apply_react` beat insertion/`ARC_DONE`,
+  `handle_beat_ended`, neighborhood/diary handlers and routes → **523 green tests**.
+- Verification: `python -m pytest -q` (523), `py -3.7 -m py_compile` on the Mod (20 files),
+  `python mod/build_package.py` (31 resources), `python mod/build.py` (83,139 bytes).

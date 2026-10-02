@@ -14,14 +14,14 @@ from sensewright_mod.debug_log import log_error, log_exception, log_warn
 # Intent kinds
 INTENT_KINDS = frozenset([
     'speak', 'approach', 'set_mood', 'bias_interaction',
-    'prefer_target', 'set_goal', 'remember', 'forget', 'command'
+    'prefer_target', 'set_goal', 'remember', 'forget', 'command', 'spawn_npc'
 ])
 
 # Expiration types
 EXPIRES_ON_TYPES = frozenset(['ttl', 'next_sleep', 'zone_transition'])
 
 # Physical/social intent kinds that have short TTL
-PHYSICAL_SOCIAL_KINDS = frozenset(['speak', 'approach', 'command'])
+PHYSICAL_SOCIAL_KINDS = frozenset(['speak', 'approach', 'command', 'spawn_npc'])
 
 # Cognitive intent kinds that expire on sleep
 COGNITIVE_KINDS = frozenset(['bias_interaction', 'prefer_target', 'set_goal', 'remember', 'forget'])

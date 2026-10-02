@@ -18,9 +18,11 @@ _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 CHANNELS = ("phone_sms", "pc_chat", "pc_email")
 
 #: Canonical Intent kinds (no legacy `name`/`args` fields).
+#: ``spawn_npc`` is the God Director's catalyst-invocation lever (2.4): the Mod
+#: instantiates a townie/visitor and starts the native VisitSituation.
 INTENT_KINDS = (
     "speak", "approach", "set_mood", "bias_interaction", "prefer_target",
-    "set_goal", "remember", "forget", "command",
+    "set_goal", "remember", "forget", "command", "spawn_npc",
 )
 
 #: Canonical Intent sources.

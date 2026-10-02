@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sensewright diary object definition (3.4). A base GameObject that exposes the
+     diary read/snoop interactions. Blind implementation: the interactions are
+     also attached to the base-game diary/journal by object_interactions.py, so
+     the feature works even if this definition needs tuning in Phase 5. -->
+<I c="GameObject" i="object" m="objects.game_object" n="sw_diary_object" s="0">
+  <L n="_super_affordances">
+    <T>swtune:sw_diary_read_interaction</T>
+    <T>swtune:sw_diary_snoop_interaction</T>
+  </L>
+</I>

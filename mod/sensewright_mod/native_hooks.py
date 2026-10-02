@@ -16,7 +16,7 @@ from sims4communitylib.enums.common_age import CommonAge
 from sims4communitylib.enums.common_gender import CommonGender
 from sims4communitylib.enums.common_species import CommonSpecies
 
-from sensewright_mod.debug_log import log_error, log_exception, log_info, log_warn, safe_call
+from sensewright_mod.debug_log import log_debug, log_error, log_exception, log_info, log_warn, safe_call
 
 
 # Global state
@@ -209,8 +209,43 @@ def has_buff(sim_info, buff_id):
         return False
 
 
+def _request_balloon(sim_info, text):
+    """Best-effort thought balloon during sleep (3.8).
+
+    The engine exposes no stable public balloon API, so try the per-Sim balloon
+    methods when present and otherwise rely on the buff reason (which already
+    carries the narrative). Never raises.
+    """
+    if not text:
+        return False
+    sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
+    if sim is None:
+        return False
+    for method_name in ('show_thought_balloon', 'show_speech_balloon'):
+        method = _safe_getattr(sim, method_name, None)
+        if callable(method):
+            try:
+                method(text)
+                return True
+            except Exception:
+                continue
+    # Native balloon request path (varies across game builds).
+    try:
+        from balloons.balloon_request import BalloonRequest
+        request = BalloonRequest(sim_info, text)
+        request.send()
+        return True
+    except Exception:
+        return False
+
+
 def apply_dream_buff(sim_info, archetype, dream_narrative):
-    """Apply the appropriate dream buff with narrative in tooltip token."""
+    """Apply the dream buff and surface the narrative in the moodlet (3.8).
+
+    The narrative is passed as the buff's ``buff_reason`` (TS4 appends it to the
+    moodlet tooltip) and a best-effort sleep balloon is requested. S4CL owns the
+    supported buff path, so this never raises.
+    """
     buff_map = {
         'epiphany': _BUFF_DREAM_EPIPHANY,
         'surreal': _BUFF_DREAM_SURREAL,
@@ -218,19 +253,32 @@ def apply_dream_buff(sim_info, archetype, dream_narrative):
         'nightmare': _BUFF_DREAM_NIGHTMARE
     }
 
-    buff_id = buff_map.get(archetype.lower())
+    buff_id = buff_map.get((archetype or '').lower())
     if buff_id == 0:
         log_warn('Unknown dream archetype: {}'.format(archetype))
         return False
 
-    # S4CL's add_buff takes no tokens/duration; the dream narrative is carried
-    # through the buff's tuned tooltip when a matching buff is registered.
+    applied = False
     try:
-        CommonBuffUtils.add_buff(sim_info, buff_id)
-        return True
+        # Newer S4CL accepts buff_reason; the dream narrative lands in the tooltip.
+        result = CommonBuffUtils.add_buff(sim_info, buff_id, buff_reason=dream_narrative or None)
+        applied = result if isinstance(result, bool) else bool(getattr(result, 'result', True))
+    except TypeError:
+        # Older S4CL signature without buff_reason.
+        try:
+            CommonBuffUtils.add_buff(sim_info, buff_id)
+            applied = True
+        except Exception as e:
+            log_exception('Failed to apply dream buff: {}'.format(e))
+            return False
     except Exception as e:
         log_exception('Failed to apply dream buff: {}'.format(e))
         return False
+
+    if dream_narrative:
+        if not _request_balloon(sim_info, dream_narrative):
+            log_debug('dream balloon API unavailable; narrative carried by the buff reason')
+    return applied
 
 
 def add_relationship_bit(sim_info, target_sim_info, bit_id):

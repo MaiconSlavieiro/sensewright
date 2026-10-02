@@ -19,7 +19,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PACKAGE = REPO_ROOT / "mod" / "dist" / "Sensewright.package"
 
 TYPE_STBL = 0x220557DA
-TUNING_TYPES = {0x6017E896, 0xCB5FDDC7, 0x7DF2169C, 0xE882D22F, 0x03E9D964, 0x545AC67A}
+TUNING_TYPES = {
+    0x6017E896, 0xCB5FDDC7, 0x7DF2169C, 0xE882D22F, 0x03E9D964, 0x545AC67A,
+    0xB61DE6B4, 0xFBC3AEEB,
+}
 
 _S_RE = re.compile(r'<I\b[^>]*\bs="(\d+)"')
 

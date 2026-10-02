@@ -267,7 +267,7 @@ class TestConstants:
     def test_intent_kinds(self):
         expected = (
             "speak", "approach", "set_mood", "bias_interaction", "prefer_target",
-            "set_goal", "remember", "forget", "command",
+            "set_goal", "remember", "forget", "command", "spawn_npc",
         )
         assert INTENT_KINDS == expected
 

@@ -45,11 +45,16 @@ def test_every_tuning_reference_resolves():
 
 def test_interactions_use_real_binding_modules():
     """Interaction/pie-category tunings must bind to real Python modules."""
-    expected_module = {
-        "buff": "buffs.buff",
-        "trait": "traits.traits",
-        "interaction": "sensewright_mod.interactions",
-        "pie_menu_category": "interactions.pie_menu_category",
+    expected_modules = {
+        "buff": ("buffs.buff",),
+        "trait": ("traits.traits",),
+        "interaction": (
+            "sensewright_mod.interactions",
+            "sensewright_mod.object_interactions",
+        ),
+        "pie_menu_category": ("interactions.pie_menu_category",),
+        "object": ("objects.game_object",),
+        "situation": ("sensewright_mod.visit_situation",),
     }
     for path in _xml_files():
         text = path.read_text(encoding="utf-8")
@@ -59,7 +64,7 @@ def test_interactions_use_real_binding_modules():
             continue
         kind = kind_match.group(1)
         module = module_match.group(1)
-        if kind in expected_module:
-            assert module == expected_module[kind], "{}: {} tuning binds to {}".format(
+        if kind in expected_modules:
+            assert module in expected_modules[kind], "{}: {} tuning binds to {}".format(
                 path.name, kind, module
             )

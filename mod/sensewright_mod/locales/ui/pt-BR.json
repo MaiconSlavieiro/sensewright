@@ -44,7 +44,10 @@
     "buff.bias_family.name": "Coração de Família",
     "buff.bias_family.desc": "Vontade de cuidar da família.",
     "buff.bias_geek.name": "Modo Geek",
-    "buff.bias_geek.desc": "Atração por tecnologia e ciência."
+    "buff.bias_geek.desc": "Atração por tecnologia e ciência.",
+    "pie_menu.diary_read": "Ler Diário...",
+    "pie_menu.diary_snoop": "Xeretar o Diário...",
+    "pie_menu.mailbox": "Histórias da Vizinhança..."
   },
   "notify": {
     "recap": {
@@ -75,6 +78,19 @@
     "paused": {
       "title": "Sensewright pausado",
       "body": "Abra o Menu Rápido para retomar."
+    },
+    "mirror": {
+      "reflect_title": "Um Momento de Reflexão",
+      "reflect_body": "Você para e olha para dentro. Algo se encaixa."
+    },
+    "diary": {
+      "read_title": "Seu Diário",
+      "snoop_title": "Diário de Alguém",
+      "empty": "As páginas ainda estão em branco."
+    },
+    "mailbox": {
+      "title": "Histórias da Vizinhança",
+      "empty": "Ainda não há histórias na vizinhança."
     }
   },
   "studio": {

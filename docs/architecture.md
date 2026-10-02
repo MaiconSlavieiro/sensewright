@@ -186,7 +186,7 @@ No external vector DB or embedding model required.
   "id": "hex-uuid",
   "trace_id": "tr_9a8f12",
   "sim_id": 12345,
-  "kind": "speak | approach | set_mood | bias_interaction | prefer_target | set_goal | remember | forget | command",
+  "kind": "speak | approach | set_mood | bias_interaction | prefer_target | set_goal | remember | forget | command | spawn_npc",
   "target_sim_id": 67890,
   "params": {"text": "...", "tone": "friendly", "archetype": "..."},
   "thought": "...",
@@ -494,6 +494,9 @@ Neighborhood-level thematic tags (`zeitgeist.tags[]`) influence:
 | `/v1/god/tick` | POST | God Director tick → directives, active arc, catalyst leases |
 | `/v1/god/direct-scene` | POST | Manual scene direction (sandbox/co-director) |
 | `/v1/god/arc/steer` | POST | Player steers arc: approve/skip/rewrite/abort beat |
+| `/v1/god/beat-ended` | POST | Catalyst conversation ended → `god.react` branches/advances the arc |
+| `/v1/world/neighborhood` | GET/POST | Chronicles + zeitgeist + a Sim's known rumors (Mailbox) |
+| `/v1/memory/diary` | GET/POST | Latest saved diary entry (Diary Tooltip / Snoop) |
 | `/v1/god/controls` | GET/POST | Read/write God dials & mode |
 | `/v1/god/zeitgeist` | POST | Set neighborhood zeitgeist from player text |
 | `/v1/agency/seats` | GET/POST | SeatManager status / set seat count |
@@ -576,16 +579,37 @@ Native TS4 execution (interactions, buffs, moodlets, sentiments, mailbox, etc.)
 For the precise, up-to-date gap analysis (per milestone, feature, and purpose, with
 `file:line` evidence), see **[`docs/status.md`](status.md)**. In summary:
 
-- **Engine-built but unwired:** `sim.dream`, `sim.cognition`, `evo.reflect`, `evo.trait`,
-  `god.plan`, `god.puppeteer`, `mem.consolidate`, `ops.recap`.
-- **Fallback-only:** 18 of the 33 purposes have no production trigger yet.
+- **Wired and operational (P0/P3 waves):** `sim.dream`, `sim.cognition`, `evo.reflect`,
+  `god.plan`, `god.scene`, `god.narration`, `world.gossip`, `sim.diary`,
+  `mem.compact`. Per-model cooldown, tier concurrency, asymmetric refund, and
+  `trace_id` propagation to `bg`/`deep` are now enforced.
+- **Partially wired (trigger exists, application incomplete):** `god.puppeteer` (lease
+  only, no spawn/approach), `sim.social.close` (no handler), `ops.recap` (result
+  discarded), `evo.trait` (helpers ready, no emission).
+- **Fallback-only:** 12 of the 33 purposes have no production trigger yet (e.g.,
+  `god.cast`, `god.react`, `god.background`, `world.aftermath`, `mem.legacy`,
+  `mem.relationship.review`, `ops.panel.summary`).
 - **Native object coupling (M5/M6):** `VisitSituation`, Diary/Snoop, Autobiography Book,
   `sim_GetToKnow`, epitaph, sleep balloons, and the custom Mirror interaction are pending.
-- **LLM/config:** per-model cooldown is dead code, tier concurrency is not enforced, and
-  the asymmetric budget refund is logically a no-op.
 - **Sidecar `/v1/i18n/compile-addon`** is a stub; STBL compilation currently lives only in
   `mod/build_package.py`.
 - In-game acceptance criteria (zone transition, Save As, Alt+F4 rollback, invisible
   autoboot) remain unvalidated outside unit tests.
 - S4CL / Lot 51 Core integration points are exercised against pinned reference clones;
   actual game-build versions may differ.
+
+---
+
+## 14. Dual UI — Quick Menu & Web Studio
+
+| UI | Access | Purpose |
+|----|--------|---------|
+| **Quick Menu (Pie)** | Click any Sim → Sensewright | Chat (Phone/PC), Provoke, Panel, Director controls |
+| **Quick Menu (Shift+Click)** | Shift+Click any Sim → Sensewright | Advanced: Profile, Memory, Seat, God controls |
+| **Web Studio — Inspector** | `http://127.0.0.1:8765/ui` → Inspector | Live sim state, intent bus, memory, psyche, relationships |
+| **Web Studio — Script Room** | `http://127.0.0.1:8765/ui` → Script Room | God Director controls, arc/beat editor, scene direction |
+| **Web Studio — Setup** | `http://127.0.0.1:8765/ui` → Setup | Config editor, provider status, locale manager, STBL compiler |
+
+The Web Studio SPA is served by `sidecar/sensewright_sidecar/webui/` (`GET /ui`); its REST
+backing endpoints are listed in §9. The in-game Quick Menu is the Mod-side `panel_ui.py` /
+`pie_menu.py`.

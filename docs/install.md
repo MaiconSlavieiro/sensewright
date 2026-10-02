@@ -139,6 +139,75 @@ The mod's worker thread can auto-launch the sidecar when the game starts.
 
 **macOS Note**: Autoboot uses `subprocess.Popen` with default flags. Test manually first with `python main.py`.
 
+### 4.4 Full Configuration Reference (Two-Layer `config.toml`)
+
+The reference template lives at [`sidecar/config.example.toml`](../sidecar/config.example.toml).
+
+**Layer 1 — Providers & Technical Limits** (`[llm.providers.*]`)
+```toml
+[llm.providers.openrouter]
+enabled = true
+base_url = "https://openrouter.ai/api/v1"
+api_key = "sk-..."
+models = ["openai/gpt-4o-mini", "meta-llama/llama-3.1-8b-instruct:free"]
+rpm = 20        # requests/minute
+rpd = 200       # requests/day
+tpm = 40000     # tokens/minute
+```
+Supported providers: `openrouter`, `gemini`, `groq`, `deepseek`, `ollama`. Set `free_only = true` to block paid models client-side.
+
+**Layer 2 — Routing & Budgets** (`[llm.routes.*]`, `[llm.tiers.*]`)
+```toml
+[llm.routes.default]
+provider = "openrouter"
+model = "openai/gpt-4o-mini"
+
+[llm.tiers.interactive]
+slo_seconds = 3.0
+max_input_tokens = 1500
+max_output_tokens = 250
+concurrency = 4
+
+[llm.tiers.realtime]
+slo_seconds = 12.0
+max_input_tokens = 700
+max_output_tokens = 220
+concurrency = 2
+thinking_budget = 0
+
+[llm.tiers.bg]
+slo_seconds = 60.0
+max_input_tokens = 1500
+max_output_tokens = 400
+concurrency = 1
+
+[llm.tiers.deep]
+slo_seconds = 300.0
+max_input_tokens = 4000
+max_output_tokens = 600
+concurrency = 1
+```
+
+**Gameplay Tunables** (`[gameplay]`, `[god]`) — editable in-game via Quick Menu / Web Studio:
+```toml
+[gameplay]
+agent_seats = 12
+lease_min_sim_minutes = 60
+hearing_radius_m = 20.0
+max_lines_per_minute = 12
+min_interval_between_lines_seconds = 30
+player_lock_seconds = 15
+
+[god]
+director_mode = "AUTONOMOUS"   # AUTONOMOUS | CO_DIRECTOR | SANDBOX
+preset = "novela"              # novela|sitcom|drama|caos|terror|romance|filme_adolescente
+intervention_frequency = 0.5
+intensity = 0.5
+mood_influence = 0.5
+autonomy_degree = 0.5
+chaos_degree = 0.5
+```
+
 ---
 
 ## 5. Verify Installation

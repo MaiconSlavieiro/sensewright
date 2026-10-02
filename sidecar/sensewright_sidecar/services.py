@@ -14,7 +14,7 @@ from .agent import (
     SeatManager, apply_cognition, apply_reflection, build_chat_context,
     build_cognition_context, build_dream_context, build_impulse_context,
     build_reaction_context, build_reflect_context, compute_salience, decay_blocks,
-    extract_thought, hard_blocked_social, is_deferred, is_salient,
+    enforce_life_story, extract_thought, hard_blocked_social, is_deferred, is_salient,
     normalize_intent, normalize_profile, physical_actions_allowed, preflight,
     record_speech, reinforce_block, resolve_limits, sleep_transition,
     speech_allowed, strip_thought, trust_delta,
@@ -22,18 +22,20 @@ from .agent import (
 from .agent.psyche import block_for_category
 from .agent.social import build_social_context, has_rumor_to_spread
 from .constants import (
-    COMPACT_ARCHIVE_COUNT, CONSOLIDATED_COMPACT_THRESHOLD, TICKS_PER_SIM_DAY,
+    COMPACT_ARCHIVE_COUNT, CONSOLIDATED_COMPACT_THRESHOLD, LEGACY_CATEGORIES,
+    TICKS_PER_SIM_DAY,
 )
 from .fallbacks import render_fallback
 from .god import (
-    current_beat, current_zeitgeist, direct_scene as god_direct_scene, get_controls,
+    beat_ended as god_beat_ended, current_beat, current_zeitgeist,
+    direct_scene as god_direct_scene, get_controls,
     god_tick as god_tick_handler, resolve_dial, run_zeitgeist, set_control,
     steer as god_steer,
 )
 from .observability.logging import get_logger
 from .schemas import normalize_lang, sanitize_payload
 from .state import AppState, get_state
-from .world.chronicle import append_chronicle
+from .world.chronicle import append_chronicle, get_chronicles
 from .world.rumors import (
     create_rumor, get_rumors, rumors_known_by, save_rumors, spread,
 )
@@ -620,7 +622,7 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # God Director: plans/zeitgeist are already submitted in the background;
     # narration is scheduled asynchronously inside god_tick.
-    god_result = god_tick_handler(state, save_id, tick, lang)
+    god_result = god_tick_handler(state, save_id, tick, lang, active_sim_id=active_sim_id)
     for directive in god_result.get("directives", []):
         intents.append(normalize_intent({
             "sim_id": active_sim_id or 0,
@@ -791,6 +793,52 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ── events ───────────────────────────────────────────────────────────────
+def _handle_legacy_event(
+    state: AppState,
+    sim_id: int,
+    category: str,
+    target_sim_id: Optional[int],
+    tick: int,
+    lang: str,
+    trace_id,
+) -> None:
+    """Fire ``mem.legacy`` (+ ``sim.lifestory``) for a lifecycle event (P28/P11).
+
+    Runs synchronously (like ``sim.reaction``) so the legacy memory is durable
+    before the request returns and no background closure outlives the session.
+    """
+    store = _store(state)
+    if store is None or not sim_id:
+        return
+    sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
+    target = state.get_census(int(target_sim_id or 0)) or {}
+    ctx = {
+        "sim_id": sim_id, "sim_name": sim.get("name", ""),
+        "event_category": category,
+        "target_sim_id": int(target_sim_id or 0), "target_name": target.get("name", ""),
+        "world_sim_tick": int(tick),
+    }
+    result = state.scheduler.run_purpose("mem.legacy", ctx, lang, trace_id=trace_id)
+    text = (result.data or {}).get("legacy", "")
+    if text:
+        store.add_memory(
+            sim_id, "legacy",
+            {"text": text, "category": category, "target_sim_id": int(target_sim_id or 0)},
+            search_text=text, created_sim_tick=int(tick),
+        )
+
+    # A legacy event also appends a life-story chapter (kept within the budget).
+    story_result = state.scheduler.run_purpose("sim.lifestory", ctx, lang, trace_id=trace_id)
+    line = (story_result.data or {}).get("life_story") or (story_result.data or {}).get("chapter") or ""
+    if line:
+        profile = _sim_profile(state, sim_id)
+        story = list(profile.get("life_story") or [])
+        story.append(str(line))
+        profile["life_story"] = enforce_life_story(story)
+        _persist_profile(state, sim_id, profile, int(tick))
+    logger.info("lifecycle %s event -> mem.legacy sim=%s", category, sim_id)
+
+
 def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
@@ -798,10 +846,19 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     category = payload.get("event_category", "mundane")
     impact = float(payload.get("impact", 0.0))
     tick = int(payload.get("world_sim_tick", 0))
+    trace_id = payload.get("trace_id")
+    target_id = payload.get("target_sim_id")
     salience = compute_salience(category, impact)
 
     triggered_jobs = []
     store = _store(state)
+
+    # Lifecycle events (2.1) produce a decay-immune legacy memory (P28) and a
+    # life-story chapter, regardless of the salience threshold.
+    if category in LEGACY_CATEGORIES:
+        _handle_legacy_event(state, sim_id, category, target_id, tick, lang, trace_id)
+        triggered_jobs.append("mem.legacy")
+
     if is_salient(category, impact):
         # Reinforce a psyche block and mark the sim for sleep consolidation.
         state.salient_since_sleep[sim_id] = True
@@ -815,7 +872,6 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
             store.upsert_sim_profile(sim_id, profile, tick)
         # Trigger a reaction (speak intent at the causer).
         sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
-        target_id = payload.get("target_sim_id")
         target = state.get_census(int(target_id or 0)) or {"name": ""}
         ctx = build_reaction_context(
             sim_id, sim.get("name", ""), target_id, target.get("name", ""),
@@ -974,10 +1030,69 @@ def handle_arc_steer(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def handle_beat_ended(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle /v1/god/beat-ended: branch the arc after a catalyst interaction (2.9/P19)."""
+    state = get_state()
+    lang = normalize_lang(payload.get("lang"))
+    return god_beat_ended(
+        state,
+        int(payload.get("save_id", 0)),
+        int(payload.get("world_sim_tick", 0)),
+        payload.get("decision", "ignore"),
+        payload.get("agent_sim_id"),
+        lang,
+    )
+
+
 def handle_zeitgeist(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
     return run_zeitgeist(state, int(payload.get("save_id", 0)), payload.get("zeitgeist_text", ""), lang)
+
+
+# ── diary (3.4) ──────────────────────────────────────────────────────────
+def handle_diary_get(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a Sim's most recent saved diary entry (for the Diary Tooltip/Snoop)."""
+    state = get_state()
+    sim_id = int(payload.get("sim_id", 0))
+    store = _store(state)
+    if store is None or not sim_id:
+        return {"ok": True, "sim_id": sim_id, "entry": ""}
+    for memory in store.recent_memories(sim_id, limit=50):
+        if memory.get("type") != "diary":
+            continue
+        content = memory.get("content") or {}
+        entry = content.get("text", "") if isinstance(content, dict) else str(content)
+        if entry:
+            return {"ok": True, "sim_id": sim_id, "entry": entry}
+    return {"ok": True, "sim_id": sim_id, "entry": ""}
+
+
+# ── world / mailbox (P23 / P24 / 3.9) ────────────────────────────────────
+def handle_neighborhood(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the save's chronicles, zeitgeist and (optionally) a Sim's rumors.
+
+    The Mod's Mailbox "Neighborhood Stories" interaction consumes this (3.9).
+    """
+    state = get_state()
+    save_id = int(payload.get("save_id", 0))
+    sim_id = int(payload.get("sim_id", 0))
+    store = _store(state)
+    zeitgeist = current_zeitgeist(state, save_id)
+    if store is None:
+        return {"ok": True, "save_id": save_id, "zeitgeist": zeitgeist,
+                "chronicles": [], "rumors": []}
+    chronicles = get_chronicles(store, save_id)
+    rumors = get_rumors(store, save_id)
+    if sim_id:
+        rumors = rumors_known_by(rumors, sim_id)
+    return {
+        "ok": True,
+        "save_id": save_id,
+        "zeitgeist": zeitgeist,
+        "chronicles": chronicles,
+        "rumors": rumors,
+    }
 
 
 def handle_controls_get() -> Dict[str, Any]:

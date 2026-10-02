@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
 
 CONFIG_FILENAME = "config.toml"
 
-#: Built-in defaults mirror config.example.toml (fully nested). Used when no
+#: Built-in defaults mirror `sidecar/config.example.toml` (fully nested). Used when no
 #: config file exists, so the sidecar always boots into 0-key fallback mode.
 DEFAULT_CONFIG: Dict[str, Any] = {
     "server": {"host": "127.0.0.1", "port": 8765, "log_level": "INFO"},

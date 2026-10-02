@@ -197,6 +197,8 @@ class GameLever(object):
                 return GameLever._execute_forget(sim_id, params)
             elif kind == 'command':
                 return GameLever._execute_command(params)
+            elif kind == 'spawn_npc':
+                return GameLever._execute_spawn_npc(sim_id, params)
             else:
                 log_warn('Unknown intent kind: {}'.format(kind))
                 return False, {'error': 'unknown_kind'}
@@ -391,6 +393,20 @@ class GameLever(object):
     def _execute_forget(sim_id, params):
         """No-op locally - sidecar owns memory. Return success."""
         return True, {'forgotten': True, 'note': 'delegated_to_sidecar'}
+
+    @staticmethod
+    def _execute_spawn_npc(sim_id, params):
+        """Spawn a catalyst townie via the native SituationManager (2.4 / 3.3).
+
+        Imported lazily to avoid a circular import (visit_situation reuses the
+        approach lever here).
+        """
+        try:
+            from sensewright_mod.visit_situation import spawn_catalyst_visitor
+            return spawn_catalyst_visitor(sim_id, params)
+        except Exception as e:
+            log_exception('Spawn NPC error: {}'.format(e))
+            return False, {'error': 'spawn_npc_failed'}
 
     @staticmethod
     def _execute_command(params):

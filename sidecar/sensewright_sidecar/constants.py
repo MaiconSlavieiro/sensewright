@@ -16,6 +16,8 @@ EVENT_CATEGORY_WEIGHTS: Dict[str, float] = {
     "death": 2.5,
     "betrayal": 2.2,
     "fire": 2.0,
+    "marriage": 1.9,
+    "birth": 1.9,
     "romance": 1.6,
     "promotion": 1.4,
     "fight": 1.3,
@@ -23,6 +25,9 @@ EVENT_CATEGORY_WEIGHTS: Dict[str, float] = {
     "gift": 1.0,
     "mundane": 0.5,
 }
+
+#: Lifecycle event categories that produce a decay-immune legacy memory (P28).
+LEGACY_CATEGORIES: Tuple[str, ...] = ("death", "marriage", "birth")
 
 SALIENCE_THRESHOLD = 1.5
 AFTERMATH_SALIENCE_THRESHOLD = 2.0

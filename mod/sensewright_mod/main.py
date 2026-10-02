@@ -18,6 +18,12 @@ from sensewright_mod.pie_menu import register_pie_menu_interactions, cmd_pie_cha
 # Importing the interactions module registers the S4CL pie menu handler as an
 # import side effect (must happen before household/sims load).
 from sensewright_mod import interactions as _interactions  # noqa: F401
+# Object-target interactions (mirror/diary/mailbox) and lifecycle event listeners
+# also register via import side effects.
+from sensewright_mod import object_interactions as _object_interactions  # noqa: F401
+from sensewright_mod import lifecycle_hooks as _lifecycle_hooks  # noqa: F401
+from sensewright_mod import catalyst_tracker
+from sensewright_mod.visit_situation import register_visit_situation
 from sensewright_mod.player_activity import register_player_activity_hooks, update_idle_detection, clear_all_player_locks
 from sensewright_mod.i18n import load_locales, get_current_language, detect_and_apply_game_language, t
 
@@ -60,6 +66,9 @@ class SensewrightService(object):
         # Resolve tuning IDs (Sensewright-owned + native archetypes) and register
         # them with native_hooks / tool_executor. See tuning.py.
         register_all_tuning()
+
+        # Resolve the catalyst VisitSituation tuning (2.4 / 3.3).
+        register_visit_situation()
 
         # Start HTTP worker thread
         start_worker()
@@ -125,6 +134,12 @@ class SensewrightService(object):
 
             # Collect sims delta
             sims_delta = collect_sims_delta()
+
+            # Report the end of any catalyst conversation (2.9 -> god.react).
+            try:
+                catalyst_tracker.observe(sims_delta)
+            except Exception as tracker_error:
+                log_exception('Catalyst tracker error: {}'.format(tracker_error))
 
             post_autonomy_tick(
                 trace_id=trace_id,

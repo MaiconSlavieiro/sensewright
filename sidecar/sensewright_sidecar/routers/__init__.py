@@ -11,6 +11,7 @@ from .health import router as health_router
 from .i18n import router as i18n_router
 from .lifecycle import router as lifecycle_router
 from .memory import router as memory_router
+from .world import router as world_router
 
 api_router = APIRouter()
 api_router.include_router(lifecycle_router)
@@ -19,5 +20,6 @@ api_router.include_router(chat_router)
 api_router.include_router(events_router)
 api_router.include_router(god_router)
 api_router.include_router(memory_router)
+api_router.include_router(world_router)
 api_router.include_router(health_router)
 api_router.include_router(i18n_router)

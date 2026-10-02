@@ -63,6 +63,11 @@ TUNING_TYPES = {
     "interaction": 0xE882D22F,
     "pie_menu_category": 0x03E9D964,
     "sim_data": 0x545AC67A,
+    # Object (B61DE6B4) and Situation (FBC3AEEB) tuning classes. Required by the
+    # Diary/mailbox object definitions and the catalyst VisitSituation (3.1/3.3).
+    # Values match S4TK's TuningResourceType enum.
+    "object": 0xB61DE6B4,
+    "situation": 0xFBC3AEEB,
 }
 DEFAULT_TUNING_TYPE = 0x545AC67A  # SimData fallback
 

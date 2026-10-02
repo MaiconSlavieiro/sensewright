@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Catalyst VisitSituation (2.4 / 3.3). Blind implementation: validated in-game
+     in Phase 5. The Mod selects or spawns a townie, starts this situation (so
+     the visitor walks to the door) and routes them toward the target. -->
+<I c="SensewrightVisitSituation" i="situation" m="sensewright_mod.visit_situation" n="sw_visit_situation" s="0">
+  <T n="allow_autonomous">True</T>
+  <T n="user_facing">False</T>
+  <T n="duration">240</T>
+</I>

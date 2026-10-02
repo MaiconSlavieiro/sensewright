@@ -57,8 +57,10 @@ def block_for_category(category: Optional[str]) -> str:
         return "betrayal"
     if cat in ("fire",):
         return "trauma_fire"
-    if cat in ("romance",):
+    if cat in ("romance", "marriage"):
         return "romance"
+    if cat in ("birth",):
+        return "family"
     if cat in ("fight",):
         return "conflict"
     return "stress"

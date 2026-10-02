@@ -18,7 +18,7 @@ DEFAULT_TTL_SIM_MINUTES = 15.0
 #: Cognitive intents that expire at next_sleep.
 COGNITIVE_KINDS = ("bias_interaction", "prefer_target", "set_goal")
 #: Physical/social intents that expire at ttl / zone_transition.
-PHYSICAL_KINDS = ("speak", "approach", "command")
+PHYSICAL_KINDS = ("speak", "approach", "command", "spawn_npc")
 
 INTENT_REQUIRED_KEYS = ("sim_id", "kind", "source")
 

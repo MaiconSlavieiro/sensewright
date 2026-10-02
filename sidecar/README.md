@@ -6,7 +6,7 @@ Local FastAPI companion for the **Sensewright v2** mod (The Sims 4 AI Companion 
 
 ```bash
 # From the sidecar directory:
-cp config.example.toml config.toml   # (config.example.toml lives in the repo root)
+cp config.example.toml config.toml   # (config.example.toml lives in this directory)
 python main.py
 # or:
 python -m sensewright_sidecar
@@ -30,7 +30,7 @@ python -m pytest
 
 ## Configuration
 
-Two-layer `config.toml` (see `config.example.toml` in the repo root):
+Two-layer `config.toml` (see `config.example.toml` in this directory):
 
 - **Layer 1** (`[llm.providers.*]`): credentials + technical rate limits (RPM/RPD/TPM).
 - **Layer 2** (`[llm.routes.*]`, `[llm.tiers.*]`): routing by purpose + generation budgets.
@@ -44,4 +44,4 @@ With no provider enabled, every one of the 33 purposes answers with a determinis
 - `data/` — runtime data (`saves/` Shadow DB, `panel.toml`, `logs/`).
 - `tests/` — pytest suite.
 
-See the repository root `README.md` and `docs/architecture.md` for the full architecture.
+See the repository root `README.md` and [`docs/architecture.md`](../docs/architecture.md) for the full architecture. The documentation hub is [`docs/README.md`](../docs/README.md).
