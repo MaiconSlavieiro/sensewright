@@ -607,11 +607,205 @@ O LLM emite apenas categorias semânticas padronizadas (`mood: "flirty"`, `activ
 
 ## F18: Sistema i18n & Compilação Automática de STBL
 
-### Requisitos F18 (`REQ-I18N-*`)
+### 1. Princípios de Design Zero-Hardcode
 
-* **REQ-I18N-01:** `en` (source of truth) e `pt-BR` completos de fábrica tanto em `mod/locales/` quanto em `sidecar/locales_content/`.
-* **REQ-I18N-02:** Nenhum código Python referencia códigos de idioma fixos; a resolução usa o `manifest.json` (compatível com leitura dentro do arquivo `.ts4script` zipado).
-* **REQ-I18N-03 (Geração Automática de STBL no Build):** O script `mod/build_package.py` extrai todas as chaves `stbl.*` e `pie_menu.*` dos arquivos `mod/locales/<code>.json` e compila automaticamente os recursos binários STBL (`0x00` ENG_US, `0x11` POR_BR) dentro do `dist/Sensewright.package`.
+| # | Regra | Mecanismo de Garantia |
+|---|---|---|
+| **I1** | **Proibição de Locale Literal em Código** | É proibido existir `"en"`, `"pt-BR"`, `"0x00"` ou `"0x11"` dentro de arquivos `.py`. Toda descoberta de idioma parte da leitura dinâmica de `manifest.json`. |
+| **I2** | **Prompts 100% Data-Driven** | Nenhum arquivo Python do Sidecar pode conter strings de System Prompt ou instruções ao LLM. Todo prompt é renderizado a partir de catálogos de dados localizados. |
+| **I3** | **Cascata de Resolução em 4 Camadas** | Chaves ausentes em uma tradução parcial nunca quebram o jogo: degradam automaticamente na ordem `User Overlay` $\rightarrow$ `Active Locale` $\rightarrow$ `Base Language` (ex: `pt`) $\rightarrow$ `Manifest Default`. |
+| **I4** | **Hot-Reload & Drop-in Sem Recompilação** | O Mod lê traduções de uma pasta aberta (`data/locales/`) com prioridade sobre o `.ts4script` zipado, permitindo criar ou editar traduções com o jogo aberto. |
+| **I5** | **Determinismo com Variedade e Flexão** | Qualquer chave de texto aceita uma string única ou uma `list[str]` (sorteada deterministicamente por seed) e suporta macros de flexão gramatical (`{g:m|f|n}`). |
+
+### 2. Topologia de Arquivos & Cascata de Prioridade
+
+O sistema separa Strings de UI/STBL (usadas pelo Mod e compiladas no `.package`) de Conteúdo Semântico & Prompts (usados pelo Sidecar e Web Studio), mas ambos compartilham o mesmo manifesto mestre e aceitam overrides externos na pasta `data/locales/`:
+
+```text
+PlaintextMods/Sensewright/
+├── Sensewright.ts4script          # Contém fallback embutido (locales/ internos)
+├── Sensewright.package            # Contém STBLs geradas a partir de locales/stbl/
+├── data/
+│   └── locales/                   # [CAMADA 1 - OVERLAY DO USUÁRIO / COMUNIDADE]
+│       ├── manifest.override.json # Opcional: registra novos idiomas sem recompilar
+│       ├── ui/                    # Drop-in: <locale>.json (sobrescreve UI do Mod)
+│       └── content/               # Drop-in: <locale>.json (sobrescreve Prompts/Fallbacks)
+└── sidecar/
+    └── locales/                   # [CAMADA 2 - BUNDLE OFICIAL]
+        ├── manifest.json          # Fonte única da verdade sobre idiomas suportados
+        ├── ui/
+        │   ├── en-US.json
+        │   └── pt-BR.json
+        └── content/
+            ├── en-US.json
+            └── pt-BR.json
+```
+
+**Ordem de Resolução de uma Chave (`t(key)`)**
+Quando qualquer módulo pede a chave `"chat.fallback.tense"` para o idioma ativo (ex: `pt-BR`):
+1. `data/locales/content/pt-BR.json` (Override customizado do usuário ou tradução da comunidade).
+2. `sidecar/locales/content/pt-BR.json` (Arquivo oficial do pacote para o locale exato).
+3. **Subtag de Língua Base (`pt`)**: Se o jogo estiver em `pt-PT` e só existir `pt-BR` com `base_subtag: "pt"`, resolve pelo parentesco declarado no manifesto.
+4. **Locale Default do Manifesto** (definido em `manifest.json` → `default_locale`).
+5. **Literal de Segurança**: Retorna `[missing:chat.fallback.tense]` e emite `validation_log("i18n.missing_key")` sem levantar exceção.
+
+### 3. Contrato do `manifest.json` Unificado (Single Source of Truth)
+
+O arquivo `manifest.json` elimina a necessidade de hardcodar bytes binários da Maxis, nomes de idiomas para o LLM ou regras de detecção do cliente TS4:
+
+```json
+{
+  "schema_version": 2,
+  "default_locale": "en-US",
+  "locales": [
+    {
+      "code": "en-US",
+      "base_subtag": "en",
+      "display_name": "English (US)",
+      "llm_language_name": "English",
+      "ts4_stbl_byte": "0x00",
+      "ts4_client_tokens": ["eng_us", "en_us", "en-us", "en"],
+      "direction": "ltr"
+    },
+    {
+      "code": "pt-BR",
+      "base_subtag": "pt",
+      "display_name": "Português (Brasil)",
+      "llm_language_name": "Português do Brasil (pt-BR)",
+      "ts4_stbl_byte": "0x11",
+      "ts4_client_tokens": ["por_br", "pt_br", "pt-br", "pt"],
+      "direction": "ltr"
+    }
+  ]
+}
+```
+
+Como cada parte do sistema consome este manifesto:
+- **Detecção Automática no Mod (`mod/i18n.py`)**: Lê a string de idioma do cliente The Sims 4 e faz o match contra `ts4_client_tokens[]` usando fronteira de palavra (regex `\b`).
+- **Compilador DBPF (`mod/build_package.py`)**: Itera sobre `locales[]`, converte `int(entry["ts4_stbl_byte"], 16)` para montar o Resource Key da tabela STBL e compila cada idioma automaticamente.
+- **Prompt Shaping no Sidecar (`ContextAssembler`)**: Usa `llm_language_name` para preencher variáveis de instrução ao modelo e `display_name` para popular o seletor de idiomas no Sensewright Web Studio (`/ui`).
+
+### 4. Estrutura do Catálogo de Conteúdo e Prompts (`locales/content/<code>.json`)
+
+Para eliminar 100% de textos em inglês hardcoded no código Python do Sidecar, os arquivos de `content/` são divididos em 4 seções padronizadas:
+
+```json
+{
+  "meta": {
+    "locale": "pt-BR",
+    "version": "2.2.0"
+  },
+
+  "anchors": {
+    "strict_language": "[INSTRUÇÃO OBRIGATÓRIA DE SISTEMA: Pense e responda EXCLUSIVAMENTE em {llm_language_name}. Nunca utilize outro idioma.]",
+    "json_only": "[Responda ESTRITAMENTE com um objeto JSON válido seguindo o schema solicitado, sem markdown extra.]",
+    "one_shot": {
+      "sim.chat": "[thought]Estou exausto hoje, mas fico feliz que {player_name} mandou mensagem.[/thought]\nQue bom falar com você! O dia foi puxado no trabalho, como estão as coisas por aí?",
+      "sim.impulse": "[thought]A pia está cheia de louça e minha energia está baixa, melhor tomar um café antes do turno.[/thought]"
+    }
+  },
+
+  "prompts": {
+    "sim.chat": {
+      "system": "Você é {sim_name} ({age_label}, {career_label}), um Sim vivendo sua rotina real. Sua personalidade base é: {core_personality}. Sua fase atual é: {current_demeanor}. Estilo de fala: {speech_style}.\n{one_shot_block}\n{strict_language_anchor}",
+      "user_phone_sms": "[Canal: SMS Rápido no Celular | Confiança com {player_name}: {trust_label}]\nEstado atual: Humor {mood_label}, {activity_label}.\nMensagem recebida de {player_name}: \"{message}\""
+    },
+    "sim.dream": {
+      "system": "Você é o inconsciente onírico de {sim_name}. Nível de surrealismo do sonho: {surrealism_index}. Crie um sonho em 1ª pessoa combinando os resíduos do dia, memórias antigas e a atmosfera do bairro ({zeitgeist_tags}).\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.puppeteer": {
+      "asymmetric_directive": "ATENÇÃO: Neste diálogo, {catalyst_name} está atuando com o objetivo dramático oculto: \"{puppeteer_objective}\". Já {agent_name} deve responder 100% por vontade própria, segundo sua psique e valores."
+    }
+  },
+
+  "enums": {
+    "mood": {
+      "fine": "{g:Bem|Bem|Bem}",
+      "flirty": "{g:Flertante|Flertante|Flertante}",
+      "tense": "{g:Tenso|Tensa|Tenso(a)}",
+      "sad": "{g:Triste|Triste|Triste}",
+      "angry": "{g:Furioso|Furiosa|Furioso(a)}",
+      "inspired": "{g:Inspirado|Inspirada|Inspirado(a)}",
+      "uncomfortable": "{g:Incomodado|Incomodada|Incomodado(a)}",
+      "dazed": "{g:Atordoado|Atordoada|Atordoado(a)}"
+    },
+    "age_stage": {
+      "CHILD": "Criança",
+      "TEEN": "Adolescente",
+      "YOUNGADULT": "{g:Jovem Adulto|Jovem Adulta|Jovem Adulto(a)}",
+      "ADULT": "{g:Adulto|Adulta|Adulto(a)}",
+      "ELDER": "{g:Idoso|Idosa|Idoso(a)}"
+    }
+  },
+
+  "fallbacks": {
+    "sim.chat.tense": [
+      "Desculpa, minha cabeça está a mil agora, estou muito {g:estressado|estressada}. Nos falamos mais tarde?",
+      "Hoje o dia está pesado demais, mal consigo me concentrar no celular.",
+      "Preciso respirar um pouco antes de conversar, estou no meu limite hoje."
+    ],
+    "sim.impulse.idle": [
+      "Preciso organizar melhor o meu dia antes que o tempo passe.",
+      "Me pergunto o que vai acontecer mais tarde por aqui.",
+      "Sinto que estou esquecendo de fazer alguma coisa importante hoje."
+    ]
+  }
+}
+```
+
+### 5. Mecanismos Avançados do Motor de Tradução (`i18n_engine.py`)
+
+#### 5.1 Micro-Gramática de Flexão de Gênero (`{g:masc|fem|neutral}`)
+Idiomas latinos e eslavos quebram a imersão quando templates usam formas masculinas fixas para todas as Sims (ex: "Bella está cansado").
+Como funciona sem hardcode: O renderizador de strings possui um pós-processador leve de regex (`\{g:([^|{}]+)\|([^|{}]+)(?:\|([^|{}]+))?\}`) que recebe o parâmetro `gender="M"|"F"|"N"` do SimInfo:
+- Em inglês (en-US), o tradutor nem precisa usar a macro ("Bella is tired").
+- Em português (pt-BR), o tradutor escreve `"{name} está {g:cansado|cansada}"` e o motor resolve automaticamente para "Bella está cansada" ou "Mortimer está cansado".
+
+#### 5.2 Rotação Determinística de Listas (Anti-Repetição em Modo 0-Key)
+Qualquer chave no JSON pode ter como valor uma string simples ou um array de strings.
+Quando o valor é uma lista, a função `t(lang, key, seed=...)` seleciona um item usando `hash(f"{sim_id}:{world_sim_tick // 60}:{key}") % len(items)`.
+**Impacto:** Um tradutor da comunidade pode adicionar 15 variações de falas para uma categoria social apenas adicionando linhas na lista JSON, sem tocar no Python.
+
+#### 5.3 Resolução Híbrida de Termos Nativos do TS4 (Zero Manutenção de DLCs)
+O The Sims 4 possui mais de 70 pacotes de expansão com centenas de carreiras e traços novos. Para evitar ter que traduzir manualmente cada novo traço da EA em enums:
+1. O `state_collector` no Mod envia os identificadores semânticos junto com o nome extraído da instância de tuning local quando disponível: `{"id": "trait_Loner", "raw_name": "Loner"}`.
+2. O `i18n_engine` tenta resolver `enums.trait.trait_Loner` no JSON do idioma ativo; se não existir (ex: traço de uma DLC nova), usa o texto limpo extraído do jogo ou formata o identificador sem falhar.
+
+### 6. Compilação Dinâmica de STBL (`.package`) sem Hardcode
+
+No The Sims 4, textos nativos do Pie Menu, nomes de Buffs/Moodlets e Traits exigem tabelas binárias STBL dentro de um arquivo `.package`, onde cada string é indexada por um hash FNV-32 (0x811C9DC5).
+Como funciona o `build_package.py` (e o Gerador de Pacotes da Comunidade):
+No arquivo `locales/ui/<code>.json`, todas as chaves sob o namespace `"stbl.*"` são destinadas ao `.package`:
+
+```json
+{
+  "stbl": {
+    "pie_menu.root": "Sensewright...",
+    "pie_menu.chat_sms": "Mandar SMS...",
+    "pie_menu.direct_scene": "Provocar Cena Aqui...",
+    "buff.dream_epiphany.name": "Epifania Matinal",
+    "buff.dream_epiphany.desc": "Um sonho vívido deixou uma ideia brilhante na cabeça.",
+    "buff.dream_nightmare.name": "Pesadelo Vívido",
+    "buff.dream_nightmare.desc": "As sombras da noite ainda causam calafrios."
+  }
+}
+```
+
+O compilador calcula automaticamente o hash `FNV-32("sensewright:" + key)` para cada chave de `"stbl"` no idioma `default_locale` e injeta esse mesmo ID numérico nos arquivos Tuning XML durante o build.
+Para cada idioma listado em `manifest.json` (e em `data/locales/manifest.override.json`), o compilador gera o binário STBL usando o `ts4_stbl_byte` declarado no manifesto.
+**Ferramenta de Exportação no Web Studio (`POST /v1/i18n/compile-addon`)**: Se um usuário criar uma tradução para Espanhol (`es-ES.json`) na pasta `data/locales/`, basta clicar em "Gerar Pacote de Idioma (.package)" no Sensewright Web Studio e o próprio Sidecar gera um arquivo `Sensewright_Locale_es-ES.package` pronto na pasta `Mods/`!
+
+### 7. Requisitos Formais de Internacionalização (REQ-I18N-* Revisados)
+
+* **REQ-I18N-01 (Zero Locale Literal):** Nenhum módulo Python do Mod ou do Sidecar pode conter códigos de idioma (`"en"`, `"pt-BR"`) ou bytes de STBL (`0x00`, `0x11`) hardcoded. Um teste automatizado de AST (`test_no_hardcoded_locales.py`) falha o build caso detecte literais de locale fora dos arquivos JSON.
+* **REQ-I18N-02 (Zero Prompt em Código):** Todos os templates de prompt (system, user, diretivas do Puppeteer e âncoras de idioma) devem residir em `locales/content/<code>.json` sob a chave `"prompts"`, sendo carregados dinamicamente pelo `ContextAssembler`.
+* **REQ-I18N-03 (Overlay Externo & Hot-Reload):** O Mod e o Sidecar devem observar o diretório `data/locales/`. Arquivos colocados ali têm precedência imediata sobre os arquivos embutidos no `.ts4script` ou no bundle do Sidecar, suportando recarregamento a quente via `POST /v1/config/lang` ou botão "Recarregar Traduções" no Web Studio.
+* **REQ-I18N-04 (Cascata de Fallback em 4 Níveis):** A busca de qualquer chave deve percorrer `User Overlay` $\rightarrow$ `Exact Locale` $\rightarrow$ `Base Subtag` $\rightarrow$ `Default Locale` antes de retornar o marcador diagnóstico `[missing:<key>]`.
+* **REQ-I18N-05 (Suporte a Listas e Flexão Gramatical):** O motor `t(lang, key, **kwargs)` deve suportar nativamente valores em lista (seleção determinística por seed) e resolver macros `{g:m|f|n}` com base no gênero do Sim alvo.
+* **REQ-I18N-06 (Paridade e Validação de Placeholders):** A suíte de testes (`test_locales_parity.py`) valida automaticamente todos os idiomas registrados no `manifest.json` garantindo:
+  1. 100% das chaves presentes no `default_locale` existem nos demais idiomas oficiais.
+  2. As variáveis de interpolação `{...}` em cada string traduzida são um subconjunto exato das variáveis da string original (impedindo `KeyError` em tempo de execução por erro de digitação do tradutor).
+* **REQ-I18N-07 (Compilação STBL Guiada por Manifesto):** O gerador de `.package` lê `ts4_stbl_byte` do `manifest.json` e calcula hashes FNV-32 automaticamente a partir da seção `"stbl"` do JSON de UI, permitindo também exportar um `.package` suplementar para idiomas criados pela comunidade.
 
 ---
 

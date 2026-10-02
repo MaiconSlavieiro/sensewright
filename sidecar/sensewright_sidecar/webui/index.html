@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="app.title">Sensewright Web Studio</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+  <!-- Top Status Bar -->
+  <header class="status-bar" role="status" aria-live="polite">
+    <div class="status-left">
+      <span class="status-badge" id="health-badge" data-state="unknown">
+        <span class="dot" aria-hidden="true"></span>
+        <span data-i18n="status.sidecar">Sidecar</span>
+        <span id="health-text">—</span>
+      </span>
+      <span class="status-sep" aria-hidden="true">|</span>
+      <span class="status-badge" id="save-badge">
+        <span class="dot" aria-hidden="true"></span>
+        <span data-i18n="status.save">Save</span>
+        <span id="save-text">—</span>
+      </span>
+      <span class="status-sep" aria-hidden="true">|</span>
+      <span class="status-badge" id="pid-badge">
+        <span class="dot" aria-hidden="true"></span>
+        <span data-i18n="status.pid">PID</span>
+        <span id="pid-text">—</span>
+      </span>
+    </div>
+    <div class="status-right">
+      <label class="lang-toggle" for="lang-select" data-i18n="status.language">Language</label>
+      <select id="lang-select" aria-label="Interface language">
+        <option value="en">English</option>
+        <option value="pt-BR">Português (BR)</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- Main Tab Navigation -->
+  <nav class="tab-bar" role="tablist" aria-label="Main sections">
+    <button role="tab" id="tab-sims" class="tab-btn active" aria-selected="true" aria-controls="panel-sims" data-i18n="tabs.sims">Mente dos Sims</button>
+    <button role="tab" id="tab-god" class="tab-btn" aria-selected="false" aria-controls="panel-god" data-i18n="tabs.god">Sala do Diretor</button>
+    <button role="tab" id="tab-providers" class="tab-btn" aria-selected="false" aria-controls="panel-providers" data-i18n="tabs.providers">Provedores & Diagnóstico</button>
+  </nav>
+
+  <!-- Tab Panels -->
+  <main class="tab-content" role="tabpanel" id="panel-sims" aria-labelledby="tab-sims">
+    <!-- Aba 1: Mente dos Sims -->
+    <section class="panel-section">
+      <header class="section-header">
+        <h2 data-i18n="sims.title">Mente dos Sims</h2>
+        <div class="section-actions">
+          <select id="sim-select" aria-label="Select a Sim">
+            <option value="" disabled selected data-i18n="sims.select_placeholder">— Select a Sim —</option>
+          </select>
+          <button id="btn-refresh-sims" class="btn btn-secondary" data-i18n="common.refresh">Refresh</button>
+        </div>
+      </header>
+
+      <div id="sim-profile" class="sim-profile hidden">
+        <!-- Core Identity -->
+        <details class="card" open>
+          <summary class="card-title" data-i18n="sims.core_identity">Core Identity</summary>
+          <div class="card-body">
+            <div class="field-row">
+              <label for="pf-name" data-i18n="sims.name">Name</label>
+              <input type="text" id="pf-name" disabled>
+            </div>
+            <div class="field-row">
+              <label for="pf-species" data-i18n="sims.species">Species</label>
+              <input type="text" id="pf-species" disabled>
+            </div>
+            <div class="field-row">
+              <label for="pf-age" data-i18n="sims.age_stage">Age Stage</label>
+              <input type="text" id="pf-age" disabled>
+            </div>
+            <div class="field-row">
+              <label for="pf-household" data-i18n="sims.household">Household</label>
+              <input type="text" id="pf-household" disabled>
+            </div>
+          </div>
+        </details>
+
+        <!-- Core Personality vs Current Demeanor -->
+        <details class="card" open>
+          <summary class="card-title" data-i18n="sims.personality_demeanor">Personality & Demeanor</summary>
+          <div class="card-body">
+            <div class="field-row">
+              <label for="pf-core" data-i18n="sims.core_personality">Core Personality</label>
+              <textarea id="pf-core" rows="3" data-field="core_personality" placeholder="Immutable essence..."></textarea>
+            </div>
+            <div class="field-row">
+              <label for="pf-demeanor" data-i18n="sims.current_demeanor">Current Demeanor</label>
+              <textarea id="pf-demeanor" rows="3" data-field="current_demeanor" placeholder="Current phase/posture..."></textarea>
+            </div>
+            <div class="field-row">
+              <label for="pf-speech" data-i18n="sims.speech_style">Speech Style</label>
+              <input type="text" id="pf-speech" data-field="speech_style" placeholder="Colloquial, formal, terse...">
+            </div>
+            <div class="field-row actions">
+              <button class="btn btn-primary" id="btn-save-personality" data-i18n="common.save">Save Changes</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- Psyche Blocks -->
+        <details class="card" open>
+          <summary class="card-title" data-i18n="sims.psyche_blocks">Psyche Blocks (Traumas & Beliefs)</summary>
+          <div class="card-body">
+            <div id="psyche-list" class="psyche-list" data-i18n-empty="sims.no_psyche">No psyche blocks recorded.</div>
+            <div class="field-row actions">
+              <button class="btn btn-secondary" id="btn-add-psyche" data-i18n="sims.add_psyche">Add Block</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- Dream & Daily Plan -->
+        <details class="card">
+          <summary class="card-title" data-i18n="sims.dream_plan">Dream & Daily Plan</summary>
+          <div class="card-body">
+            <div class="field-row">
+              <label for="pf-dream" data-i18n="sims.dream">Last Dream</label>
+              <textarea id="pf-dream" rows="3" data-field="dream" readonly placeholder="Dream narrative appears here after sleep..."></textarea>
+            </div>
+            <div class="field-row">
+              <label for="pf-dream-archetype" data-i18n="sims.dream_archetype">Archetype</label>
+              <input type="text" id="pf-dream-archetype" readonly>
+            </div>
+            <div class="field-row">
+              <label for="pf-dream-urge" data-i18n="sims.dream_urge">Dream Urge</label>
+              <input type="text" id="pf-dream-urge" readonly>
+            </div>
+            <hr>
+            <div class="field-row">
+              <label for="pf-plan" data-i18n="sims.daily_plan">Daily Plan</label>
+              <textarea id="pf-plan" rows="4" data-field="daily_plan" placeholder="Morning / Afternoon / Evening blocks..."></textarea>
+            </div>
+            <div class="field-row actions">
+              <button class="btn btn-primary" id="btn-save-plan" data-i18n="common.save">Save Plan</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- Life Story & Diary -->
+        <details class="card">
+          <summary class="card-title" data-i18n="sims.lifestory_diary">Life Story & Diary</summary>
+          <div class="card-body">
+            <div class="field-row">
+              <label for="pf-lifestory" data-i18n="sims.life_story">Life Story</label>
+              <textarea id="pf-lifestory" rows="5" data-field="life_story" readonly placeholder="Life story chapters..."></textarea>
+            </div>
+            <hr>
+            <div class="field-row">
+              <label for="pf-diary" data-i18n="sims.diary">Diary (Latest Entry)</label>
+              <textarea id="pf-diary" rows="4" data-field="diary" readonly placeholder="Diary entries appear here..."></textarea>
+            </div>
+          </div>
+        </details>
+
+        <!-- Relationships Graph (simple list) -->
+        <details class="card">
+          <summary class="card-title" data-i18n="sims.relationships">Relationships</summary>
+          <div class="card-body">
+            <div id="relationships-list" class="relationships-list" data-i18n-empty="sims.no_relationships">No relationship data.</div>
+          </div>
+        </details>
+      </div>
+
+      <div id="no-sim-selected" class="empty-state" data-i18n="sims.no_sim_selected">Select a Sim from the dropdown to view and edit their profile.</div>
+    </section>
+  </main>
+
+  <main class="tab-content hidden" role="tabpanel" id="panel-god" aria-labelledby="tab-god">
+    <!-- Aba 2: Sala do Diretor -->
+    <section class="panel-section">
+      <header class="section-header">
+        <h2 data-i18n="god.title">Sala do Diretor</h2>
+      </header>
+
+      <!-- Spoiler Shield -->
+      <details class="card" open>
+        <summary class="card-title">
+          <label class="toggle-label">
+            <input type="checkbox" id="spoiler-shield" checked>
+            <span class="toggle-slider" aria-hidden="true"></span>
+            <span data-i18n="god.spoiler_shield">Spoiler Shield (ON = hide beats)</span>
+          </label>
+        </summary>
+        <div class="card-body" id="god-beats-container">
+          <div id="beats-list" class="beats-list" data-i18n-empty="god.no_beats">No active arc or beats loaded.</div>
+        </div>
+      </details>
+
+      <!-- God Dials -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="god.dials">God Dials</summary>
+        <div class="card-body">
+          <div class="dials-grid" id="dials-grid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </details>
+
+      <!-- Preset Selector -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="god.preset">Director Preset</summary>
+        <div class="card-body">
+          <div class="field-row">
+            <label for="god-preset" data-i18n="god.preset_label">Active Preset</label>
+            <select id="god-preset" aria-label="Director preset">
+              <option value="off" data-i18n="god.presets.off">Off</option>
+              <option value="novela" data-i18n="god.presets.novela">Novela</option>
+              <option value="sitcom" data-i18n="god.presets.sitcom">Sitcom</option>
+              <option value="drama" data-i18n="god.presets.drama">Drama</option>
+              <option value="caos" data-i18n="god.presets.caos">Caos</option>
+              <option value="terror" data-i18n="god.presets.terror">Terror</option>
+              <option value="romance" data-i18n="god.presets.romance">Romance</option>
+              <option value="filme_adolescente" data-i18n="god.presets.filme_adolescente">Filme Adolescente</option>
+            </select>
+          </div>
+          <div class="field-row actions">
+            <button class="btn btn-primary" id="btn-apply-preset" data-i18n="god.apply_preset">Apply Preset</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- Zeitgeist Tags -->
+      <details class="card">
+        <summary class="card-title" data-i18n="god.zeitgeist">Zeitgeist (Neighborhood Mood)</summary>
+        <div class="card-body">
+          <div class="field-row">
+            <label for="zeitgeist-tags" data-i18n="god.zeitgeist_tags">Tags (comma-separated)</label>
+            <input type="text" id="zeitgeist-tags" placeholder="mystery, romance, tension...">
+          </div>
+          <div class="field-row">
+            <label for="zeitgeist-weather" data-i18n="god.weather_preference">Weather Preference</label>
+            <select id="zeitgeist-weather">
+              <option value="" data-i18n="god.weather_auto">Auto</option>
+              <option value="sunny" data-i18n="god.weather.sunny">Sunny</option>
+              <option value="rain" data-i18n="god.weather.rain">Rain</option>
+              <option value="storm" data-i18n="god.weather.storm">Storm</option>
+              <option value="snow" data-i18n="god.weather.snow">Snow</option>
+              <option value="fog" data-i18n="god.weather.fog">Fog</option>
+            </select>
+          </div>
+          <div class="field-row actions">
+            <button class="btn btn-primary" id="btn-save-zeitgeist" data-i18n="common.save">Save Zeitgeist</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- Casting Gallery -->
+      <details class="card">
+        <summary class="card-title" data-i18n="god.casting">Casting Gallery (god.cast)</summary>
+        <div class="card-body">
+          <div id="casting-list" class="casting-list" data-i18n-empty="god.no_cast">No catalyst NPCs cast.</div>
+          <div class="field-row actions">
+            <button class="btn btn-secondary" id="btn-recast" data-i18n="god.recast">Recast Beat</button>
+          </div>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <main class="tab-content hidden" role="tabpanel" id="panel-providers" aria-labelledby="tab-providers">
+    <!-- Aba 3: Provedores & Diagnóstico -->
+    <section class="panel-section">
+      <header class="section-header">
+        <h2 data-i18n="providers.title">Provedores & Diagnóstico</h2>
+        <button class="btn btn-secondary" id="btn-refresh-status" data-i18n="common.refresh">Refresh Status</button>
+      </header>
+
+      <!-- Provider Chain Status -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="providers.chain_status">Provider Chain Status</summary>
+        <div class="card-body">
+          <div id="chain-status" class="chain-status" data-i18n-empty="providers.loading">Loading...</div>
+        </div>
+      </details>
+
+      <!-- Provider Configuration (Layer 1) -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="providers.layer1">Camada 1: Credenciais & Limites (API Keys)</summary>
+        <div class="card-body">
+          <div id="providers-config" class="providers-grid">
+            <!-- Populated by JS from /v1/status -->
+          </div>
+          <p class="hint" data-i18n="providers.keys_hint">Keys are stored locally in the sidecar config. Never logged or sent to the game.</p>
+        </div>
+      </details>
+
+      <!-- Routing & Tiers (Layer 2) -->
+      <details class="card">
+        <summary class="card-title" data-i18n="providers.layer2">Camada 2: Rotas & Tiers</summary>
+        <div class="card-body">
+          <div class="field-row">
+            <label for="free-only" data-i18n="providers.free_only">Free Models Only</label>
+            <label class="toggle-label">
+              <input type="checkbox" id="free-only">
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+          </div>
+          <div id="routes-config" class="routes-config" data-i18n-empty="providers.loading_routes">Loading routes...</div>
+        </div>
+      </details>
+
+      <!-- Queue & Budget Diagnostics -->
+      <details class="card">
+        <summary class="card-title" data-i18n="providers.diagnostics">Diagnostics</summary>
+        <div class="card-body">
+          <div class="diag-grid" id="diag-grid">
+            <div class="diag-card">
+              <h4 data-i18n="providers.queue">Queue</h4>
+              <pre id="diag-queue">—</pre>
+            </div>
+            <div class="diag-card">
+              <h4 data-i18n="providers.limits">Rate Limits</h4>
+              <pre id="diag-limits">—</pre>
+            </div>
+            <div class="diag-card">
+              <h4 data-i18n="providers.pool">Provider Pool</h4>
+              <pre id="diag-pool">—</pre>
+            </div>
+            <div class="diag-card">
+              <h4 data-i18n="providers.tiers">Tiers</h4>
+              <pre id="diag-tiers">—</pre>
+            </div>
+          </div>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <!-- Toast container for notifications -->
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

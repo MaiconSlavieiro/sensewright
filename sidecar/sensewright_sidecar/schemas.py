@@ -14,10 +14,6 @@ from typing import Any, Dict, List
 #: JSON primitive types allowed on the wire.
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 
-#: Supported language codes. ``en`` is the source of truth.
-SUPPORTED_LANGS = ("en", "pt-BR")
-DEFAULT_LANG = "en"
-
 #: Canonical chat channels.
 CHANNELS = ("phone_sms", "pc_chat", "pc_email")
 
@@ -69,10 +65,17 @@ def sanitize_payload(obj: Any) -> Any:
 
 
 def normalize_lang(lang: Any) -> str:
-    """Coerce a language code to a supported value, defaulting to ``en``."""
-    if isinstance(lang, str) and lang in SUPPORTED_LANGS:
-        return lang
-    return DEFAULT_LANG
+    """Coerce a language code/client token to a registered locale code.
+
+    Language discovery is manifest-driven (zero locale literals in code). The
+    resolution consults the unified manifest's ``code``/``base_subtag``/
+    ``ts4_client_tokens`` and falls back to ``default_locale``.
+    """
+    from .i18n_engine import get_engine
+
+    if not isinstance(lang, str) or not lang.strip():
+        return get_engine().default_locale()
+    return get_engine().resolve_locale(lang)
 
 
 def require_lang(payload: Dict[str, Any]) -> str:

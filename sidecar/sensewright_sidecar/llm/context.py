@@ -1,10 +1,12 @@
-"""ContextAssembler — slices context to the tier budget and builds prompts.
+"""ContextAssembler — slices context to the tier budget and renders prompts.
 
 Implements F16: each tier has an input-token ceiling. Profile fields and
 memories are sliced (micro vs deep) so a ``realtime`` impulse never floods the
-prompt, while a ``deep`` dream gets the full life-story context. The language
-anchor is always the last line; a 1-shot example is included in the target
-language (REQ-LLM-04).
+prompt, while a ``deep`` dream gets the full life-story context.
+
+Prompts are 100% data-driven (REQ-I18N-02): they are rendered from
+``locales/content/<code>.json`` via the I18nEngine, with enum state translated
+before assembly and the language anchor injected as the last line.
 """
 from __future__ import annotations
 
@@ -12,10 +14,9 @@ import json
 from typing import Any, Dict, List
 
 from ..config import Config
-from ..fallbacks import render_fallback
-from ..locales import language_anchor, one_shot_example
+from ..i18n_engine import get_engine
 from ..purposes import get_purpose
-from ..schemas import normalize_lang
+from ..schemas import CHANNELS, normalize_lang
 from .limits import estimate_tokens
 
 #: How many recent memories to include per tier.
@@ -45,56 +46,97 @@ class ContextAssembler:
         self,
         purpose_id: str,
         context: Dict[str, Any],
-        lang: str = "en",
+        lang: str = "",
     ) -> List[Dict[str, str]]:
         """Build the full message list (system + user) for a purpose."""
         lang = normalize_lang(lang)
+        engine = get_engine()
         purpose = get_purpose(purpose_id)
         tier = purpose.tier if purpose else "bg"
 
-        system = self._build_system(purpose_id, lang)
-        user = self._build_user(purpose_id, context, lang, tier)
+        ctx = self._render_ctx(context, lang)
+        system = engine.render_prompt(purpose_id, "system", lang, ctx).strip()
+
+        channel = context.get("channel")
+        section = ("user_" + channel) if channel in CHANNELS else "user"
+        payload = self._build_payload(purpose_id, context, tier)
+        user_ctx = dict(ctx)
+        user_ctx["context_json"] = json.dumps(payload, ensure_ascii=False)
+        user = engine.render_prompt(purpose_id, section, lang, user_ctx).strip()
+        if not user:
+            user = user_ctx["context_json"]
+
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
 
-    def _build_system(self, purpose_id: str, lang: str) -> str:
-        purpose = get_purpose(purpose_id)
-        output_keys = list(render_fallback(purpose_id, lang, {}).keys())
-        keys_hint = ", ".join(output_keys) if output_keys else "a JSON object"
+    def _render_ctx(self, context: Dict[str, Any], lang: str) -> Dict[str, Any]:
+        """Translate enum state and lift context fields into prompt variables."""
+        engine = get_engine()
+        profile = context.get("profile") or {}
+        gender = context.get("gender")
+        sim_name = context.get("sim_name") or profile.get("name") or ""
+        trust = context.get("trust")
+        if trust is None:
+            trust = context.get("friendship", "")
+        zeitgeist = context.get("zeitgeist_tags") or []
+        if isinstance(zeitgeist, str):
+            zeitgeist = [zeitgeist]
 
-        lines = [
-            "You are the inner mind of a The Sims 4 character (Sim).",
-            "You always respond with a single JSON object and nothing else.",
-            "Required JSON keys: {}.".format(keys_hint),
-            one_shot_example(lang),
-            language_anchor(lang),
-        ]
-        return "\n".join(lines)
+        return {
+            "sim_name": sim_name,
+            "player_name": context.get("player_name", ""),
+            "core_personality": profile.get("core_personality", ""),
+            "current_demeanor": profile.get("current_demeanor", ""),
+            "speech_style": profile.get("speech_style", ""),
+            "age_label": engine.enum("age_stage", profile.get("age_stage") or context.get("age_stage"), lang, gender),
+            "career_label": context.get("career_label", ""),
+            "mood_label": engine.enum("mood", context.get("mood"), lang, gender),
+            "activity_label": engine.enum("activity", context.get("activity"), lang, gender),
+            "trust_label": str(trust),
+            "message": context.get("message", ""),
+            "memories_text": self._memories_text(context.get("memories"), lang),
+            "surrealism_index": str(context.get("surrealism_index", "0.5")),
+            "zeitgeist_tags": ", ".join(zeitgeist),
+            "target_name": context.get("target_name", ""),
+            "catalyst_name": context.get("catalyst_name", ""),
+            "agent_name": context.get("agent_name", ""),
+            "puppeteer_objective": context.get("puppeteer_objective", ""),
+        }
 
-    def _build_user(self, purpose_id: str, context: Dict[str, Any], lang: str, tier: str) -> str:
+    def _memories_text(self, memories: Any, lang: str) -> str:
+        if not isinstance(memories, list) or not memories:
+            return ""
+        parts = []
+        for memory in memories[:5]:
+            if isinstance(memory, dict):
+                search = memory.get("search_text") or memory.get("content")
+                if isinstance(search, str):
+                    parts.append(search)
+                else:
+                    parts.append(json.dumps(search, ensure_ascii=False))
+        return " | ".join(parts)
+
+    def _build_payload(self, purpose_id: str, context: Dict[str, Any], tier: str) -> Dict[str, Any]:
+        """Slice context into a JSON payload bounded by the tier budget."""
         budget = self.tier_budget(tier)
-        # Build a payload, then trim to budget.
-        payload: Dict[str, Any] = {"purpose": purpose_id, "lang": lang}
+        payload: Dict[str, Any] = {"purpose": purpose_id}
 
         profile = context.get("profile") or {}
-        if tier == "realtime" or tier == "interactive":
+        if tier in ("realtime", "interactive"):
             payload["profile"] = {k: profile.get(k, "") for k in _MICRO_FIELDS}
         else:
             payload["profile"] = {k: profile.get(k, "") for k in _DEEP_FIELDS}
 
-        # Current volatile state (mood, activity, needs).
         for key in ("mood", "activity", "current_needs", "room_id", "is_sleeping", "is_off_lot_duty"):
             if key in context:
                 payload[key] = context[key]
 
-        # Memories (already sliced by the agent/god callers, but guard here).
         memories = context.get("memories") or []
         if isinstance(memories, list):
             payload["memories"] = memories[:_MEMORY_COUNT_BY_TIER.get(tier, 8)]
 
-        # Extra free-form context (chat message, event, directives...).
         for key in (
             "message", "event", "target", "directives", "active_arc", "zeitgeist",
             "dream_urge", "schedule_blocks", "obligatory_tasks", "native_wants",
@@ -109,7 +151,6 @@ class ContextAssembler:
         """Truncate text so its estimated token count fits ``budget``."""
         if estimate_tokens(text) <= budget:
             return text
-        # Crude but safe: cut characters proportionally (4 chars ~ 1 token).
         max_chars = max(200, budget * 4)
         if len(text) <= max_chars:
             return text

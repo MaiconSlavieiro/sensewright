@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "locale": "pt-BR",
+    "version": "2.2.0"
+  },
+
+  "anchors": {
+    "strict_language": "[INSTRUÇÃO OBRIGATÓRIA DE SISTEMA: Pense e responda EXCLUSIVAMENTE em {llm_language_name}. Nunca utilize outro idioma.]",
+    "json_only": "[Responda ESTRITAMENTE com um objeto JSON válido seguindo o schema solicitado, sem markdown extra.]",
+    "one_shot": {
+      "sim.chat": "[thought]Estou exausto hoje, mas fico feliz que {player_name} mandou mensagem.[/thought]\nQue bom falar com você! O dia foi puxado no trabalho, como estão as coisas por aí?",
+      "sim.impulse": "[thought]A pia está cheia de louça e minha energia está baixa, melhor tomar um café antes do turno.[/thought]",
+      "sim.social": "{\"a_line\": \"Você não vai acreditar no que aconteceu hoje.\", \"b_line\": \"Me conta tudo!\", \"topic\": \"fofoca\", \"event_summary\": \"uma troca animada\", \"impact\": 1.2}"
+    }
+  },
+
+  "prompts": {
+    "_default": {
+      "system": "Você é {sim_name}, um Sim vivendo uma vida diária real. Personalidade base: {core_personality}. Fase atual: {current_demeanor}. Estilo de fala: {speech_style}.\n{json_only}\n{strict_language_anchor}",
+      "user": "{context_json}"
+    },
+    "sim.chat": {
+      "system": "Você é {sim_name} ({age_label}, {career_label}), um Sim vivendo sua rotina real. Personalidade base: {core_personality}. Fase atual: {current_demeanor}. Estilo de fala: {speech_style}.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}",
+      "user_phone_sms": "[Canal: SMS rápido no celular | Confiança com {player_name}: {trust_label}]\nEstado atual: humor {mood_label}, {activity_label}.\nMensagem recebida de {player_name}: \"{message}\"",
+      "user_pc_chat": "[Canal: chat profundo no computador | Confiança com {player_name}: {trust_label}]\nEstado atual: humor {mood_label}, {activity_label}.\nMemórias recentes: {memories_text}\nMensagem recebida de {player_name}: \"{message}\"",
+      "user_pc_email": "[Canal: e-mail | Confiança com {player_name}: {trust_label}]\nEstado atual: humor {mood_label}, {activity_label}.\nMensagem recebida de {player_name}: \"{message}\""
+    },
+    "sim.impulse": {
+      "system": "Você é a mente interior ociosa de {sim_name}. Produza apenas pensamento interno; nunca fale em voz alta.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.dream": {
+      "system": "Você é o inconsciente onírico de {sim_name}. Índice de surrealismo do sonho: {surrealism_index}. Crie um sonho em 1ª pessoa combinando os resíduos do dia, memórias antigas e a atmosfera do bairro ({zeitgeist_tags}).\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.social": {
+      "system": "Você é dois Sims, {sim_name} e {target_name}, conversando entre si. Gere uma fala para cada um, dentro do personagem.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.puppeteer": {
+      "asymmetric_directive": "ATENÇÃO: Neste diálogo, {catalyst_name} está atuando com o objetivo dramático oculto: \"{puppeteer_objective}\". Já {agent_name} deve responder 100% por vontade própria, segundo sua própria psique e valores."
+    },
+    "god.narration": {
+      "system": "Você é um narrador invisível de um mundo vivo. Produza exatamente uma frase atmosférica curta (no máximo 80 tokens).\n{json_only}\n{strict_language_anchor}"
+    }
+  },
+
+  "enums": {
+    "mood": {
+      "fine": "bem",
+      "happy": "feliz",
+      "sad": "triste",
+      "angry": "{g:irritado|irritada|irritado(a)}",
+      "tense": "{g:tenso|tensa|tenso(a)}",
+      "flirty": "paquerador",
+      "inspired": "{g:inspirado|inspirada|inspirado(a)}",
+      "focused": "{g:concentrado|concentrada|concentrado(a)}",
+      "dazed": "{g:confuso|confusa|confuso(a)}",
+      "bored": "{g:entediado|entediada|entediado(a)}",
+      "sleepy": "{g:sonolento|sonolenta|sonolento(a)}",
+      "uncomfortable": "{g:desconfortável|desconfortável|desconfortável}",
+      "confident": "{g:confiante|confiante|confiante}",
+      "energized": "{g:energizado|energizada|energizado(a)}"
+    },
+    "activity": {
+      "idle": "à toa",
+      "painting": "pintando",
+      "cooking": "cozinhando",
+      "gardening": "cuidando do jardim",
+      "working": "trabalhando",
+      "sleeping": "dormindo",
+      "socializing": "socializando",
+      "exercising": "se exercitando",
+      "reading": "lendo",
+      "writing": "escrevendo"
+    },
+    "age_stage": {
+      "BABY": "Bebê",
+      "INFANT": "Infant",
+      "TODDLER": "Criança Pequena",
+      "CHILD": "Criança",
+      "TEEN": "Adolescente",
+      "YOUNGADULT": "{g:Jovem Adulto|Jovem Adulta|Jovem Adulto(a)}",
+      "ADULT": "{g:Adulto|Adulta|Adulto(a)}",
+      "ELDER": "{g:Idoso|Idosa|Idoso(a)}"
+    }
+  },
+
+  "fallbacks": {
+    "sim.chat": [
+      "Oi! Desculpa, estou meio distraído agora. Vamos conversar daqui a pouco.",
+      "Ah, oi! Minha cabeça estava longe, me dá um segundo.",
+      "Adoraria conversar, mas estou no meio de algo. A gente se fala já já?"
+    ],
+    "sim.profile.backstory": "Uma vida se desdobrando em silêncio, um dia de cada vez.",
+    "sim.impulse": [
+      "Só absorvendo o dia. Nada urgente na minha mente.",
+      "Preciso organizar melhor o meu dia antes que o tempo passe.",
+      "Me pergunto o que vai acontecer mais tarde por aqui."
+    ],
+    "sim.reaction": [
+      "Não acredito que isso acabou de acontecer.",
+      "Isso me pegou completamente de surpresa.",
+      "Uau, preciso de um momento para processar isso."
+    ],
+    "sim.social.a_line": ["Então, como está seu dia?", "Você não vai acreditar no que eu acabei de ver."],
+    "sim.social.b_line": ["O mesmo de sempre, eu acho.", "Me conta tudo!"],
+    "sim.social.topic": "conversa fiada",
+    "sim.social.close": "uma conversa breve",
+    "sim.dream.narrative": [
+      "Sonhei que andava por uma casa que não parava de reorganizar seus cômodos.",
+      "Sonhei que voava sobre a vizinhança, vendo as luzinhas de todos se apagarem.",
+      "Sonhei com uma porta que dava para um lugar que eu quase lembrava."
+    ],
+    "sim.dream.urge": "Explorar algum lugar desconhecido hoje",
+    "sim.cognition.focus": "Levar o dia no meu próprio ritmo.",
+    "sim.sleep": "Uma noite tranquila. Meus pensamentos se acalmam enquanto adormeço.",
+    "sim.diary": "Querido diário, hoje foi comum, mas sou grato pelos pequenos momentos.",
+    "sim.lifestory": "A vida segue se desdobrando, um dia tranquilo após o outro.",
+    "sim.aspiration": "Viver uma vida com significado",
+    "sim.background.expand": [
+      "Cresci em um bairro modesto.",
+      "Tive um amigo de infância que se mudou.",
+      "Sempre sonhei com algo mais."
+    ],
+    "god.zeitgeist.tags": ["calmo", "cotidiano"],
+    "god.plan.theme": "O ritmo tranquilo da vizinhança",
+    "god.scene.draft": "Um encontro ao acaso.",
+    "god.scene.subtext": "Algo parece diferente hoje.",
+    "god.puppeteer.objective": "Puxar conversa.",
+    "god.puppeteer.opening": "Ei, você tem um minuto?",
+    "god.puppeteer.subtext": "Você sente alguém observando.",
+    "god.react.pivot": "A história continua por si só.",
+    "god.narration": "E assim o dia se desenrola...",
+    "god.background": "Um lugar familiar e cheio de vida.",
+    "world.npc.backstory": "Um recém-chegado com uma história ainda não contada.",
+    "world.household.chronicle": "A família seguiu seu dia de sempre.",
+    "world.gossip": "Dizem pela cidade que algo interessante aconteceu.",
+    "world.aftermath": "A vizinhança volta lentamente ao normal.",
+    "mem.consolidate": "Conversamos e me senti compreendido.",
+    "mem.compact": "O passado se resume a algumas memórias vivas.",
+    "mem.legacy": "Uma vida lembrada.",
+    "mem.relationship.review.note": "Nos damos bem o suficiente.",
+    "evo.reflect": "Olho para mim e vejo alguém ainda crescendo.",
+    "ops.recap.headline": "Anteriormente...",
+    "ops.recap.text": "A vida continua neste pequeno mundo.",
+    "ops.panel.summary": "O Sensewright está rodando em silêncio."
+  }
+}

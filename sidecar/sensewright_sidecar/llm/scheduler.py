@@ -102,7 +102,7 @@ class LLMScheduler:
         self,
         purpose_id: str,
         context: Optional[Dict[str, Any]] = None,
-        lang: str = "en",
+        lang: str = "",
         trace_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> LLMResult:
@@ -169,7 +169,7 @@ class LLMScheduler:
         self,
         purpose_id: str,
         context: Optional[Dict[str, Any]] = None,
-        lang: str = "en",
+        lang: str = "",
         trace_id: Optional[str] = None,
         dedup_key: Optional[str] = None,
         callback: Optional[Callable[[LLMResult], None]] = None,

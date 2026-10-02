@@ -33,7 +33,7 @@ class LLMJob:
     purpose_id: str
     tier: str
     context: Dict[str, Any]
-    lang: str = "en"
+    lang: str = ""
     trace_id: str = "-"
     sim_id: Optional[int] = None
     # dedup_key = player:save:scope:id:purpose (REQ-SCHED-03).

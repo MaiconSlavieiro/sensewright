@@ -19,6 +19,6 @@ __all__ = [
 ]
 
 
-def run_purpose(purpose_id, context=None, lang="en", trace_id=None, timeout=None):
+def run_purpose(purpose_id, context=None, lang="", trace_id=None, timeout=None):
     """Convenience wrapper: run a purpose synchronously via the shared scheduler."""
     return get_scheduler().run_purpose(purpose_id, context, lang, trace_id, timeout)

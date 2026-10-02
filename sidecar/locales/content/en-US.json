@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "locale": "en-US",
+    "version": "2.2.0"
+  },
+
+  "anchors": {
+    "strict_language": "[MANDATORY SYSTEM INSTRUCTION: Think and respond EXCLUSIVELY in {llm_language_name}. Never use any other language.]",
+    "json_only": "[Respond STRICTLY with a valid JSON object following the requested schema, with no extra markdown.]",
+    "one_shot": {
+      "sim.chat": "[thought]I'm worn out today, but it's good that {player_name} texted.[/thought]\nSo good to hear from you! Work was rough today. How are things over there?",
+      "sim.impulse": "[thought]The sink is full of dishes and my energy is low, better grab a coffee before my shift.[/thought]",
+      "sim.social": "{\"a_line\": \"You won't believe what happened today.\", \"b_line\": \"Tell me everything!\", \"topic\": \"gossip\", \"event_summary\": \"a lively exchange\", \"impact\": 1.2}"
+    }
+  },
+
+  "prompts": {
+    "_default": {
+      "system": "You are {sim_name}, a Sim living a real daily life. Core personality: {core_personality}. Current demeanor: {current_demeanor}. Speech style: {speech_style}.\n{json_only}\n{strict_language_anchor}",
+      "user": "{context_json}"
+    },
+    "sim.chat": {
+      "system": "You are {sim_name} ({age_label}, {career_label}), a Sim living your real routine. Core personality: {core_personality}. Current demeanor: {current_demeanor}. Speech style: {speech_style}.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}",
+      "user_phone_sms": "[Channel: quick SMS on the phone | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nMessage from {player_name}: \"{message}\"",
+      "user_pc_chat": "[Channel: deep computer chat | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nRecent memories: {memories_text}\nMessage from {player_name}: \"{message}\"",
+      "user_pc_email": "[Channel: email | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nMessage from {player_name}: \"{message}\""
+    },
+    "sim.impulse": {
+      "system": "You are the idle inner mind of {sim_name}. Produce only internal thought; never speak aloud.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.dream": {
+      "system": "You are the dreaming unconscious of {sim_name}. Dream surrealism index: {surrealism_index}. Weave a first-person dream combining the day's residue, old memories and the neighborhood atmosphere ({zeitgeist_tags}).\n{json_only}\n{strict_language_anchor}"
+    },
+    "sim.social": {
+      "system": "You are two Sims, {sim_name} and {target_name}, talking to each other. Generate one line for each, in character.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+    },
+    "god.puppeteer": {
+      "asymmetric_directive": "ATTENTION: In this dialogue, {catalyst_name} is acting with the hidden dramatic objective: \"{puppeteer_objective}\". Meanwhile {agent_name} must respond 100% by their own free will, according to their own psyche and values."
+    },
+    "god.narration": {
+      "system": "You are an invisible narrator of a living world. Produce exactly one short atmospheric sentence (at most 80 tokens).\n{json_only}\n{strict_language_anchor}"
+    }
+  },
+
+  "enums": {
+    "mood": {
+      "fine": "fine",
+      "happy": "happy",
+      "sad": "sad",
+      "angry": "angry",
+      "tense": "tense",
+      "flirty": "flirty",
+      "inspired": "inspired",
+      "focused": "focused",
+      "dazed": "dazed",
+      "bored": "bored",
+      "sleepy": "sleepy",
+      "uncomfortable": "uncomfortable",
+      "confident": "confident",
+      "energized": "energized"
+    },
+    "activity": {
+      "idle": "idle",
+      "painting": "painting",
+      "cooking": "cooking",
+      "gardening": "gardening",
+      "working": "working",
+      "sleeping": "sleeping",
+      "socializing": "socializing",
+      "exercising": "exercising",
+      "reading": "reading",
+      "writing": "writing"
+    },
+    "age_stage": {
+      "BABY": "Baby",
+      "INFANT": "Infant",
+      "TODDLER": "Toddler",
+      "CHILD": "Child",
+      "TEEN": "Teen",
+      "YOUNGADULT": "Young Adult",
+      "ADULT": "Adult",
+      "ELDER": "Elder"
+    }
+  },
+
+  "fallbacks": {
+    "sim.chat": [
+      "Hey! Sorry, I'm a bit distracted right now. Let's talk more in a moment.",
+      "Oh hi! My mind was wandering, give me a second.",
+      "I'd love to chat but I'm in the middle of something. Can we talk soon?"
+    ],
+    "sim.profile.backstory": "A life unfolding quietly, one day at a time.",
+    "sim.impulse": [
+      "Just taking in the day. Nothing pressing on my mind.",
+      "I should sort out my day before the time slips away.",
+      "I wonder what will happen later around here."
+    ],
+    "sim.reaction": [
+      "I can't believe that just happened.",
+      "That caught me completely off guard.",
+      "Wow, I need a moment to process that."
+    ],
+    "sim.social.a_line": ["So, how's your day going?", "You won't believe what I just saw."],
+    "sim.social.b_line": ["Same as always, I suppose.", "Tell me everything!"],
+    "sim.social.topic": "small talk",
+    "sim.social.close": "a brief conversation",
+    "sim.dream.narrative": [
+      "I dreamed I was walking through a house that kept rearranging its rooms.",
+      "I dreamed I was flying over the neighborhood, watching everyone's little lights go out.",
+      "I dreamed of a door that opened onto a place I almost remembered."
+    ],
+    "sim.dream.urge": "Explore somewhere unfamiliar today",
+    "sim.cognition.focus": "Get through the day at my own pace.",
+    "sim.sleep": "A quiet night. My thoughts settle as I drift off.",
+    "sim.diary": "Dear diary, today was ordinary, but I'm grateful for the little moments.",
+    "sim.lifestory": "Life keeps unfolding, one quiet day after another.",
+    "sim.aspiration": "Live a meaningful life",
+    "sim.background.expand": [
+      "I grew up in a modest neighborhood.",
+      "I had a childhood friend who moved away.",
+      "I always dreamed of something more."
+    ],
+    "god.zeitgeist.tags": ["calm", "everyday"],
+    "god.plan.theme": "The quiet rhythm of the neighborhood",
+    "god.scene.draft": "A chance encounter.",
+    "god.scene.subtext": "Something feels different today.",
+    "god.puppeteer.objective": "Strike up a conversation.",
+    "god.puppeteer.opening": "Hey, do you have a moment?",
+    "god.puppeteer.subtext": "You sense someone watching.",
+    "god.react.pivot": "The story continues on its own.",
+    "god.narration": "And so the day unfolds...",
+    "god.background": "A familiar, lived-in place.",
+    "world.npc.backstory": "A newcomer with an untold story.",
+    "world.household.chronicle": "The household went about its usual day.",
+    "world.gossip": "Word around town is that something interesting happened.",
+    "world.aftermath": "The neighborhood slowly returns to normal.",
+    "mem.consolidate": "We talked and I felt understood.",
+    "mem.compact": "The past fades into a few vivid memories.",
+    "mem.legacy": "A life remembered.",
+    "mem.relationship.review.note": "We get along well enough.",
+    "evo.reflect": "I look at myself and see someone still growing.",
+    "ops.recap.headline": "Previously...",
+    "ops.recap.text": "Life continues in this little world.",
+    "ops.panel.summary": "Sensewright is running quietly."
+  }
+}
