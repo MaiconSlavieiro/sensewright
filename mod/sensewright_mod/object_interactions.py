@@ -6,7 +6,6 @@
 # objects by matching the object definition name, because EA exposes no stable
 # tuning id for these objects across packs/builds.
 
-from sims4.sim import Sim
 from sims4communitylib.classes.interactions.common_immediate_super_interaction import CommonImmediateSuperInteraction
 from sims4communitylib.classes.testing.common_execution_result import CommonExecutionResult
 from sims4communitylib.classes.testing.common_test_result import CommonTestResult

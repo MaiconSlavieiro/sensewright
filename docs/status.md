@@ -388,3 +388,16 @@ Log validation (mod `Sensewright_Worker.log` + sidecar `sensewright-sidecar.log`
 Expected visible results after relaunch: `sim.reaction` emits spoken lines (notifications),
 God Director arcs form and narrate, impulse moods become real moodlets, and the mirror/diary/
 mailbox interactions are available (they were never installed before).
+
+### Regression caught on the next launch (18:22) and fixed
+
+The 18:22 launch produced a `lastException` (`categoryid=object_interactions.py:9`):
+`ModuleNotFoundError: No module named 'sims4.sim'` from a stray, unused
+`from sims4.sim import Sim` in `object_interactions.py`. That import aborts the whole
+`sensewright_mod.main` import (the game loads `main.py`), so the mod did **not** load:
+the worker never started and the sidecar was never autobooted (the 18:21 sidecar log lines
+were a local smoke test, not the game). Removed the import and added
+`tests/test_mod_game_imports.py`, a static guard that fails if any Mod file imports a
+non-existent `sims4.<submodule>` (the game packages live at the top level: `sims.sim`,
+`services`, `objects.*`, `situations.*`). Rebuilt and reinstalled; the installed
+`object_interactions.pyc` no longer references `sims4.sim`. 524 tests green.
