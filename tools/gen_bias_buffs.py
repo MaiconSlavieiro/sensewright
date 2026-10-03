@@ -26,7 +26,7 @@ BUFF_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <I c="Buff" i="buff" m="buffs.buff" n="{tuning_name}" s="0">
   <E n="buff_type">POSITIVE</E>
   <T n="duration">{duration}</T>
-  <T n="mood_type">0</T>
+  <E n="mood_type">HAPPY</E>
   <T n="mood_weight">0</T>
   <T n="visible">False</T>
   <U n="game_effect_modifiers">

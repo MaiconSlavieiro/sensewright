@@ -125,6 +125,19 @@ class TestProfileGeneration:
         assert services._schedule_profile_generation(state, 1, 1000, "en-US") is True
         assert services._schedule_profile_generation(state, 1, 1000, "en-US") is False
 
+    def test_autonomy_tick_schedules_profile_for_template_household_sim(self):
+        state = _state_with_store()
+        state.update_census({
+            1: {"sim_id": 1, "name": "Alice", "is_player": True,
+                "age_stage": "ADULT", "species": "HUMAN",
+                "pos": {"x": 0.0, "z": 0.0}},
+        })
+        services.handle_autonomy_tick({
+            "save_id": 1, "world_sim_tick": 1000, "clock_speed": 1,
+            "sims_delta": [], "lang": "en-US",
+        })
+        assert "sim.profile" in state.scheduler.purposes()
+
 
 # ── BUG-13 — relationship import ──────────────────────────────────────────
 class TestRelationshipsImport:

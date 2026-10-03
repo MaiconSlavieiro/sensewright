@@ -105,16 +105,26 @@ def get_or_create_player_confidant(player_name=None):
         if sim_info is not None:
             return sim_info
 
+    # BUG-12: the confidant's hidden household NAME does not reliably persist
+    # across sessions, so a household-name search re-creates it each session and
+    # duplicates the Sim (observed: 21 "Confidente Sensewright" rows). Search the
+    # whole sim manager for the existing confidant by its stable last name before
+    # creating a new one; the household is only a fallback.
+    existing = _find_existing_confidant_sim()
+    if existing is not None:
+        _player_confidant_sim_id = existing.id
+        _player_confidant_household_id = _coerce_household_id(existing)
+        log_info('Reused existing player confidant SimInfo: {} (ID: {})'.format(
+            _safe_getattr(existing, 'full_name', existing), existing.id))
+        return existing
+
     household = _get_or_create_hidden_household()
     if household is None:
         log_error('Failed to create hidden household for player confidant')
         return None
 
-    # BUG-12: the hidden household is dedicated to the confidant and persists
-    # across sessions, but the in-memory ``_player_confidant_sim_id`` resets to 0
-    # on every restart. The old code always spawned a fresh SimInfo, duplicating
-    # the confidant (20 "Confidente Sensewright" rows). Return the existing member
-    # before creating a new one.
+    # Fallback: an existing confidant already inside the (possibly re-created)
+    # hidden household still wins over spawning a duplicate.
     existing = _find_existing_confidant(household)
     if existing is not None:
         _player_confidant_sim_id = existing.id
@@ -180,6 +190,37 @@ def _get_or_create_hidden_household():
     except Exception as e:
         log_exception('Failed to create hidden household: {}'.format(e))
         return None
+
+
+def _find_existing_confidant_sim():
+    """Return an existing confidant SimInfo from the sim manager, or None.
+
+    BUG-12: the confidant is identified by its stable last name ("Sensewright")
+    plus the hidden trait. Searching the whole sim manager is robust to the
+    hidden household's name not persisting across sessions (the previous
+    household-name search re-created the confidant every restart).
+    """
+    manager = services.sim_info_manager()
+    if manager is None:
+        return None
+    try:
+        sims = list(manager.values())
+    except Exception:
+        sims = []
+    for sim_info in sims:
+        if sim_info is None:
+            continue
+        last_name = str(_safe_getattr(sim_info, 'last_name', '') or '')
+        full_name = str(_safe_getattr(sim_info, 'full_name', '') or '')
+        if 'Sensewright' in last_name or 'Sensewright' in full_name:
+            return sim_info
+    return None
+
+
+def _coerce_household_id(sim_info):
+    """Best-effort numeric household id for a sim (0 when unknown)."""
+    household = _safe_getattr(sim_info, 'household', None)
+    return _safe_getattr(household, 'id', 0) or 0
 
 
 def _find_existing_confidant(household):

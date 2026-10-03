@@ -466,6 +466,18 @@ the prompt is sent, so the tone follows the real feedback:
 > `mod_logs/Sensewright_Worker.log`, DB
 > `Mods/Sensewright/sidecar/data/saves/slot_1488584711.committed.db` (committed 14:54).
 
+> **Post-install follow-up (2026-10-03, session 15:23–15:30):** the first deploy left
+> three items incomplete, now fixed and re-deployed:
+> - **BUG-07 regression** — the `bias`/`dream`/`missing_player` buffs still used
+>   `<T n="mood_type">0</T>` (= `Mood.INVALID`), so `BuffInfo/MoodKey()` null kept
+>   flooding `lastUIException`. All buffs now use `<E n="mood_type">…</E>`.
+> - **BUG-12** — the hidden household's name doesn't persist, so the confidant was
+>   re-created (21 rows). `get_or_create_player_confidant` now searches the whole sim
+>   manager by last name first.
+> - **BUG-11** — census-time scheduling gated on `is_player` (unreliable at
+>   session-start). Added a seat-based trigger in `handle_autonomy_tick` + a census
+>   diagnostic log line.
+
 Status legend: ⬜ Pending · 🟡 In progress · ✅ Done
 
 ## Summary

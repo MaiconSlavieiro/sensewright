@@ -977,6 +977,10 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
             if _is_template_profile(profile):
                 if _schedule_profile_generation(state, sim_id, tick, lang):
                     scheduled_profiles += 1
+    logger.info(
+        "census: %d sims hydrated, %d household, %d profiles scheduled (relationships=%d)",
+        hydrated, len(household_sim_ids), scheduled_profiles, imported_edges,
+    )
 
     return {
         "ok": True,
@@ -1201,6 +1205,16 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         if seat["sim_id"] not in [s["sim_id"] for s in order]:
             order.append(seat)
     order = order[:budget]
+
+    # BUG-11: ensure the active sim and household seats have a real persona. The
+    # census pass may miss them (e.g. ``is_player`` not yet resolved when the
+    # census is collected at session-start), so re-check here on every autonomy
+    # tick using the seat assignment — which already proved it can identify
+    # household sims. RAM-guarded, so each sim is attempted once per session.
+    for seat in order:
+        profile = _sim_profile(state, int(seat["sim_id"]))
+        if _is_template_profile(profile):
+            _schedule_profile_generation(state, int(seat["sim_id"]), tick, lang)
 
     for seat in order:
         sim_id = int(seat["sim_id"])

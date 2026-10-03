@@ -2,7 +2,7 @@
 <I c="Buff" i="buff" m="buffs.buff" n="buff_dream_surreal" s="1234567890123456801">
   <E n="buff_type">NEUTRAL</E>
   <T n="duration">240</T>
-  <T n="mood_type">0</T>
+  <E n="mood_type">DAZED</E>
   <T n="mood_weight">0</T>
   <T n="visible">True</T>
   <V n="buff_name" t="localized_string" p="STBL">stbl.buff.dream_surreal.name</V>

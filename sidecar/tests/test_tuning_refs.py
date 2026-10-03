@@ -68,3 +68,23 @@ def test_interactions_use_real_binding_modules():
             assert module in expected_modules[kind], "{}: {} tuning binds to {}".format(
                 path.name, kind, module
             )
+
+
+def test_buff_mood_type_is_enum_not_numeric():
+    """Every buff must declare ``mood_type`` as an enum, never a numeric tunable.
+
+    BUG-07 regression: a ``<T n="mood_type">0</T>`` parses to ``Mood.INVALID``,
+    which has no client ``MoodKey`` and floods ``lastUIException`` with a null
+    reference. The correct form is ``<E n="mood_type">HAPPY</E>``.
+    """
+    offenders = []
+    for path in _xml_files():
+        if path.parent.name != "buffs":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if re.search(r'<T\b[^>]*\bn="mood_type"', text):
+            offenders.append(str(path.relative_to(TUNING_DIR)))
+    assert not offenders, (
+        "buff tunings use a numeric mood_type (must be an <E> enum):\n"
+        + "\n".join(offenders)
+    )

@@ -8,6 +8,42 @@ that remain. Complements [`status.md`](status.md) (spec↔code gap) and [`bugs.m
 
 ---
 
+## 2026-10-03 — Playtest #4 follow-up (post-install regression fixes)
+
+After the first deploy, a real session (`save 1488584711`, 15:23–15:30) showed three
+fixes were incomplete. Closed them:
+
+### A. `lastUIException` flood returned (BUG-07 regression)
+
+- The earlier `mood_type` fix only touched `buff_mood_*.xml`; the **bias**, **dream**
+  and **missing_player** buffs still used `<T n="mood_type">0</T>` (= `Mood.INVALID`,
+  no client `MoodKey`), so `BuffInfo/MoodKey()` null still flooded `lastUIException`.
+- All remaining buffs now use `<E n="mood_type">HAPPY|INSPIRED|DAZED|STRESSED|SAD</E>`;
+  `tools/gen_bias_buffs.py` template fixed so regeneration can't reintroduce it;
+  `test_tuning_refs.py` now asserts no buff uses a numeric `mood_type`. | `mod/tuning/buffs/*.xml`, `tools/gen_bias_buffs.py`, `test_tuning_refs.py` |
+
+### B. Confidant still duplicated (BUG-12)
+
+- The hidden household's **name** doesn't reliably persist, so the household-name
+  search re-created the confidant each session (21 rows). `get_or_create_player_confidant`
+  now searches the whole sim manager for the existing confidant by last name
+  ("Sensewright") before spawning a new `SimInfo`. | `native_hooks.py` |
+
+### C. `sim.profile` still never ran (BUG-11)
+
+- Census-time scheduling gated on `is_player`, which was unreliable at session-start.
+  Added a second, seat-based trigger in `handle_autonomy_tick` (the same assignment
+  that already drives impulses, so it provably identifies household sims) and a
+  diagnostic census log line. | `services.py`, `test_playtest4.py` |
+
+### Verification
+
+- `cd sidecar && python -m pytest -q` → **673 passed** (2 new).
+- `py -3.7 -m compileall -q mod/sensewright_mod` → clean.
+- Build + deploy via `scripts/install-mod.ps1`.
+
+---
+
 ## 2026-10-03 — Playtest #4 fixes: personas, relationships, catalyst gating, census hygiene
 
 Closed **BUG-11/12/13/14/15/16/17** and addressed **NOTE-02** (see [`bugs.md`](bugs.md)).
