@@ -8,6 +8,61 @@ that remain. Complements [`status.md`](status.md) (spec↔code gap) and [`bugs.m
 
 ---
 
+## 2026-10-03 — Playtest #4 fixes: personas, relationships, catalyst gating, census hygiene
+
+Closed **BUG-11/12/13/14/15/16/17** and addressed **NOTE-02** (see [`bugs.md`](bugs.md)).
+
+### A. `sim.profile` actually runs (BUG-11)
+
+| # | Change | Files |
+|---|--------|-------|
+| 1 | `handle_census` schedules a bounded background `sim.profile` for household sims whose stored profile is still a template (deduped + RAM-guarded per session). | `services.py`, `state.py` |
+| 2 | `handle_profile` regenerates when the profile is a template (empty persona), not just when it is `None`; generated personas are tagged `source="llm"`. | `services.py`, `agent/profile.py` |
+| 3 | `handle_chat` kicks off a one-shot fallback generation when the persona is still empty. | `services.py` |
+
+### B. Player confidant dedupe (BUG-12)
+
+- `get_or_create_player_confidant` searches the hidden household for an existing member
+  (name marker, then first member) before spawning a new `SimInfo`. | `native_hooks.py` |
+
+### C. Relationship graph collection (BUG-13)
+
+- `collect_full_census` collects edges via S4CL `CommonRelationshipUtils.get_relationships_gen`
+  + `get_friendship_level`/`get_romance_level`; the engine's `Relationship` exposes
+  `sim_id_a`/`sim_id_b`/`get_other_sim_id`, not `target_sim_id`/`friendship`/`romance`. | `state_collector.py` |
+
+### D. Catalyst gate on `beat-ended` (BUG-14)
+
+- The Mod reports the conversation peer (`target_sim_id`) with `beat-ended`.
+- The sidecar gates `run_react` on whether either participant is the catalyst (leased
+  puppeteer NPC or a resolved cast member); ambient chatter no longer advances the arc. | `catalyst_tracker.py`, `god/react.py`, `god/orchestrator.py`, `services.py` |
+
+### E. Census hygiene (BUG-15/16/17)
+
+- `age_stage` reported via `Age.name` (stripping an `Age.` prefix); sidecar normalizes legacy
+  stored values in `normalize_age_stage`. | `state_collector.py`, `agent/profile.py`, `services.py` |
+- `http_client._make_request` no longer sends a JSON body on GET (moves the payload into the
+  query string), fixing the mailbox `/world/neighborhood` WinError 10053. | `http_client.py` |
+- `gender` (`M`/`F`/`N`) collected via S4CL `CommonGenderUtils` and threaded into `sim.chat`,
+  `sim.social` and `sim.profile` contexts. | `state_collector.py`, `agent/chat.py`, `agent/social.py`, `services.py` |
+
+### F. LLM routing (NOTE-02, ops)
+
+- `config.example.toml` documents JSON-only routing + the groq 403 user-agent issue; the
+  installed `config.toml` routes JSON-only purposes to a JSON-capable free model and keeps
+  `deepseek` disabled. | `config.example.toml`, `config.toml` |
+
+### Verification
+
+- `cd sidecar && python -m pytest -q` → **671 passed** (16 new in `test_playtest4.py`, plus
+  the updated catalyst-gate assertions in `test_p2_infra.py`).
+- `py -3.7 -m compileall -q mod/sensewright_mod` → clean.
+- `python mod/build_package.py` → `Sensewright.package` (16,864 B, 43 resources).
+- `python mod/build.py` → `Sensewright.ts4script` (100,257 B, 3.7 bytecode).
+- Deployed with `scripts/install-mod.ps1`.
+
+---
+
 ## 2026-10-03 — Chat grounding + context-aware dialogue + native relationship feedback
 
 Requirement review: "any interaction must consider context", plus the native
@@ -111,6 +166,11 @@ Closed **BUG-08/09/10** (see [`bugs.md`](bugs.md)).
 - [ ] **Web Studio UX gaps.** The Sims tab has no auto-refresh (manual "Refresh Sims" only), and
       the God tab does not render `director_mode` (only the preset dropdown).
 - [ ] **In-game Phase 6.2 validation still pending** — see [`hardening.md`](hardening.md).
+- [ ] **Playtest #4 follow-up playtest.** BUG-11..17 + NOTE-02 are now fixed in code/config
+      (see [`bugs.md`](bugs.md) → "Playtest #4 — diagnosis — FIXED"), but the in-game
+      confirmation is still pending: `sim.profile` should run (`purpose=sim.profile` > 0),
+      exactly one confidant should persist, `relationships` should fill, and only catalyst
+      conversations should advance an arc. Re-verify with `scripts/install-mod.ps1` + play.
 
 ---
 

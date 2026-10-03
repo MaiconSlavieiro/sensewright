@@ -19,7 +19,9 @@ from .presence import (
     capabilities, excluded_from_seats, hard_blocked_social, presence_tier,
     sensory_only,
 )
-from .profile import enforce_life_story, normalize_profile, template_profile
+from .profile import (
+    enforce_life_story, normalize_age_stage, normalize_profile, template_profile,
+)
 from .psyche import (
     block_for_category, compute_salience, decay_blocks, is_salient,
     reinforce_block, strongest_block,
@@ -44,6 +46,7 @@ __all__ = [
     "normalize_intent", "validate_intent",
     "capabilities", "excluded_from_seats", "presence_tier", "sensory_only",
     "enforce_life_story", "normalize_profile", "template_profile",
+    "normalize_age_stage",
     "block_for_category", "compute_salience", "decay_blocks", "is_salient",
     "reinforce_block", "strongest_block",
     "SeatManager",

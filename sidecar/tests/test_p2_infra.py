@@ -159,14 +159,31 @@ class TestBeatEnded:
 
     def test_beat_ended_handler_advances_arc(self):
         state = _state_with_store()
-        state.active_arc = create_arc("drama", [{"title": "b1"}, {"title": "b2"}], [], 10)
+        arc = create_arc("drama", [{"title": "b1"}, {"title": "b2"}],
+                         [{"sim_id": 7, "role": "catalyst"}], 10)
+        state.active_arc = arc
         state.working_store().save_arc(state.active_arc)
+        state.catalyst_leases = {7: {"objective": "x", "lease_expires_tick": 999999}}
         result = services.handle_beat_ended({
             "save_id": 1, "world_sim_tick": 200, "decision": "accept",
-            "agent_sim_id": 1, "lang": "en-US",
+            "agent_sim_id": 1, "target_sim_id": 7, "lang": "en-US",
         })
         assert result["ok"] is True
         assert state.active_arc["current_beat_idx"] == 1
+
+    def test_beat_ended_rejects_non_catalyst_conversation(self):
+        state = _state_with_store()
+        arc = create_arc("drama", [{"title": "b1"}, {"title": "b2"}],
+                         [{"sim_id": 7, "role": "catalyst"}], 10)
+        state.active_arc = arc
+        state.working_store().save_arc(state.active_arc)
+        result = services.handle_beat_ended({
+            "save_id": 1, "world_sim_tick": 200, "decision": "accept",
+            "agent_sim_id": 3, "target_sim_id": 4, "lang": "en-US",
+        })
+        assert result["ok"] is False
+        assert result["reason"] == "not_catalyst_conversation"
+        assert state.active_arc["current_beat_idx"] == 0
 
     def test_beat_ended_endpoint(self, client):
         response = client.post("/v1/god/beat-ended", json={"save_id": 1})

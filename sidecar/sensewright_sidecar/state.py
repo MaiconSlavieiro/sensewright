@@ -77,6 +77,11 @@ class AppState:
         self.townie_sightings: Dict[int, int] = {}
         #: Sims for which sim.background.expand already ran (P13).
         self.background_expanded: set = set()
+        #: Sims for which a ``sim.profile`` generation was already scheduled this
+        #: session (BUG-11). Bounds the chat-triggered fallback to one attempt per
+        #: sim per session, so a persistent template (LLM down) cannot re-spawn a
+        #: profile job on every chat message.
+        self.profile_generation_attempted: set = set()
         #: Per-sim tick of the last relationship review (P29).
         self.last_relationship_review_tick: Dict[int, int] = {}
         #: Panic switch (FC4 / 4.8): when True autonomy dispatch is suspended.
@@ -268,6 +273,7 @@ class AppState:
             self.recap = {}
             self.townie_sightings = {}
             self.background_expanded = set()
+            self.profile_generation_attempted = set()
             self.last_relationship_review_tick = {}
             self.paused = False
             self.seats = {}

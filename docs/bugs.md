@@ -453,3 +453,249 @@ the prompt is sent, so the tone follows the real feedback:
   `build_social_context` location/relationship/action, native feedback delta).
 - `py -3.7 -m py_compile` on changed Mod files → clean.
 - `python -m py_compile` on changed Sidecar files → clean.
+
+---
+
+# Playtest #4 — diagnosis (2026-10-03 14:42–14:54) — FIXED
+
+> **Status:** ✅ CLOSED (2026-10-03) — BUG-11/12/13/14/15/16/17 fixed with regression
+> tests (`sidecar/tests/test_playtest4.py`, 16 tests) + NOTE-02 addressed in config/docs.
+> **Branch:** `v2-remake`
+> **Basis:** real session `save 1488584711`, logs
+> `Mods/Sensewright/sidecar/data/logs/sensewright-sidecar.log` +
+> `mod_logs/Sensewright_Worker.log`, DB
+> `Mods/Sensewright/sidecar/data/saves/slot_1488584711.committed.db` (committed 14:54).
+
+Status legend: ⬜ Pending · 🟡 In progress · ✅ Done
+
+## Summary
+
+| ID | Bug | Severity | Evidence (this session) | Status |
+|----|-----|----------|--------------------------|--------|
+| BUG-11 | `sim.profile` never runs → every Sim has an empty persona | Critical | `sim.profile` = **0** all-time; DB **114/124** profiles `source=template`, **0** `source=llm`, all personality fields empty | ✅ Fixed |
+| BUG-12 | Player confidant re-created every session → **20** "Confidente Sensewright" | High | `SELECT COUNT(*) FROM sims WHERE profile LIKE '%Confidente Sensewright%'` = 20 | ✅ Fixed |
+| BUG-13 | `relationships` table empty → no relationship graph/baseline | High | `relationships` = **0 rows**; `relationships_imported=0` | ✅ Fixed |
+| BUG-14 | `beat-ended` posted for **every** conversation → arc burns through beats | High | 30 `beat-ended posted`; arc `28abc5324e9b` idx 1→6 → `done` in ~3 min; `god.react` 7× | ✅ Fixed |
+| BUG-15 | `age_stage` carries an `Age.` prefix → enum never translates | Medium | DB `age_stage="Age.YOUNGADULT"`; prompt shows `Age.YOUNGADULT` not `Jovem Adulto` | ✅ Fixed |
+| BUG-16 | Mailbox `/world/neighborhood` request aborts (WinError 10053) | Medium | 2× `Request exception for /world/neighborhood?save_id=...` | ✅ Fixed |
+| BUG-17 | `gender` never collected → gender inflection never applies | Low | `llm/context._render_ctx` reads `context.get("gender")`, never populated by the Mod | ✅ Fixed |
+| NOTE-02 | LLM routes unreliable (deepseek unusable, groq 403, circuit-open) | Ops | many `all routes failed` / `circuit-open` at 14:52; benches on deepseek & openrouter free | ✅ Addressed |
+
+### Fix summary
+
+- **BUG-11** — `handle_census` now schedules a bounded background `sim.profile`
+  generation for household sims whose stored profile is still a template;
+  `handle_profile` regenerates when `source == "template"` (empty persona) instead
+  of only when the profile is `None`; `handle_chat` kicks off a one-shot fallback
+  generation (RAM-guarded per session). Generated personas are tagged
+  `source="llm"`; the 0-key fallback stays `template`.
+- **BUG-12** — `get_or_create_player_confidant` now searches the hidden household
+  for an existing member (name marker, then first member) before spawning a new
+  `SimInfo`.
+- **BUG-13** — `collect_full_census` collects relationship edges via S4CL
+  `CommonRelationshipUtils.get_relationships_gen` + `get_friendship_level` /
+  `get_romance_level` (the engine's `Relationship` exposes `sim_id_a`/`sim_id_b`/
+  `get_other_sim_id`, not `target_sim_id`/`friendship`/`romance`).
+- **BUG-14** — the Mod reports the conversation peer (`target_sim_id`) with
+  `beat-ended`; the sidecar gates `run_react` on whether either participant is the
+  catalyst (leased puppeteer NPC or a resolved cast member). Ambient chatter no
+  longer advances the arc.
+- **BUG-15** — the Mod reports `age_stage` via `Age.name` (stripping an `Age.`
+  prefix); the sidecar normalizes legacy stored values in `normalize_age_stage`.
+- **BUG-16** — `http_client._make_request` no longer sends a JSON body on GET;
+  any GET payload (e.g. `trace_id`) is moved into the query string.
+- **BUG-17** — the Mod collects `gender` (`M`/`F`/`N` via S4CL `CommonGenderUtils`)
+  and the sidecar threads it into `sim.chat`, `sim.social` and `sim.profile` contexts.
+- **NOTE-02** — `sidecar/config.example.toml` + the installed `config.toml` now route
+  JSON-only purposes explicitly to a JSON-capable free model and keep `deepseek`
+  disabled (ops, no code change).
+
+---
+
+## Baseline that already works (do not regress)
+
+- **Chat** (10 msgs): `chat submitted ... player=Confidente friendship=0.05` and
+  `chat response ... len=55..263` — the BUG-08 grounding fix is live (player name +
+  friendship + varied replies).
+- **sim.social** (34 runs): pairs form and pass `gate={... ok: True}`.
+- **Memory** (581 rows): `thought` 495, `sleep_reflection` 21, `consolidated` 19,
+  `backstory` 15, `legacy` 12, `dream` 11, `diary` 8.
+- **God Director**: `god.plan`, `god.cast → spawn_npc` (2×), `god.puppeteer`; intents
+  applied (`bias_interaction`, `set_mood`, `speak`, `command`, `spawn_npc`).
+
+---
+
+## BUG-11 — `sim.profile` never runs; every Sim has an empty persona ✅ FIXED
+
+**Symptom.** Chat/dialogue prompts render with empty `Core personality / Current
+demeanor / Speech style`. Replies feel generic even with the scene context in place.
+
+**Evidence.**
+- Sidecar log: `purpose=sim.profile` = **0** (entire history).
+- DB: `source="llm"` = **0**, `source="template"` = **114** (of 124 sims); e.g.
+  `core_personality=""`, `current_demeanor=""`, `speech_style=""`, `backstory=""`.
+
+**Root cause.** `handle_census` (`services.py:835`) pre-creates a **template** profile for
+every census Sim; `handle_profile` (`services.py:1555`) only calls `run_purpose("sim.profile")`
+when `profile is None or force_interactive` — since the template already exists, the LLM
+profile is never generated. The Mod never posts `/v1/profile`.
+
+**Impact.** The `sim.chat`/`sim.social` system prompt has no persona to ground the voice
+(the very "respostas sempre iguais/genéricas" symptom).
+
+**Fix (implemented).**
+- `handle_census` schedules a bounded background `sim.profile` for household sims whose
+  stored profile is still a template; `handle_profile` regenerates on `source == "template"`
+  (empty persona); `handle_chat` triggers a one-shot (RAM-guarded) fallback generation.
+- Generated personas are tagged `source="llm"`; the 0-key fallback stays `template`.
+
+**Files.** `sidecar/sensewright_sidecar/services.py` (`handle_census`, `handle_profile`,
+`handle_session_start`), `mod/sensewright_mod/state_collector.py` (census), purpose
+`sim.profile` (`purposes.py:55`).
+
+---
+
+## BUG-12 — Player confidant re-created every session (20 duplicates) ✅ FIXED
+
+**Symptom.** The player's identity/trust does not persist; the DB accumulates confidants.
+
+**Evidence.** DB: **20** rows with `name="Confidente Sensewright"` across different
+`generated_at_tick`s (17988692 … 34155186).
+
+**Root cause.** `native_hooks.get_or_create_player_confidant` (`native_hooks.py:94`) only
+checks the in-memory `_player_confidant_sim_id` (0 on every game restart). It finds the
+hidden household by name but then **always** `CommonSimSpawnUtils.create_sim_info(...)`,
+never searching the household for an existing confidant.
+
+**Impact.** Friendship/trust (sim↔confidant) restarts near 0 each session; `state.relationships`
+and the native-feedback delta lose their anchor; DB growth.
+
+**Fix (implemented).** After resolving the hidden household, `_find_existing_confidant`
+returns an existing member (name marker, then first member) before spawning a new `SimInfo`.
+
+**Files.** `mod/sensewright_mod/native_hooks.py`.
+
+---
+
+## BUG-13 — `relationships` table is empty (no relationship graph/baseline) ✅ FIXED
+
+**Symptom.** Web Studio relationship graph is empty; relationship-based logic has no data.
+
+**Evidence.** DB: `relationships` = **0 rows**; census response `relationships_imported=0`.
+
+**Root cause.** `collect_full_census` (`state_collector.py:743-750`) iterates
+`rel_tracker.relationships` and reads `rel.target_sim_id` / `.friendship` / `.romance` —
+none of these exist on TS4's `Relationship` (it exposes `sim_id_a`/`sim_id_b`,
+`get_other_sim_id`, and track accessors). Same failure class as the old `family_links` bug.
+
+**Impact.** `mem.relationship.review` has no edges; `relationship_context` baseline is
+always 0 (so the native-feedback delta is really "current value"); Web Studio empty.
+
+**Fix (implemented).** `collect_full_census` collects edges via S4CL
+`CommonRelationshipUtils.get_relationships_gen` + `get_friendship_level`/`get_romance_level`
+(the engine's `Relationship` exposes `sim_id_a`/`sim_id_b`/`get_other_sim_id`).
+
+**Files.** `mod/sensewright_mod/state_collector.py` (`collect_full_census`).
+
+---
+
+## BUG-14 — `beat-ended` fires for every conversation; arc burns through beats ✅ FIXED
+
+**Symptom.** The God Director's arc advances on ambient chatter and completes within minutes.
+
+**Evidence.** Worker log: 30 `beat-ended posted` for unrelated sims; sidecar
+`god.react beat resolved idx=1..6`; arc `28abc5324e9b` went `active`→`done` in ~3 min
+(14:49:47 → 14:52:44).
+
+**Root cause.** `catalyst_tracker.observe` (`catalyst_tracker.py:55-71`) reports the end of
+**any** conversation as `beat-ended`; it never checks whether the conversation involved the
+current **catalyst** (lease from `god.cast`). Every ambient sim conversation therefore
+triggers `god.react` and advances the arc.
+
+**Impact.** Wasted `god.react` LLM calls; incoherent narrative pacing; beats consumed by
+random conversations.
+
+**Fix (implemented).** The Mod reports the conversation peer (`target_sim_id`) with
+`beat-ended`; the sidecar gates `run_react` on whether either participant is the catalyst
+(leased puppeteer NPC or a resolved cast member). Ambient chatter no longer advances the arc.
+
+**Files.** `mod/sensewright_mod/catalyst_tracker.py` (+ possibly `native_hooks`/sidecar lease
+exposure to the Mod).
+
+---
+
+## BUG-15 — `age_stage` carries an `Age.` prefix ✅ FIXED
+
+**Symptom.** Age renders as `Age.YOUNGADULT` in profiles/prompts instead of a localized label.
+
+**Evidence.** DB profiles: `age_stage="Age.YOUNGADULT"`, `"Age.ADULT"`, `"Age.INFANT"`.
+Prompt enum lookup key is `YOUNGADULT`.
+
+**Root cause.** `state_collector.py:643` does `str(_safe_getattr(sim_info, 'age', 'YOUNGADULT'))`;
+`sim_info.age` is an `Age` enum whose `str()` is `"Age.YOUNGADULT"`.
+
+**Fix (implemented).** The Mod reports `age_stage` via `Age.name` (stripping an `Age.` prefix);
+the sidecar normalizes legacy stored values in `normalize_age_stage`.
+
+**Files.** `mod/sensewright_mod/state_collector.py` (+ `agent/profile.normalize_profile`).
+
+---
+
+## BUG-16 — Mailbox `/world/neighborhood` GET aborts (WinError 10053) ✅ FIXED
+
+**Symptom.** "Neighborhood Stories" mailbox notification fails; a request exception is logged.
+
+**Evidence.** Worker log 14:48:07 and 14:52:32:
+`Request exception for /world/neighborhood?save_id=1488584711: [WinError 10053]`.
+
+**Root cause (probable).** `get_async` builds a GET request but `http_client._make_request`
+always serializes the payload as a JSON **body** (`data=`) even for GET; with a query string
+already present, the server (uvicorn) resets the connection. (`handle_neighborhood` itself is
+fast/side-effect-free.)
+
+**Fix (implemented).** `http_client._make_request` no longer sends a JSON body on GET; any GET
+payload (e.g. `trace_id`) is moved into the query string.
+
+**Files.** `mod/sensewright_mod/http_client.py` (`get_async` / `_make_request`).
+
+---
+
+## BUG-17 — `gender` never collected (no gender inflection) ✅ FIXED
+
+**Symptom.** Gender-inflected pt-BR strings always use the masculine/neutral form.
+
+**Evidence.** `llm/context._render_ctx` reads `context.get("gender")`; neither the census nor
+the delta ever sends a `gender` field.
+
+**Fix (implemented).** The Mod collects `gender` (`M`/`F`/`N` via S4CL `CommonGenderUtils`) and
+the sidecar threads it into `sim.chat`, `sim.social` and `sim.profile` contexts.
+
+**Files.** `mod/sensewright_mod/state_collector.py`, sidecar contexts.
+
+## NOTE-02 — LLM routes unreliable during the session (ops) ✅ ADDRESSED
+
+**Symptom.** Many purposes fell back to deterministic templates around 14:52.
+
+**Evidence.** `deepseek-flash`/`deepseek-v4-pro` benched ("unusable output") per NOTE-01;
+`groq` returned `HTTP 403: error code 1010` (Cloudflare) → provider circuit opened; opencode
+and openrouter free models benched/circuit-open; `sim.impulse`, `god.react`,
+`sim.social.close`, `god.narration`, `god.scene` → `all routes failed` → fallback.
+
+**Action (config/ops, done).** `sidecar/config.example.toml` + the installed `config.toml`
+route JSON-only purposes explicitly to a JSON-capable free model, keep `deepseek` disabled,
+and document the groq 403 (Cloudflare) user-agent issue. No code change required.
+
+---
+
+## How to re-inspect this session
+
+1. With the game closed:
+   - Sidecar log: `%USERPROFILE%\OneDrive\Documents\Electronic Arts\The Sims 4\Mods\Sensewright\sidecar\data\logs\sensewright-sidecar.log`
+   - Worker log: `...\The Sims 4\mod_logs\Sensewright_Worker.log`
+   - DB: `...\Mods\Sensewright\sidecar\data\saves\slot_1488584711.committed.db`
+2. Quick DB probes:
+   - `sim.profile` count: `grep -c 'purpose=sim.profile' sensewright-sidecar.log` (expect > 0).
+   - Confidants: `SELECT COUNT(*) FROM sims WHERE profile LIKE '%Confidente%';`
+   - Profiles: `SELECT COUNT(*) FROM sims WHERE profile LIKE '%"source": "llm"%';`
+   - Edges: `SELECT COUNT(*) FROM relationships;`
+   - Arcs: `SELECT id,status,current_beat_idx,theme FROM arcs;`

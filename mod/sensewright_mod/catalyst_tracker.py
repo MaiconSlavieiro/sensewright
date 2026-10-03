@@ -78,16 +78,23 @@ def _report(sim_id, sim):
     try:
         state = get_current_game_state()
         decision = _infer_decision(sim)
+        # BUG-14: report the conversation peer so the sidecar can gate on whether
+        # the conversation actually involved the leased catalyst. Without the peer
+        # the sidecar cannot distinguish a catalyst scene from ambient chatter and
+        # advances the arc on every random conversation.
+        peer_sim_id = sim.get('social_target_sim_id', 0) if isinstance(sim, dict) else 0
         post_async('/god/beat-ended', {
             'trace_id': generate_trace_id(),
             'sim_id': sim_id,
             'agent_sim_id': sim_id,
+            'target_sim_id': int(peer_sim_id or 0),
             'decision': decision,
             'player_id': 'player_1',
             'save_id': state['save_id'],
             'world_sim_tick': state['world_sim_tick'],
             'lang': get_current_language(),
         })
-        worker_log_info('catalyst tracker: beat-ended posted sim={} decision={}'.format(sim_id, decision))
+        worker_log_info('catalyst tracker: beat-ended posted sim={} peer={} decision={}'.format(
+            sim_id, peer_sim_id, decision))
     except Exception as e:
         log_exception('catalyst_tracker: report failed: {}'.format(e))

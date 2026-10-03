@@ -144,10 +144,16 @@ chaos_degree = 0.5
 beat_timeout_sim_days = 1
 
 # ────────────────────────────────────────────────────────────────
-# Routing note (NOTE-01): JSON-only purposes (sim.reaction, god.plan,
-# god.scene, sim.impulse…) must resolve to a model that reliably emits JSON.
-# Route them explicitly instead of leaving them on a reasoning model:
+# Routing note (NOTE-01 / NOTE-02): JSON-only purposes must resolve to a model
+# that reliably emits JSON. Do NOT leave them on a reasoning model
+# (deepseek-v4-pro / deepseek-flash emit prose around the payload and get
+# benched as "unusable output"). Route them explicitly:
 #   [llm.routes."sim.reaction"]
 #   provider = "openrouter"
 #   model = "meta-llama/llama-3.1-8b-instruct:free"
+#
+# Keep the paid deepseek provider disabled (set [llm.providers.deepseek]
+# enabled = false) unless you point it at a JSON-capable model. If groq returns
+# HTTP 403 (Cloudflare "error code 1010"), the edge is blocking the default
+# urllib user-agent — prefer openrouter/opencode/gemini free models instead.
 # ────────────────────────────────────────────────────────────────

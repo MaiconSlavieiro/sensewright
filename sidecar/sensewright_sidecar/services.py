@@ -16,12 +16,13 @@ from .agent import (
     build_impulse_context, build_reaction_context, build_reflect_context,
     coerce_float, compute_salience, decay_blocks, enforce_life_story,
     extract_thought, family_relation_label, hard_blocked_social, is_deferred,
-    is_salient, location_context, normalize_intent, normalize_profile,
-    physical_actions_allowed, preflight, record_speech, reinforce_block,
-    relationship_context, resolve_limits, sleep_transition, speech_allowed,
-    strip_thought, trust_delta,
+    is_salient, location_context, normalize_age_stage, normalize_intent,
+    normalize_profile, physical_actions_allowed, preflight, record_speech,
+    reinforce_block, relationship_context, resolve_limits, sleep_transition,
+    speech_allowed, strip_thought, trust_delta,
 )
 from .agent.psyche import block_for_category
+from .agent.profile import PROFILE_SOURCE_LLM, PROFILE_SOURCE_TEMPLATE
 from .agent.social import build_social_context, has_rumor_to_spread
 from .constants import (
     AFTERMATH_SALIENCE_THRESHOLD, COMPACT_ARCHIVE_COUNT,
@@ -112,6 +113,88 @@ def _persist_profile(state: AppState, sim_id: int, profile: Dict[str, Any], tick
     store = _store(state)
     if store is not None and profile:
         store.upsert_sim_profile(sim_id, profile, tick)
+
+
+def _is_template_profile(profile: Optional[Dict[str, Any]]) -> bool:
+    """True when a profile still lacks an LLM-generated persona (BUG-11).
+
+    ``handle_census`` pre-creates a template profile for every census Sim, and
+    ``handle_profile`` used to gate LLM generation on ``profile is None`` — which
+    is never true once the template exists. Gate on whether the persona is empty
+    instead: a template (or a 0-key fallback) has no core personality, demeanor
+    or speech style.
+    """
+    if not isinstance(profile, dict):
+        return True
+    return not (
+        profile.get("core_personality")
+        or profile.get("current_demeanor")
+        or profile.get("speech_style")
+    )
+
+
+def _profile_source(data: Dict[str, Any]) -> str:
+    """Return ``llm`` when ``data`` carries a real persona, else ``template``.
+
+    The 0-key fallback and the census template both leave the personality fields
+    empty; only a successful ``sim.profile`` generation fills them. Tracking this
+    on the profile keeps ``_is_template_profile`` honest without a separate flag.
+    """
+    if data.get("core_personality") or data.get("current_demeanor") or data.get("speech_style"):
+        return PROFILE_SOURCE_LLM
+    return PROFILE_SOURCE_TEMPLATE
+
+
+def _profile_callback(state: AppState, sim_id: int, tick: int):
+    """Background callback: persist a generated ``sim.profile`` (BUG-11)."""
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            sim = state.get_census(sim_id) or {"name": ""}
+            profile = normalize_profile(
+                data, name=sim.get("name", ""), species=sim.get("species"),
+                age_stage=sim.get("age_stage"), traits=sim.get("traits"),
+                likes=sim.get("likes"), dislikes=sim.get("dislikes"),
+                source=_profile_source(data),
+                generated_at_tick=tick,
+            )
+            _persist_profile(state, sim_id, profile, tick)
+            state.incr("profiles_generated")
+        except Exception:  # noqa: BLE001
+            logger.exception("sim.profile callback failed for sim %s", sim_id)
+
+    return _callback
+
+
+def _schedule_profile_generation(state: AppState, sim_id: int, tick: int, lang: str) -> bool:
+    """Schedule a background ``sim.profile`` generation for one sim (BUG-11).
+
+    Bounded (one attempt per sim per session) and deduped; returns False when no
+    job was scheduled (store unavailable, or already attempted this session). The
+    LLM call runs off the request thread and the persona is persisted by
+    ``_profile_callback``.
+    """
+    store = _store(state)
+    if store is None:
+        return False
+    if sim_id in state.profile_generation_attempted:
+        return False
+    state.profile_generation_attempted.add(sim_id)
+    sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
+    ctx = {
+        "sim_id": sim_id, "sim_name": sim.get("name", ""),
+        "species": sim.get("species"), "age_stage": sim.get("age_stage"),
+        "gender": sim.get("gender"),
+        "traits": sim.get("traits"), "likes": sim.get("likes"),
+        "dislikes": sim.get("dislikes"), "world_sim_tick": int(tick),
+    }
+    state.scheduler.submit_bg(
+        "sim.profile", ctx, lang,
+        dedup_key="{}:{}:profile".format(state.active_save_id or 0, sim_id),
+        callback=state.guard_callback("sim.profile", _profile_callback(state, sim_id, tick)),
+    )
+    return True
 
 
 def _schedule_cognition(state: AppState, sim_id: int, tick: int, lang: str, trace_id) -> None:
@@ -821,14 +904,21 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
     hydrated = 0
     store = _store(state)
     census_update: Dict[int, Dict[str, Any]] = {}
+    household_sim_ids: List[int] = []
     for sim in sims:
         if not isinstance(sim, dict):
             continue
         sim_id = int(sim.get("sim_id", 0))
         if not sim_id:
             continue
+        # BUG-15: legacy builds report ``Age.YOUNGADULT``; normalize so the
+        # enum keys (and every downstream age comparison) match the canonical token.
+        if "age_stage" in sim:
+            sim["age_stage"] = normalize_age_stage(sim.get("age_stage"))
         census_update[sim_id] = sim
         hydrated += 1
+        if sim.get("is_player"):
+            household_sim_ids.append(sim_id)
         if store is not None:
             existing = store.get_sim_profile(sim_id)
             profile = existing["profile"] if existing else None
@@ -872,7 +962,28 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
         imported_edges += 1
 
     state.update_census(census_update)
-    return {"ok": True, "hydrated_count": hydrated, "relationships_imported": imported_edges}
+
+    # BUG-11: generate a real persona for household sims at session-start (bounded,
+    # background, deduped). The template profile created above is only a placeholder;
+    # without this the LLM never runs and every dialogue is generic.
+    lang = normalize_lang(payload.get("lang"))
+    tick = int(payload.get("world_sim_tick", 0))
+    max_profiles = int(state.config.gameplay("agent_seats", 12))
+    scheduled_profiles = 0
+    if store is not None:
+        for sim_id in household_sim_ids[:max_profiles]:
+            existing = store.get_sim_profile(sim_id)
+            profile = (existing or {}).get("profile")
+            if _is_template_profile(profile):
+                if _schedule_profile_generation(state, sim_id, tick, lang):
+                    scheduled_profiles += 1
+
+    return {
+        "ok": True,
+        "hydrated_count": hydrated,
+        "relationships_imported": imported_edges,
+        "profiles_scheduled": scheduled_profiles,
+    }
 
 
 # ── autonomy ─────────────────────────────────────────────────────────────
@@ -1353,6 +1464,13 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     memories = store.recent_memories(sim_id, limit=8) if store else []
     profile = (store.get_sim_profile(sim_id) or {}).get("profile") if store else None
 
+    # BUG-11 fallback: if the sim opens a chat while its persona is still an empty
+    # template, kick off a background profile generation (non-blocking) so the
+    # reply has a persona on the next message. The census pass usually covers this,
+    # but a chat can arrive before that job lands.
+    if _is_template_profile(profile):
+        _schedule_profile_generation(state, sim_id, tick, lang)
+
     # BUG: friendship was never available — the mod never sent it and the census
     # omits it, so trust was pinned to the lowest tier. Prefer the wire value,
     # fall back to the census, then to the relationship store.
@@ -1367,6 +1485,7 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         history=history, family=_resolve_family(state, sim_id),
         location=location_context(state, sim),
         action=action_context(sim),
+        gender=sim.get("gender"),
     )
     result = state.scheduler.run_purpose("sim.chat", ctx, lang)
     data = result.data or {}
@@ -1552,8 +1671,13 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
         existing = store.get_sim_profile(sim_id)
         profile = existing["profile"] if existing else None
 
-    if profile is None or force_interactive:
+    # BUG-11: regenerate when there is no stored profile, when the caller forces
+    # an interactive regeneration, OR when the stored profile is still a template
+    # (empty persona) — the census pre-creates a template, which used to make the
+    # `profile is None` gate never fire.
+    if profile is None or force_interactive or _is_template_profile(profile):
         ctx = {"sim_id": sim_id, "sim_name": sim.get("name", ""), "species": sim.get("species"), "age_stage": sim.get("age_stage"),
+               "gender": sim.get("gender"),
                "traits": sim.get("traits"), "likes": sim.get("likes"), "dislikes": sim.get("dislikes"),
                "world_sim_tick": int(payload.get("world_sim_tick", 0))}
         result = state.scheduler.run_purpose("sim.profile", ctx, lang)
@@ -1562,6 +1686,7 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
             data, name=sim.get("name", ""), species=sim.get("species"),
             age_stage=sim.get("age_stage"), traits=sim.get("traits"),
             likes=sim.get("likes"), dislikes=sim.get("dislikes"),
+            source=_profile_source(data), generated_at_tick=tick,
         )
         if store:
             store.upsert_sim_profile(sim_id, profile, int(payload.get("world_sim_tick", 0)))
@@ -1714,6 +1839,7 @@ def handle_beat_ended(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload.get("decision", "ignore"),
         payload.get("agent_sim_id"),
         lang,
+        target_sim_id=payload.get("target_sim_id"),
     )
 
 

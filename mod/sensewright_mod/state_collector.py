@@ -305,6 +305,65 @@ def _get_venue_context():
         return {'venue_type': '', 'is_residential': False}
 
 
+def _get_age_stage(sim_info):
+    """Return a normalized age-stage token (e.g. 'YOUNGADULT') from ``sim_info.age``.
+
+    BUG-15: ``sim_info.age`` is the vanilla ``Age`` enum; ``str(Age.YOUNGADULT)``
+    yields ``"Age.YOUNGADULT"``, which never matches the sidecar's
+    ``enums.age_stage`` keys (``YOUNGADULT``). Reading ``.name`` (and defensively
+    stripping an ``Age.`` prefix) yields the canonical, translatable token.
+    """
+    age = _safe_getattr(sim_info, 'age', None)
+    name = _safe_getattr(age, 'name', None)
+    if name:
+        token = str(name).upper()
+        if token.startswith('AGE.'):
+            token = token[4:]
+        return token
+    return 'YOUNGADULT'
+
+
+def _get_sim_gender(sim_info):
+    """Return the sim's grammatical gender as 'M'/'F'/'N' (REQ-I18N-05 / BUG-17).
+
+    The i18n engine resolves ``{g:m|f|n}`` inflection macros from the gender code,
+    but the census never sent a ``gender`` field, so every string fell back to the
+    masculine/neutral form. Uses S4CL's ``CommonGenderUtils`` to map the vanilla
+    binary ``Gender`` enum onto the expected codes; degrades to 'N' (neutral).
+    """
+    try:
+        from sims4communitylib.utils.sims.common_gender_utils import CommonGenderUtils
+        if CommonGenderUtils.is_male(sim_info):
+            return 'M'
+        if CommonGenderUtils.is_female(sim_info):
+            return 'F'
+    except Exception:
+        pass
+    return 'N'
+
+
+def _resolve_other_sim_id(rel, sim_id):
+    """Return the id of the *other* sim in a vanilla ``Relationship`` object.
+
+    ``Relationship`` exposes ``sim_id_a``/``sim_id_b`` and ``get_other_sim_id``
+    (not ``target_sim_id``). This is the same failure class the old
+    ``family_links`` bug had; resolve defensively so a game-build API change only
+    costs the relationship edge, never the census.
+    """
+    getter = _safe_getattr(rel, 'get_other_sim_id', None)
+    if callable(getter):
+        other = _safe_call(getter, sim_id)
+        if other:
+            return _coerce_int(other, 0)
+    a = _coerce_int(_safe_getattr(rel, 'sim_id_a', 0), 0)
+    b = _coerce_int(_safe_getattr(rel, 'sim_id_b', 0), 0)
+    if a == sim_id:
+        return b
+    if b == sim_id:
+        return a
+    return 0
+
+
 def _collect_sim_delta(sim_info):
     """Collect volatile state delta for a single sim."""
     if sim_info is None:
@@ -640,7 +699,8 @@ def _collect_full_sim_census(sim_info):
             'sim_id': sim_id,
             'name': str(_safe_getattr(sim_info, 'full_name', 'Unknown') or 'Unknown'),
             'species': 'HUMAN',  # Simplified
-            'age_stage': str(_safe_getattr(sim_info, 'age', 'YOUNGADULT')),
+            'age_stage': _get_age_stage(sim_info),
+            'gender': _get_sim_gender(sim_info),
             'traits': traits,
             'likes': likes,
             'dislikes': dislikes,
@@ -708,6 +768,53 @@ def collect_sims_delta(active_only=False):
     return sims_delta
 
 
+def _collect_relationships(sim_info_manager):
+    """Collect undirected relationship edges with friendship/romance tracks (BUG-13).
+
+    Uses S4CL's ``CommonRelationshipUtils`` so the collection is version-stable.
+    The engine's ``Relationship`` object exposes ``sim_id_a``/``sim_id_b`` and
+    ``get_other_sim_id`` (not ``target_sim_id``), and the friendship/romance
+    values live in relationship *tracks*, not flat attributes.
+    """
+    relationships = []
+    try:
+        from sims4communitylib.utils.sims.common_relationship_utils import CommonRelationshipUtils
+        seen_pairs = set()
+        for sim_info in sim_info_manager.values():
+            sim_id = _coerce_int(_safe_getattr(sim_info, 'id', 0), 0)
+            if not sim_id:
+                continue
+            try:
+                rels = CommonRelationshipUtils.get_relationships_gen(sim_info)
+            except Exception:
+                continue
+            for rel in rels:
+                target_id = _resolve_other_sim_id(rel, sim_id)
+                if not target_id or target_id <= sim_id:
+                    continue  # Avoid duplicates (only keep sim_id < target_id)
+                pair = (sim_id, target_id)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                target_info = _get_sim_info(target_id)
+                if target_info is None:
+                    continue
+                try:
+                    friendship = CommonRelationshipUtils.get_friendship_level(sim_info, target_info)
+                    romance = CommonRelationshipUtils.get_romance_level(sim_info, target_info)
+                except Exception:
+                    friendship, romance = 0.0, 0.0
+                relationships.append({
+                    'sim_id': sim_id,
+                    'target_sim_id': target_id,
+                    'friendship': float(friendship),
+                    'romance': float(romance),
+                })
+    except Exception as e:
+        log_exception('Error collecting relationships: {}'.format(e))
+    return relationships
+
+
 def collect_full_census():
     """Collect full census for session start."""
     sims = []
@@ -736,20 +843,12 @@ def collect_full_census():
                     'funds': _coerce_int(_safe_getattr(household, 'funds', 0))
                 })
 
-        # Relationships (simplified)
-        for sim_info in sim_info_manager.values():
-            rel_tracker = _safe_getattr(sim_info, 'relationship_tracker', None)
-            if rel_tracker is not None:
-                for rel in _safe_getattr(rel_tracker, 'relationships', []):
-                    target_id = _safe_getattr(rel, 'target_sim_id', 0)
-                    if target_id > sim_info.id:  # Avoid duplicates
-                        relationships.append({
-                            'sim_id': sim_info.id,
-                            'target_sim_id': target_id,
-                            'friendship': _safe_getattr(rel, 'friendship', 0),
-                            'romance': _safe_getattr(rel, 'romance', 0),
-                            'tracks': []
-                        })
+        # Relationships (BUG-13): iterate S4CL's relationship generator and read
+        # the friendship/romance tracks via its accessors. The previous code read
+        # ``rel.target_sim_id`` / ``rel.friendship`` / ``rel.romance`` — none of
+        # these exist on TS4's ``Relationship`` object (it exposes ``sim_id_a``/
+        # ``sim_id_b`` and ``get_other_sim_id``), so the graph was always empty.
+        relationships = _collect_relationships(sim_info_manager)
 
     except Exception as e:
         log_exception('Error in collect_full_census: {}'.format(e))

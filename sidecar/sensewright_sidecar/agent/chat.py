@@ -87,6 +87,7 @@ def build_chat_context(
     family: Optional[List[Dict[str, str]]] = None,
     location: Optional[Dict[str, Any]] = None,
     action: Optional[Dict[str, Any]] = None,
+    gender: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the ``sim.chat`` context (profile slicing by channel).
 
@@ -118,6 +119,8 @@ def build_chat_context(
         context["location"] = location
     if action:
         context["action"] = action
+    if gender:
+        context["gender"] = gender
     return context
 
 

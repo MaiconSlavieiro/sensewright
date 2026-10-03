@@ -24,6 +24,22 @@ PROFILE_SOURCE_TEMPLATE = "template"
 PROFILE_SOURCE_LLM = "llm"
 
 
+def normalize_age_stage(value: Any) -> str:
+    """Return a canonical age-stage token (e.g. ``YOUNGADULT``).
+
+    BUG-15: legacy builds stored ``age_stage`` as the vanilla ``Age`` enum's
+    ``str()`` (``"Age.YOUNGADULT"``), which never matches the sidecar's
+    ``enums.age_stage`` keys. Strip an ``Age.`` prefix and upper-case so both
+    fresh census values and legacy stored profiles resolve to the canonical key.
+    """
+    if value is None:
+        return "YOUNGADULT"
+    token = str(value).strip().upper()
+    if token.startswith("AGE."):
+        token = token[len("AGE."):]
+    return token or "YOUNGADULT"
+
+
 def _list(value: Any) -> List[Any]:
     if isinstance(value, list):
         return value
@@ -69,7 +85,7 @@ def normalize_profile(
     profile: Dict[str, Any] = {
         "name": raw.get("name") or name,
         "species": species or raw.get("species", "HUMAN"),
-        "age_stage": age_stage or raw.get("age_stage", "YOUNGADULT"),
+        "age_stage": normalize_age_stage(age_stage or raw.get("age_stage", "YOUNGADULT")),
         "backstory": raw.get("backstory", ""),
         "core_personality": raw.get("core_personality", ""),
         "current_demeanor": raw.get("current_demeanor", ""),

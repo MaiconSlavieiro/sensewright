@@ -290,6 +290,7 @@ def beat_ended(
     decision: str,
     agent_sim_id: Optional[int],
     lang: str,
+    target_sim_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Handle /v1/god/beat-ended: branch the arc after a catalyst interaction (P19)."""
-    return run_react(state, save_id, tick, decision, agent_sim_id, lang)
+    return run_react(state, save_id, tick, decision, agent_sim_id, lang, target_sim_id=target_sim_id)

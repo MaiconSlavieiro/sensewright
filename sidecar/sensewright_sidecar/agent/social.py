@@ -234,7 +234,8 @@ def build_social_context(
     ``location`` (venue / indoor-outdoor / home-away), ``relationship`` (friendship
     tier / family) and ``action`` (the selected interaction menu text each Sim is
     performing or has queued), so the tone reflects the setting and the specific
-    action being taken.
+    action being taken. The actor's ``gender`` is carried through for grammatical
+    inflection (BUG-17).
     """
     context: Dict[str, Any] = {
         "sim_id": int(sim_a.get("sim_id", 0)),
@@ -243,6 +244,8 @@ def build_social_context(
         "target_name": sim_b.get("name", ""),
         "world_sim_tick": tick,
     }
+    if sim_a.get("gender"):
+        context["gender"] = sim_a.get("gender")
     if rumor:
         context["rumor"] = rumor
     if puppeteer:

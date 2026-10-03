@@ -6,6 +6,7 @@ import json
 import queue
 import threading
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 import subprocess
@@ -317,7 +318,19 @@ def _make_request(method, endpoint, payload=None, timeout=None):
 
     headers = {'Content-Type': 'application/json'}
     data = None
-    if payload is not None:
+    if method == 'GET':
+        # BUG-16: a GET must not carry a JSON body. The server (uvicorn) resets
+        # the connection when a GET arrives with a body plus a query string
+        # (observed: WinError 10053 on /world/neighborhood). Move any payload
+        # (e.g. the trace_id injected by _process_outbound_request) into the
+        # query string instead.
+        if payload:
+            query = urllib.parse.urlencode({
+                str(k): ('' if v is None else str(v)) for k, v in payload.items()
+            })
+            if query:
+                url = url + ('&' if '?' in url else '?') + query
+    elif payload is not None:
         # default=str keeps game objects (e.g. FamilyFunds) from aborting a
         # request with a non-serializable payload.
         data = json.dumps(payload, default=str).encode('utf-8')

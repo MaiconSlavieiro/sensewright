@@ -68,6 +68,26 @@ def _react_callback(state: AppState, arc: Dict[str, Any], tick: int):
     return _callback
 
 
+def _catalyst_sim_ids(state: AppState, arc: Optional[Dict[str, Any]]) -> set:
+    """Return the set of sim ids currently acting as the beat's catalyst.
+
+    The catalyst is either a leased puppeteer NPC (``state.catalyst_leases``) or a
+    cast member resolved to a concrete townie (``arc["cast"]``). When the cast
+    member was spawned via ``spawn_npc`` its ``sim_id`` is 0 (unknown), so it is
+    excluded and the beat relies on the BUG-03 liveness timeout instead.
+    """
+    ids = set()
+    for sid in state.catalyst_leases:
+        ids.add(int(sid))
+    for member in (arc or {}).get("cast", []) or []:
+        if isinstance(member, dict) and member.get("sim_id"):
+            try:
+                ids.add(int(member["sim_id"]))
+            except (TypeError, ValueError):
+                continue
+    return ids
+
+
 def run_react(
     state: AppState,
     save_id: int,
@@ -76,6 +96,7 @@ def run_react(
     agent_sim_id: Optional[int],
     lang: str,
     arc: Optional[Dict[str, Any]] = None,
+    target_sim_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Schedule a ``god.react`` continuation for the active beat (P19)."""
     store = state.working_store()
@@ -85,6 +106,20 @@ def run_react(
     beat = current_beat(arc)
     if beat is None:
         return {"ok": False, "reason": "no_current_beat"}
+
+    # BUG-14: only a conversation that actually involved the catalyst may advance
+    # the beat. The Mod reports the conversation's two participants; ambient
+    # chatter between unrelated sims must be ignored or the arc burns through its
+    # beats in minutes.
+    catalyst_ids = _catalyst_sim_ids(state, arc)
+    if not catalyst_ids:
+        return {"ok": False, "reason": "no_catalyst"}
+    participants = {int(agent_sim_id or 0)}
+    if target_sim_id:
+        participants.add(int(target_sim_id))
+    if not (catalyst_ids & participants):
+        return {"ok": False, "reason": "not_catalyst_conversation"}
+
     decision = str(decision or "ignore").lower()
     if decision not in REACT_DECISIONS:
         decision = "ignore"

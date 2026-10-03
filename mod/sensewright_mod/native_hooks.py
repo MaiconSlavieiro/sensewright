@@ -110,6 +110,19 @@ def get_or_create_player_confidant(player_name=None):
         log_error('Failed to create hidden household for player confidant')
         return None
 
+    # BUG-12: the hidden household is dedicated to the confidant and persists
+    # across sessions, but the in-memory ``_player_confidant_sim_id`` resets to 0
+    # on every restart. The old code always spawned a fresh SimInfo, duplicating
+    # the confidant (20 "Confidente Sensewright" rows). Return the existing member
+    # before creating a new one.
+    existing = _find_existing_confidant(household)
+    if existing is not None:
+        _player_confidant_sim_id = existing.id
+        _player_confidant_household_id = household.id
+        log_info('Reused existing player confidant SimInfo: {} (ID: {})'.format(
+            _safe_getattr(existing, 'full_name', existing), existing.id))
+        return existing
+
     try:
         sim_info = CommonSimSpawnUtils.create_sim_info(
             CommonSpecies.HUMAN,
@@ -167,6 +180,37 @@ def _get_or_create_hidden_household():
     except Exception as e:
         log_exception('Failed to create hidden household: {}'.format(e))
         return None
+
+
+def _find_existing_confidant(household):
+    """Return the existing confidant SimInfo in the hidden household, or None.
+
+    BUG-12: the household is dedicated to the confidant, so any member is the
+    confidant. Prefer a name marker ("Sensewright"), then fall back to the first
+    member. Uses S4CL's household-member generator (version-stable) with a
+    defensive ``sim_info_gen`` fallback.
+    """
+    members = []
+    try:
+        from sims4communitylib.utils.sims.common_household_utils import CommonHouseholdUtils
+        members = [m for m in CommonHouseholdUtils.get_sim_info_of_all_sims_in_household_generator(household) if m is not None]
+    except Exception:
+        members = []
+    if not members:
+        try:
+            gen = _safe_getattr(household, 'sim_info_gen', None)
+            if callable(gen):
+                members = [m for m in _safe_call(gen) if m is not None]
+        except Exception:
+            members = []
+    for member in members:
+        if member is None:
+            continue
+        full_name = str(_safe_getattr(member, 'full_name', '') or '')
+        last_name = str(_safe_getattr(member, 'last_name', '') or '')
+        if 'Sensewright' in full_name or 'Sensewright' in last_name:
+            return member
+    return members[0] if members else None
 
 
 def apply_buff(sim_info, buff_id, duration_sim_minutes=60):
