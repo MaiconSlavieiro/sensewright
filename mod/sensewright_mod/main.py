@@ -1,6 +1,8 @@
 # Sensewright v2 — Main Entry Point
 # Python 3.7 compatible
 
+import time
+
 import services
 import sims4.commands
 from lot51_core.services.events import event_service, CoreEvent
@@ -37,6 +39,16 @@ class SensewrightService(object):
         self._last_autonomy_tick = 0
         self._autonomy_interval = 15 * 1000  # 15 sim-minutes in ticks
         self._language_applied = False
+        #: Session state machine (1.1): HOUSEHOLDS_AND_SIMS_LOADED re-fires
+        #: several times per session; only the first is a real session-start.
+        self._in_active_session = False
+        self._last_session_save_id = None
+        self._last_session_tick = 0
+        self._last_zone_id = None
+        #: Pre-save tick (1.2): GAME_SAVE reads the clock post-serialization,
+        #: which drifts ~68 ticks and caused recurring false rewinds.
+        self._pending_save_tick = None
+        self._pending_save_monotonic = 0.0
 
     def _ensure_language(self):
         """Apply the game's configured language once it becomes available.
@@ -196,7 +208,12 @@ def _on_game_tick(event_service, *args, **kwargs):
 
 @event_service.handler(CoreEvent.HOUSEHOLDS_AND_SIMS_LOADED)
 def _on_households_and_sims_loaded(event_service, *args, **kwargs):
-    """Called when all households and sims are loaded (session start)."""
+    """Called when all households and sims are loaded.
+
+    This event re-fires several times per session (audit finding C), so it is
+    gated by a small session state machine: only the first firing — a genuinely
+    new save, or a reload that rolled the clock back — starts a session.
+    """
     try:
         service = get_service()
         service.start()
@@ -204,18 +221,42 @@ def _on_households_and_sims_loaded(event_service, *args, **kwargs):
         # Get or create player confidant
         get_or_create_player_confidant()
 
-        # Send session-start to sidecar
-        from sensewright_mod.http_client import post_lifecycle_session_start
+        from sensewright_mod.http_client import post_lifecycle_session_start, post_census
         state = get_current_game_state()
+        save_id = state['save_id']
+        tick = state['world_sim_tick']
+        is_new_session = (
+            not service._in_active_session
+            or service._last_session_save_id != save_id
+            or tick < service._last_session_tick
+        )
+
+        if not is_new_session:
+            # Zone transition / duplicate load event: the session (and its
+            # sidecar epoch) stays intact; just advance the observed tick.
+            service._last_session_tick = max(service._last_session_tick, tick)
+            log_info('HOUSEHOLDS_AND_SIMS_LOADED repeat ignored '
+                     '(active session save={})'.format(save_id))
+            return
+
+        service._in_active_session = True
+        service._last_session_save_id = save_id
+        service._last_session_tick = tick
+
         # Re-arm the sidecar watchdog (covers a sidecar restarted mid-session).
         post_lifecycle_attach()
-        post_lifecycle_session_start('player_1', state['save_id'], state['world_sim_tick'], get_current_language())
+        post_lifecycle_session_start('player_1', save_id, tick, get_current_language())
 
-        # Send full census
-        from sensewright_mod.http_client import post_census
-        sims, households, relationships = collect_full_census()
-        post_census('player_1', state['save_id'], state['world_sim_tick'],
-                    sims, households, relationships, state['installed_packs'])
+        # Send full census. The census window absorbs the relationship-bit
+        # rehydration burst without emitting marriage events (3.4).
+        _lifecycle_hooks.begin_marriage_snapshot()
+        try:
+            sims, households, relationships = collect_full_census()
+            post_census('player_1', save_id, tick,
+                        sims, households, relationships, state['installed_packs'],
+                        detected_mods=state.get('detected_mods'))
+        finally:
+            _lifecycle_hooks.end_marriage_snapshot()
 
         # Surface the in-game entry points to the player.
         _show_onboarding_notification()
@@ -229,12 +270,15 @@ def _on_households_and_sims_loaded(event_service, *args, **kwargs):
 def _on_zone_load(event_service, *args, **kwargs):
     """Called on zone load (including travel)."""
     try:
+        service = get_service()
         state = get_current_game_state()
         from sensewright_mod.http_client import post_lifecycle_zone_transition
         post_lifecycle_zone_transition('player_1', state['save_id'], state['zone_id'], state['world_sim_tick'])
 
         # Clear zone-specific intents
         get_intent_bus().clear_zone_intents()
+        service._last_zone_id = state['zone_id']
+        service._last_session_tick = max(service._last_session_tick, state['world_sim_tick'])
 
         log_info('Zone loaded: {}'.format(state['zone_id']))
     except Exception as e:
@@ -255,8 +299,12 @@ def _on_zone_unload(event_service, *args, **kwargs):
 def _on_game_pre_save(event_service, *args, **kwargs):
     """Called before game saves."""
     try:
-        # Flush any pending data
-        log_info('Pre-save: flushing buffers')
+        # Capture the pre-serialization clock (1.2). GAME_SAVE runs after the
+        # save file is written and reads a tick that has already drifted.
+        service = get_service()
+        service._pending_save_tick = get_current_game_state()['world_sim_tick']
+        service._pending_save_monotonic = time.monotonic()
+        log_info('Pre-save: captured tick {}'.format(service._pending_save_tick))
     except Exception as e:
         log_exception('Pre-save error: {}'.format(e))
 
@@ -265,10 +313,19 @@ def _on_game_pre_save(event_service, *args, **kwargs):
 def _on_game_save(event_service, *args, **kwargs):
     """Called after game saves."""
     try:
+        service = get_service()
         state = get_current_game_state()
         from sensewright_mod.http_client import post_lifecycle_save
-        post_lifecycle_save('player_1', state['save_id'], None, state['world_sim_tick'])
-        log_info('Game saved, lifecycle/save sent')
+        tick = state['world_sim_tick']
+        # Consume the pre-save tick only if it is fresh (< 30 s); a cancelled
+        # "Save As…" or a failed save leaves a stale value behind.
+        if (service._pending_save_tick is not None
+                and (time.monotonic() - service._pending_save_monotonic) < 30.0):
+            tick = service._pending_save_tick
+        service._pending_save_tick = None
+        post_lifecycle_save('player_1', state['save_id'], None, tick)
+        service._last_session_tick = max(service._last_session_tick, tick)
+        log_info('Game saved at tick {}, lifecycle/save sent'.format(tick))
     except Exception as e:
         log_exception('Game save error: {}'.format(e))
 
@@ -283,6 +340,39 @@ def _on_loading_screen_lifted(event_service, *args, **kwargs):
         log_info('Loading screen lifted')
     except Exception as e:
         log_exception('Loading screen lifted error: {}'.format(e))
+
+
+def _mark_session_closed(reason):
+    """Close the active session so the next load is a clean session-start (1.1)."""
+    service = get_service()
+    service._in_active_session = False
+    log_info('Session closed ({})'.format(reason))
+
+
+# CLIENT_DISCONNECT (back to main menu) and GAME_LOAD (loading a save) close the
+# session. They are registered only when the running Lot 51 Core build exposes
+# them, so a missing enum member can never abort the mod import.
+def _register_optional_session_event(event_name, reason):
+    event = getattr(CoreEvent, event_name, None)
+    if event is None:
+        log_info('Optional CoreEvent {} unavailable'.format(event_name))
+        return
+
+    @event_service.handler(event)
+    def _handler(event_service, *args, **kwargs):
+        try:
+            _mark_session_closed(reason)
+        except Exception as e:
+            log_exception('{} handler error: {}'.format(event_name, e))
+
+    log_info('Registered session-close handler for {}'.format(event_name))
+
+
+try:
+    _register_optional_session_event('CLIENT_DISCONNECT', 'client_disconnect')
+    _register_optional_session_event('GAME_LOAD', 'game_load')
+except Exception as e:
+    log_exception('Optional session events registration failed: {}'.format(e))
 
 
 log_info('Sensewright v2 mod loaded')

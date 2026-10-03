@@ -99,6 +99,6 @@ def run_react(
     state.scheduler.submit_bg(
         "god.react", ctx, lang,
         dedup_key="{}:{}:god:react".format(save_id, arc.get("current_beat_idx", 0)),
-        callback=_react_callback(state, arc, tick),
+        callback=state.guard_callback("god.react", _react_callback(state, arc, tick)),
     )
     return {"ok": True, "scheduled": "god.react", "beat_index": arc.get("current_beat_idx", 0)}

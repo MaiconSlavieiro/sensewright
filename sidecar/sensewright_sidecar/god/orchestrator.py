@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 from ..agent import normalize_intent
 from ..observability.logging import get_logger
 from ..state import AppState
+from ..constants import TICKS_PER_SIM_DAY
 from .arcs import (
-    advance_arc, create_arc, current_beat, load_active_arc, save_arc, steer_arc,
+    ARC_DONE, advance_arc, create_arc, current_beat, load_active_arc, save_arc, steer_arc,
 )
 from .cast import run_cast
 from .controls import current_preset, resolve_dial, resolve_mode
@@ -19,7 +20,11 @@ logger = get_logger("god.orchestrator")
 
 
 def _plan_callback(state: AppState, tick: int):
-    """Background callback: build and persist an arc from a god.plan result (P15)."""
+    """Background callback: build and persist an arc from a god.plan result (P15).
+
+    The synchronous ``arc_planning`` claim released here is what guarantees a
+    single active arc even when several ticks fire before the LLM responds (3.1).
+    """
 
     def _callback(result) -> None:
         try:
@@ -47,6 +52,8 @@ def _plan_callback(state: AppState, tick: int):
                 logger.info("god.plan created arc id=%s beats=%d", arc["id"], len(beats))
         except Exception:  # noqa: BLE001
             logger.exception("god.plan callback failed")
+        finally:
+            state.end_arc_plan()
 
     return _callback
 
@@ -103,6 +110,15 @@ def god_tick(
     """Drive the God Director loop: plan arcs, assign cast, advance beats."""
     store = state.working_store()
     directives: List[Dict[str, Any]] = []
+
+    # F13: drop expired catalyst leases so a stale puppeteer objective cannot
+    # linger on a sim after the scene window closed.
+    for lease_sim_id in list(state.catalyst_leases.keys()):
+        lease = state.catalyst_leases.get(lease_sim_id) or {}
+        expires = int(lease.get("lease_expires_tick", 0) or 0)
+        if expires and int(tick) > expires:
+            state.catalyst_leases.pop(lease_sim_id, None)
+
     active_arc = state.active_arc or (load_active_arc(store) if store else None)
 
     mode = resolve_mode(state.panel, state.config)
@@ -118,22 +134,64 @@ def god_tick(
     if active_arc is None:
         frequency = resolve_dial(state.panel, state.config, "intervention_frequency")
         if random.random() < float(frequency) * 0.05:
-            state.scheduler.submit_bg(
-                "god.plan",
-                {"save_id": save_id, "world_sim_tick": tick, "preset": current_preset(state.panel, state.config)},
-                lang, dedup_key="{}:{}:god:plan".format(save_id, tick // 720),
-                callback=_plan_callback(state, tick),
-            )
+            # Single-flight: claim the slot synchronously so a burst of ticks
+            # cannot each schedule their own god.plan before the first lands.
+            if state.try_begin_arc_plan():
+                state.scheduler.submit_bg(
+                    "god.plan",
+                    {"save_id": save_id, "world_sim_tick": tick, "preset": current_preset(state.panel, state.config)},
+                    lang, dedup_key="{}:{}:god:plan".format(save_id, tick // 720),
+                    callback=state.guard_callback("god.plan", _plan_callback(state, tick)),
+                )
         return {
             "directives": directives,
             "active_arc": {},
             "active_catalyst_leases": list(state.catalyst_leases.keys()),
         }
 
-    # 2. Advance/arm beats and emit narration.
+    # 2. Liveness (BUG-03): advance a beat that never received a catalyst
+    # reaction within the configured window, so an arc can never stall forever.
     beat = current_beat(active_arc)
+    if beat is not None and beat.get("armed"):
+        if "beat_armed_tick" not in beat:
+            # Legacy/loaded arc without a stamp: start its liveness window now.
+            beat["beat_armed_tick"] = int(tick)
+            beats = list(active_arc.get("beats", []) or [])
+            idx = int(active_arc.get("current_beat_idx", 0))
+            if 0 <= idx < len(beats):
+                beats[idx] = beat
+                active_arc["beats"] = beats
+            if store is not None:
+                save_arc(store, active_arc)
+        timeout_days = int(state.config.god("beat_timeout_sim_days", 1) or 0)
+        armed_tick = int(beat.get("beat_armed_tick", tick))
+        if timeout_days > 0 and (int(tick) - armed_tick) >= timeout_days * TICKS_PER_SIM_DAY:
+            logger.info(
+                "god beat timeout: arc=%s beat=%s stalled %d ticks -> advance",
+                active_arc.get("id"), active_arc.get("current_beat_idx"), int(tick) - armed_tick,
+            )
+            state.incr("god_beat_timeouts")
+            active_arc = advance_arc(active_arc)
+            if store is not None:
+                save_arc(store, active_arc)
+            state.active_arc = active_arc
+            if active_arc.get("status") == ARC_DONE:
+                state.enqueue_intents([normalize_intent({
+                    "sim_id": 0, "kind": "command", "source": "god",
+                    "params": {"visual_type": "SPECIAL_MOMENT",
+                               "text": active_arc.get("theme", "")},
+                }, default_source="god")])
+                return {
+                    "directives": directives,
+                    "active_arc": active_arc,
+                    "active_catalyst_leases": list(state.catalyst_leases.keys()),
+                }
+            beat = current_beat(active_arc)
+
+    # 3. Advance/arm beats and emit narration.
     if beat and not beat.get("armed"):
         beat["armed"] = True
+        beat["beat_armed_tick"] = tick
         beat_idx = int(active_arc.get("current_beat_idx", 0))
         active_arc["beats"][beat_idx] = beat
         save_arc(store, active_arc) if store else None
@@ -143,7 +201,7 @@ def god_tick(
             "god.narration",
             {"sim_name": "", "world_sim_tick": tick, "beat": beat.get("title", "")},
             lang,
-            callback=_narration_callback(state),
+            callback=state.guard_callback("god.narration", _narration_callback(state)),
         )
         # Prepare the catalyst scene draft for P18 (god.puppeteer).
         state.scheduler.submit_bg(
@@ -151,7 +209,8 @@ def god_tick(
             {"save_id": save_id, "world_sim_tick": tick, "beat": beat,
              "theme": active_arc.get("theme", "")},
             lang, dedup_key="{}:{}:god:scene".format(save_id, beat_idx),
-            callback=_scene_callback(state, active_arc, beat_idx),
+            callback=state.guard_callback(
+                "god.scene", _scene_callback(state, active_arc, beat_idx)),
         )
 
         # P16: assign a catalyst (reuse a townie, or emit spawn_npc for the Mod).

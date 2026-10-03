@@ -17,6 +17,28 @@ from sensewright_mod.i18n import get_current_language
 #: independent because tuning names are English identifiers.
 _MARRIAGE_MARKERS = ('married', 'spouse', 'fiance', 'engaged', 'soulmate')
 
+#: 3.4: loading a save re-adds every relationship bit, which used to emit a
+#: `marriage` legacy event per pair on every load. During the census window we
+#: silently snapshot the existing pairs; afterwards only genuinely new pairs
+#: (with a running clock) emit.
+_known_marriage_pairs = set()
+_suppress_marriage_events = [False]
+
+
+def begin_marriage_snapshot():
+    """Enter the census window: absorb existing marriage bits without events."""
+    _suppress_marriage_events[0] = True
+
+
+def end_marriage_snapshot():
+    """Leave the census window: only new marriage transitions emit events."""
+    _suppress_marriage_events[0] = False
+
+
+def _marriage_pair_key(sim_a_id, sim_b_id, bit_name):
+    first, second = sorted((int(sim_a_id or 0), int(sim_b_id or 0)))
+    return (first, second, str(bit_name or ''))
+
 
 def _safe_getattr(obj, attr, default=None):
     try:
@@ -109,6 +131,24 @@ if _S4CL_AVAILABLE:
                 return True
             sim_a = _safe_getattr(event_data, 'sim_info_a', None)
             sim_b = _safe_getattr(event_data, 'sim_info_b', None)
+            key = _marriage_pair_key(_sim_id(sim_a), _sim_id(sim_b), bit_name)
+
+            # Load-time rehydration: snapshot the pair silently (3.4).
+            if _suppress_marriage_events[0] or key in _known_marriage_pairs:
+                _known_marriage_pairs.add(key)
+                return True
+
+            # Never emit while the game clock is paused (the rehydration burst
+            # also arrives paused).
+            try:
+                clock_speed = int(get_current_game_state().get('clock_speed', 1))
+            except Exception:
+                clock_speed = 1
+            if clock_speed <= 0:
+                _known_marriage_pairs.add(key)
+                return True
+
+            _known_marriage_pairs.add(key)
             _post_lifecycle('marriage', sim_a, target_sim_info=sim_b, impact=1.0,
                             content=bit_name)
         except Exception as e:

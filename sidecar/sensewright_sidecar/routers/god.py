@@ -8,7 +8,8 @@ from fastapi import APIRouter, Body
 from ..schemas import sanitize_payload
 from ..services import (
     handle_arc_steer, handle_beat_ended, handle_controls_get, handle_controls_post,
-    handle_direct_scene, handle_god_tick, handle_zeitgeist,
+    handle_direct_scene, handle_get_arc, handle_get_cast, handle_god_tick,
+    handle_zeitgeist,
 )
 
 router = APIRouter(prefix="/v1/god", tags=["god"])
@@ -47,3 +48,13 @@ def controls_post(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
 @router.post("/zeitgeist")
 def zeitgeist(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
     return handle_zeitgeist(sanitize_payload(payload))
+
+
+@router.get("/arc")
+def get_arc() -> Dict[str, Any]:
+    return handle_get_arc()
+
+
+@router.get("/cast")
+def get_cast() -> Dict[str, Any]:
+    return handle_get_cast()

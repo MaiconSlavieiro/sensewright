@@ -105,6 +105,10 @@
       "title": "Sensewright pausado",
       "body": "Abra o Menu Rápido para retomar."
     },
+    "resumed": {
+      "title": "Sensewright retomado",
+      "body": "A vida interior dos seus Sims continua."
+    },
     "mirror": {
       "reflect_title": "Um Momento de Reflexão",
       "reflect_body": "Você para e olha para dentro. Algo se encaixa."
@@ -140,6 +144,8 @@
       "director_mode": "Modo do Diretor",
       "autonomy": "Autonomia",
       "web_studio": "Abrir Web Studio",
+      "panic": "Pausar Sensewright",
+      "resume": "Retomar Sensewright",
       "refresh": "Atualizar"
     },
     "summary": {

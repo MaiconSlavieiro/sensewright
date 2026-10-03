@@ -401,3 +401,103 @@ were a local smoke test, not the game). Removed the import and added
 non-existent `sims4.<submodule>` (the game packages live at the top level: `sims.sim`,
 `services`, `objects.*`, `situations.*`). Rebuilt and reinstalled; the installed
 `object_interactions.pyc` no longer references `sims4.sim`. 524 tests green.
+
+### Runtime reliability & concurrency hardening (2026-10-02, branch `v2-remake`)
+
+Executed [`hardening.md`](hardening.md) against the audit findings
+(`lastException.txt`, worker/sidecar logs, `slot_1488584711.*.db`):
+
+- **Mod session state machine (1.1):** `HOUSEHOLDS_AND_SIMS_LOADED` no longer re-fires
+  `session-start`/census; it starts a session only for a new save or a same-save reload that
+  rolled the clock back, and closes the session on optional `CLIENT_DISCONNECT`/`GAME_LOAD`.
+- **Pre-save clock (1.2):** `GAME_PRE_SAVE` captures the tick and `GAME_SAVE` consumes it when
+  fresh (< 30 s), removing the ~68-tick post-serialization drift.
+- **Strict rewind tolerance (2.1/2.2):** `REWIND_TOLERANCE_TICKS` (default 3000, configurable)
+  ignores ordinary drift; only a genuine rollback restores the ring snapshot and seeds
+  `last_processed_tick`.
+- **Tick idempotency (2.3) + session epochs (2.4):** `accept_tick` rejects duplicates; every
+  async callback is wrapped by `guard_callback` and dropped (`stale_epoch_dropped`) when its
+  session is obsolete, so a job can never write into a newer session's store.
+- **God single-flight (3.1):** an atomic `arc_planning` claim guarantees exactly one active arc.
+- **Mod two-lane queue + coalescing slot (3.3):** bounded realtime lane drops stale events only,
+  autonomy/player-activity coalesce `sims_delta` by `sim_id`, an event-driven worker replaces the
+  10 ms poll, per-endpoint timeouts, and an idle intent pull (4.3, 2 s→10 s backoff).
+- **Marriage snapshot (3.4):** the load-time relationship-bit rehydration is absorbed silently.
+- **Atomic rate limiter (3.6):** `try_accept_and_record` closes the check-then-act overshoot.
+- **LLM pressure (4.1/4.2/4.4):** per-sim impulse cooldown + queue-depth backpressure,
+  `sim.reaction` on a dedicated realtime pool, configurable bench/purpose cooldowns with a
+  per-purpose breaker exposed in `/v1/status`.
+- **Memory (4.5):** `mem.consolidate` now fires on zone-transition, save (before commit) and
+  chat silence; the wake `sim.sleep` reflection is no longer gated behind a salient event.
+- **Observability (5.1):** `/v1/status` exposes `metrics`, `session_epoch`,
+  `last_processed_tick` and `arc_planning`.
+
+Verification: `python -m pytest -q` → **535 green** (new `tests/test_hardening.py`),
+`py -3.7 -m py_compile` clean, `build_package.py` (42 tunings) and `build.py` (88,405 bytes)
+rebuilt. In-game validation (hardening Phase 6.2) remains.
+
+### Post-deploy playtest findings (2026-10-03) — see [`bugs.md`](bugs.md)
+
+The hardening build was installed and played. The runtime fixes held, but the playtest exposed
+**new, previously unmapped bugs** that keep the visible features dead:
+
+- **BUG-01** — `sim.social` never triggers: activity-based pair detection never matches, so no
+  Sim-to-Sim dialogue and no catalyst conversation (`status.md` F04/P05 marked this "Full").
+- **BUG-02** — stale duplicate `active` arcs persist (2 arcs at beat 0); hardening 3.1 only
+  prevents *new* duplicates.
+- **BUG-03** — armed beats have no liveness/timeout, so arcs stall forever.
+
+Details, evidence and proposed fixes are in [`bugs.md`](bugs.md).
+
+### Bug-fix + P1/P4 wave (2026-10-03) — second pass
+
+Closed the three playtest bugs (see [`bugs.md`](bugs.md)) and implemented a broad
+slice of the still-missing wiring. **623 sidecar tests green** (was 536); Mod
+compiles under 3.7; `.package` (44 resources) and `.ts4script` (91,397 B) rebuilt.
+
+**Bugs (all with regression tests in `tests/test_bugs.py`)**
+- BUG-01 `sim.social`: Mod reports `is_conversing` + `social_target_sim_id`; sidecar
+  prefers it, keeps marker + proximity fallbacks; asymmetric puppeteer routing wired
+  (F04/P18). `state_collector._resolve_interaction_target_sim_id`, `services._find_conversational_pair`,
+  `_proximity_pair`, `_puppeteer_context`.
+- BUG-02 stale arcs: `SqliteStore.deactivate_stale_arcs`, `god.arcs.load_active_arc`
+  self-heal, `handle_session_start` keeps one `active` arc.
+- BUG-03 beat liveness: `beat_armed_tick` + `god.beat_timeout_sim_days` (default 1);
+  `god_tick` advances/completes a stalled beat.
+- NOTE-01: `config.example.toml` documents JSON-purpose routing.
+
+**Sidecar — purposes promoted to Full**
+- P06 `sim.social.close`: conversation sessions tracked from census edges; callback
+  writes social memories; `social_sessions` returned on the tick.
+- P12 `sim.aspiration`: `ambition` added to the profile shape; new
+  `POST /v1/sim/aspiration`; census aspiration ingested.
+- P13 `sim.background.expand`: family backstory memories on demand.
+- P21 `god.background` + `BackgroundScheduler` (`god/background_scheduler.py`,
+  priority `PLAYER > HOUSEHOLD > ACTIVE > RELATED`).
+- P22 `world.npc.backstory`: recurring-townie detection + background.
+- P25 `world.aftermath` (`world/aftermath.py`): high-salience events shift the
+  zeitgeist and enqueue durable intents.
+- P29 `mem.relationship.review`: census relationships ingested; once-per-day edge review.
+- P32 `ops.recap`: recapped at session-start, stored, `GET /v1/recap`.
+- P33 `ops.panel.summary`: deterministic 2-line summary in `GET /v1/panel/summary` and `/v1/status`.
+- F12 `off` presence tier is now effective (sensory-only/excluded → no seat).
+- F13 catalyst leases expire (swept in `god_tick`).
+
+**Web Studio / P4**
+- 4.1 persist posted profile; 4.2 `POST /v1/config/provider` + live client reload
+  (the SPA's `provider.*` control keys are routed to it); 4.3 `GET /v1/god/arc` /
+  `/v1/god/cast` (+ SPA arc/beat/cast panel and steer buttons); 4.5 real
+  `compile-addon` via `i18n_compile.py` (byte-compatible DBPF/STBL);
+  4.8 `POST /v1/config/panic` + `/v1/config/resume` (autonomy freeze).
+
+**Mod (Python 3.7)**
+- 2.2 aspiration collection; 2.3 `installed_packs` via S4CL `CommonPackUtils`;
+  2.5 Panic Button (`sw.panic` / `sw.resume` + Quick Menu buttons, clears IntentBus);
+  2.7 compatible-mod detection (`detected_mods`, exposed in `/v1/status`);
+  2.8 `archetype_map` populated from owned bias buffs.
+
+**Still remaining**
+- FC3 cost dashboard (4.7), real spoiler-shield wiring (4.4), Onboarding Wizard (2.6,
+  currently the single notification), P2 in-game hooks (Autobiography Book 3.5,
+  GetToKnow 3.6, epitaph 3.7) and **Phase 5 in-game validation** (all Mod hooks are
+  coded blind and need a playtest).

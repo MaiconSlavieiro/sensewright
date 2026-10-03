@@ -14,6 +14,7 @@ import queue
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
@@ -133,6 +134,11 @@ class LLMScheduler:
         #: serializes its calls; realtime/interactive benefit most since they
         #: run synchronously on multiple HTTP threads.
         self._tier_sems: Dict[str, threading.BoundedSemaphore] = {}
+        #: Dedicated realtime-async pool (4.2): reactions/narration must not wait
+        #: behind the single bg worker, and must not block the HTTP request thread.
+        self._realtime_pool = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="sensewright-realtime",
+        )
         self._worker = threading.Thread(target=self._worker_loop, name="sensewright-llm-worker", daemon=True)
         self._worker.start()
 
@@ -147,6 +153,11 @@ class LLMScheduler:
                 sem = threading.BoundedSemaphore(max(1, limit))
                 self._tier_sems[tier] = sem
             return sem
+
+    # ── config hot-reload (4.2) ──────────────────────────────────────────
+    def reload_provider(self, name: str) -> None:
+        """Rebuild a provider client after credentials changed at runtime."""
+        self._chain.reload_provider(name)
 
     # ── public API ───────────────────────────────────────────────────────
     def run_purpose(
@@ -282,28 +293,61 @@ class LLMScheduler:
         job._callback = callback  # type: ignore[attr-defined]
         self._queue.put(job)
 
+    def submit_async(
+        self,
+        purpose_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        lang: str = "",
+        trace_id: Optional[str] = None,
+        dedup_key: Optional[str] = None,
+        callback: Optional[Callable[[LLMResult], None]] = None,
+    ) -> None:
+        """Run a purpose on the dedicated realtime pool (fire-and-forget).
+
+        Used for latency-sensitive, non-blocking paths (``sim.reaction``) that
+        previously ran synchronously on the HTTP request thread (4.2).
+        """
+        context = context or {}
+        purpose = get_purpose(purpose_id)
+        tier = purpose.tier if purpose else "realtime"
+        job = LLMJob(
+            purpose_id=purpose_id, tier=tier, context=context,
+            lang=normalize_lang(lang), trace_id=trace_id or generate_trace_id(),
+            dedup_key=dedup_key or "",
+        )
+        if job.dedup_key:
+            with self._lock:
+                if job.dedup_key in self._in_flight:
+                    return
+                self._in_flight.add(job.dedup_key)
+        job._callback = callback  # type: ignore[attr-defined]
+        self._realtime_pool.submit(self._run_job, job)
+
+    def _run_job(self, job: LLMJob) -> None:
+        try:
+            # Propagate the originating trace id into the worker thread so
+            # bg/deep log lines stay greppable (REQ-OBS-01).
+            set_trace_id(job.trace_id or "-")
+            result = self.run_purpose(
+                job.purpose_id, job.context, job.lang, job.trace_id,
+            )
+            callback = getattr(job, "_callback", None)
+            if callback is not None:
+                try:
+                    callback(result)
+                except Exception:  # noqa: BLE001
+                    logger.exception("async callback failed for %s", job.purpose_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("job execution error for %s", job.purpose_id)
+        finally:
+            if job.dedup_key:
+                with self._lock:
+                    self._in_flight.discard(job.dedup_key)
+
     def _worker_loop(self) -> None:
         while True:
             job = self._queue.get()
-            try:
-                # Propagate the originating trace id into the worker thread so
-                # bg/deep log lines stay greppable (REQ-OBS-01).
-                set_trace_id(job.trace_id or "-")
-                result = self.run_purpose(
-                    job.purpose_id, job.context, job.lang, job.trace_id,
-                )
-                callback = getattr(job, "_callback", None)
-                if callback is not None:
-                    try:
-                        callback(result)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("bg callback failed for %s", job.purpose_id)
-            except Exception:  # noqa: BLE001
-                logger.exception("worker loop error for %s", job.purpose_id)
-            finally:
-                if job.dedup_key:
-                    with self._lock:
-                        self._in_flight.discard(job.dedup_key)
+            self._run_job(job)
 
     def status(self) -> Dict[str, Any]:
         return {

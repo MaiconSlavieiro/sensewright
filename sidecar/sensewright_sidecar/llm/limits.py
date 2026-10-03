@@ -74,6 +74,28 @@ class ProviderRateLimiter:
             self._requests.append(now)
             self._daily_requests.append(now)
 
+    def try_accept_and_record(self, estimated_tokens: int = 0) -> bool:
+        """Atomically check capacity and, if allowed, record the dispatch.
+
+        Replaces the separate ``can_accept`` + ``record_request`` calls, which
+        formed a check-then-act race across concurrent HTTP threads and allowed
+        the limiter to overshoot its RPM/RPD/TPM budget (3.6).
+        """
+        with self._lock:
+            now = time.time()
+            self._prune(now)
+            if self.rpm and len(self._requests) >= self.rpm:
+                return False
+            if self.rpd and len(self._daily_requests) >= self.rpd:
+                return False
+            if self.tpm and estimated_tokens > 0:
+                used_tokens = sum(t for _, t in self._tokens)
+                if used_tokens + estimated_tokens > self.tpm:
+                    return False
+            self._requests.append(now)
+            self._daily_requests.append(now)
+            return True
+
     def record_tokens(self, tokens: int) -> None:
         """Record reconciled token usage (TPM accounting)."""
         if tokens <= 0:

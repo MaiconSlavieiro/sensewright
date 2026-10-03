@@ -51,12 +51,17 @@ def presence_tier(
     is_catalyst: bool,
     friendship: float = 0.0,
     bond_types: Optional[List[str]] = None,
+    species: Optional[str] = None,
+    age_stage: Optional[str] = None,
 ) -> str:
     """Classify a sim's presence tier.
 
-    Priority: active household / player -> full; catalyst -> full; intimate
-    visitor (friendship >= 20 on an intimate bond) -> full; else reactive.
+    Priority: excluded/sensory-only (BABY, pets, INFANT/TODDLER) -> off; active
+    household / player -> full; catalyst -> full; intimate visitor
+    (friendship >= 20 on an intimate bond) -> full; else reactive.
     """
+    if excluded_from_seats(species) or sensory_only(species, age_stage):
+        return PRESENCE_OFF
     if is_player or in_active_household or is_catalyst:
         return PRESENCE_FULL
     bonds = [b or "" for b in (bond_types or [])]

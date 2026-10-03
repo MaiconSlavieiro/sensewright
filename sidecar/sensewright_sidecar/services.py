@@ -22,20 +22,27 @@ from .agent import (
 from .agent.psyche import block_for_category
 from .agent.social import build_social_context, has_rumor_to_spread
 from .constants import (
-    COMPACT_ARCHIVE_COUNT, CONSOLIDATED_COMPACT_THRESHOLD, LEGACY_CATEGORIES,
-    TICKS_PER_SIM_DAY,
+    AFTERMATH_SALIENCE_THRESHOLD, COMPACT_ARCHIVE_COUNT,
+    CONSOLIDATED_COMPACT_THRESHOLD, LEGACY_CATEGORIES, TICKS_PER_SIM_DAY,
+    TICKS_PER_SIM_MINUTE,
 )
 from .fallbacks import render_fallback
 from .god import (
     beat_ended as god_beat_ended, current_beat, current_zeitgeist,
-    direct_scene as god_direct_scene, get_controls,
-    god_tick as god_tick_handler, resolve_dial, run_zeitgeist, set_control,
-    steer as god_steer,
+    deactivate_stale_arcs, direct_scene as god_direct_scene, get_controls,
+    god_tick as god_tick_handler, resolve_dial, run_zeitgeist,
+    set_control, steer as god_steer,
 )
+from .god.background_scheduler import select_targets
 from .observability.logging import get_logger
 from .schemas import normalize_lang, sanitize_payload
 from .state import AppState, get_state
-from .world.chronicle import append_chronicle, get_chronicles
+from .world.aftermath import (
+    build_aftermath_context, merge_zeitgeist, parse_aftermath,
+)
+from .world.chronicle import (
+    append_chronicle, get_chronicles, get_zeitgeist, set_zeitgeist,
+)
 from .world.rumors import (
     create_rumor, get_rumors, rumors_known_by, save_rumors, spread,
 )
@@ -80,7 +87,8 @@ def _schedule_cognition(state: AppState, sim_id: int, tick: int, lang: str, trac
     state.scheduler.submit_bg(
         "sim.cognition", ctx, lang, trace_id=trace_id,
         dedup_key="{}:{}:cognition".format(sim_id, tick // TICKS_PER_SIM_DAY),
-        callback=_cognition_callback(state, sim_id, tick),
+        callback=state.guard_callback(
+            "sim.cognition", _cognition_callback(state, sim_id, tick)),
     )
 
 
@@ -204,7 +212,8 @@ def _on_sleep_start(state: AppState, sim: Dict[str, Any], tick: int, lang: str, 
     state.scheduler.submit_bg(
         "sim.dream", ctx, lang, trace_id=trace_id,
         dedup_key="{}:{}:dream".format(sim_id, tick // TICKS_PER_SIM_DAY),
-        callback=_dream_callback(state, sim_id, tick, trace_id, lang),
+        callback=state.guard_callback(
+            "sim.dream", _dream_callback(state, sim_id, tick, trace_id, lang)),
     )
     logger.info("sleep start sim=%s -> sim.dream", sim_id)
 
@@ -215,19 +224,24 @@ def _on_wake(state: AppState, sim: Dict[str, Any], tick: int, lang: str, trace_i
         return
     _apply_psyche_decay(state, sim_id, tick)
 
-    if state.salient_since_sleep.pop(sim_id, False):
-        profile = _sim_profile(state, sim_id)
-        ctx = {
-            "sim_id": sim_id, "sim_name": sim.get("name", ""),
-            "world_sim_tick": tick,
-            "psyche_blocks": profile.get("psyche_blocks") or {},
-            "dream_urge": profile.get("dream_urge") or {},
-        }
-        state.scheduler.submit_bg(
-            "sim.sleep", ctx, lang, trace_id=trace_id,
-            dedup_key="{}:{}:sleep".format(sim_id, tick // TICKS_PER_SIM_DAY),
-            callback=_sleep_callback(state, sim_id, tick),
-        )
+    # Always run the wake reflection (4.5): gating it behind a salient event left
+    # `sleep_reflection` with zero rows in the audit DB. The salient flag still
+    # biases the prompt content, but no longer suppresses persistence.
+    salient = state.salient_since_sleep.pop(sim_id, False)
+    profile = _sim_profile(state, sim_id)
+    ctx = {
+        "sim_id": sim_id, "sim_name": sim.get("name", ""),
+        "world_sim_tick": tick,
+        "psyche_blocks": profile.get("psyche_blocks") or {},
+        "dream_urge": profile.get("dream_urge") or {},
+        "salient": salient,
+    }
+    state.scheduler.submit_bg(
+        "sim.sleep", ctx, lang, trace_id=trace_id,
+        dedup_key="{}:{}:sleep".format(sim_id, tick // TICKS_PER_SIM_DAY),
+        callback=state.guard_callback(
+            "sim.sleep", _sleep_callback(state, sim_id, tick)),
+    )
 
     last = state.last_reflect_tick.get(sim_id)
     if last is None or (int(tick) - int(last)) >= TICKS_PER_SIM_DAY:
@@ -237,7 +251,8 @@ def _on_wake(state: AppState, sim: Dict[str, Any], tick: int, lang: str, trace_i
         state.scheduler.submit_bg(
             "evo.reflect", ctx, lang, trace_id=trace_id,
             dedup_key="{}:{}:reflect".format(sim_id, tick // TICKS_PER_SIM_DAY),
-            callback=_reflect_callback(state, sim_id, tick),
+            callback=state.guard_callback(
+                "evo.reflect", _reflect_callback(state, sim_id, tick)),
         )
 
 
@@ -308,7 +323,8 @@ def _maybe_end_of_day(
         {"save_id": save_id, "world_sim_tick": tick, "day": day},
         lang, trace_id=trace_id,
         dedup_key="{}:{}:chronicle".format(save_id, day),
-        callback=_chronicle_callback(state, save_id, tick),
+        callback=state.guard_callback(
+            "world.household.chronicle", _chronicle_callback(state, save_id, tick)),
     )
     scheduled += 1
 
@@ -320,10 +336,328 @@ def _maybe_end_of_day(
              "world_sim_tick": tick},
             lang, trace_id=trace_id,
             dedup_key="{}:{}:diary".format(active_sim_id, day),
-            callback=_diary_callback(state, int(active_sim_id), tick),
+            callback=state.guard_callback(
+                "sim.diary", _diary_callback(state, int(active_sim_id), tick)),
         )
         scheduled += 1
     return scheduled
+
+
+# ── world.aftermath (P25) ─────────────────────────────────────────────────
+def _aftermath_callback(state: AppState, save_id: int, tick: int):
+    def _callback(result) -> None:
+        try:
+            data = parse_aftermath(result.data or {})
+            store = _store(state)
+            if store is not None and any(data["zeitgeist_shift"].values()):
+                existing = get_zeitgeist(store, save_id)
+                merged = merge_zeitgeist(existing, data["zeitgeist_shift"])
+                set_zeitgeist(
+                    store, save_id, merged.get("tags", []),
+                    merged.get("preset", "drama"),
+                    merged.get("weather_preference", "sunny"), tick,
+                )
+            intents = [
+                normalize_intent(raw, default_source="world")
+                for raw in data.get("intents", []) if isinstance(raw, dict)
+            ]
+            if intents:
+                state.enqueue_intents(intents)
+        except Exception:  # noqa: BLE001
+            logger.exception("aftermath callback failed for save %s", save_id)
+
+    return _callback
+
+
+# ── conversation sessions & close (P06) ───────────────────────────────────
+def _conversation_pairs(state: AppState) -> Dict[str, tuple]:
+    """Map of active conversing pair -> (sim_a, sim_b), keyed deterministically."""
+    items = dict(state.census_items())
+    pairs: Dict[str, tuple] = {}
+    for sim_id, sim in items.items():
+        if not sim.get("is_conversing"):
+            continue
+        target_id = int(sim.get("social_target_sim_id") or 0)
+        if not target_id or target_id not in items:
+            continue
+        a, b = sorted((int(sim_id), int(target_id)))
+        pairs["{}-{}".format(a, b)] = (a, b)
+    return pairs
+
+
+def _track_conversations(state: AppState, tick: int, lang: str, trace_id) -> int:
+    """Open/close ConversationSessions from census edges and fire sim.social.close (P06)."""
+    current = _conversation_pairs(state)
+    previous = set(state.conversations.keys())
+    current_keys = set(current.keys())
+
+    for key in current_keys - previous:
+        a, b = current[key]
+        state.conversations[key] = {"sim_a": a, "sim_b": b, "start_tick": int(tick)}
+
+    closed = 0
+    for key in previous - current_keys:
+        session = state.conversations.pop(key, None)
+        if not session:
+            continue
+        a_id, b_id = int(session.get("sim_a", 0)), int(session.get("sim_b", 0))
+        sim_a, sim_b = state.get_census(a_id), state.get_census(b_id)
+        ctx = {
+            "sim_id": a_id, "sim_name": sim_a.get("name", ""),
+            "target_sim_id": b_id, "target_name": sim_b.get("name", ""),
+            "world_sim_tick": int(tick),
+        }
+        state.scheduler.submit_bg(
+            "sim.social.close", ctx, lang, trace_id=trace_id,
+            dedup_key="{}:{}-{}:social_close".format(state.active_save_id or 0, a_id, b_id),
+            callback=state.guard_callback(
+                "sim.social.close", _social_close_callback(state, a_id, b_id, tick)),
+        )
+        closed += 1
+    return closed
+
+
+def _social_close_callback(state: AppState, a_id: int, b_id: int, tick: int):
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            summary = data.get("summary") or data.get("social_memory") or ""
+            store = _store(state)
+            if summary and store is not None:
+                for src, other in ((a_id, b_id), (b_id, a_id)):
+                    store.add_memory(
+                        src, "social", {"text": summary, "with": other},
+                        search_text=summary, created_sim_tick=tick,
+                    )
+                state.incr("social_sessions_closed")
+        except Exception:  # noqa: BLE001
+            logger.exception("social close callback failed for %s/%s", a_id, b_id)
+
+    return _callback
+
+
+def _social_sessions(state: AppState) -> List[Dict[str, Any]]:
+    return [
+        {"sim_a": s.get("sim_a"), "sim_b": s.get("sim_b"),
+         "start_tick": s.get("start_tick")}
+        for s in state.conversations.values()
+    ]
+
+
+def _conversing_sim_ids(state: AppState) -> List[int]:
+    """Flat list of sim ids currently in a conversation (SeatManager expects ids)."""
+    ids = set()
+    for pair in state.conversations.values():
+        for key in ("sim_a", "sim_b"):
+            try:
+                sim_id = int(pair.get(key, 0))
+            except (TypeError, ValueError):
+                continue
+            if sim_id:
+                ids.add(sim_id)
+    return sorted(ids)
+
+
+# ── ops.recap (P32) ───────────────────────────────────────────────────────
+def _recap_callback(state: AppState, tick: int):
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            state.recap = {
+                "headline": data.get("headline", ""),
+                "recap_text": data.get("recap_text", ""),
+                "tick": int(tick),
+            }
+            state.incr("recap_ready")
+        except Exception:  # noqa: BLE001
+            logger.exception("recap callback failed")
+
+    return _callback
+
+
+# ── background scheduler / NPC background (P21/P22/P13) ───────────────────
+def _background_callback(state: AppState, sim_id: int, tick: int, purpose: str):
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            text = data.get("background") or data.get("backstory") or ""
+            store = _store(state)
+            if text and store is not None:
+                store.set_sim_background(sim_id, str(text), tick)
+                state.incr("npc_backgrounds")
+        except Exception:  # noqa: BLE001
+            logger.exception("%s callback failed for sim %s", purpose, sim_id)
+
+    return _callback
+
+
+def _maybe_background(state: AppState, tick: int, lang: str, trace_id, active_sim_id) -> int:
+    """Populate a background for the highest-priority sim lacking one (P21)."""
+    store = _store(state)
+    if store is None:
+        return 0
+    scheduled = 0
+    for sim in select_targets(state, active_sim_id, cap=1):
+        sim_id = int(sim.get("sim_id", 0))
+        if not sim_id:
+            continue
+        sim = state.get_census(sim_id)
+        if (store.get_sim_profile(sim_id) or {}).get("background"):
+            continue
+        state.scheduler.submit_bg(
+            "god.background",
+            {"sim_id": sim_id, "sim_name": sim.get("name", ""), "world_sim_tick": tick},
+            lang, trace_id=trace_id,
+            dedup_key="{}:{}:god_background".format(state.active_save_id or 0, sim_id),
+            callback=state.guard_callback(
+                "god.background", _background_callback(state, sim_id, tick, "god.background")),
+        )
+        scheduled += 1
+    return scheduled
+
+
+def _maybe_npc_backstory(state: AppState, tick: int, lang: str, trace_id) -> int:
+    """Generate a background for a recurring non-player townie (P22)."""
+    store = _store(state)
+    if store is None:
+        return 0
+    recurring = []
+    for _sid, sim in state.census_items():
+        if sim.get("is_player"):
+            continue
+        sim_id = int(sim.get("sim_id", 0))
+        if not sim_id:
+            continue
+        state.townie_sightings[sim_id] = state.townie_sightings.get(sim_id, 0) + 1
+        if state.townie_sightings[sim_id] == 2:
+            recurring.append(sim_id)
+    if not recurring:
+        return 0
+    sim_id = recurring[0]
+    if (store.get_sim_profile(sim_id) or {}).get("background"):
+        return 0
+    sim = state.get_census(sim_id)
+    state.scheduler.submit_bg(
+        "world.npc.backstory",
+        {"sim_id": sim_id, "sim_name": sim.get("name", ""), "world_sim_tick": tick},
+        lang, trace_id=trace_id,
+        dedup_key="{}:{}:npc_backstory".format(state.active_save_id or 0, sim_id),
+        callback=state.guard_callback(
+            "world.npc.backstory", _background_callback(state, sim_id, tick, "world.npc.backstory")),
+    )
+    return 1
+
+
+def _maybe_expand_background(state: AppState, tick: int, lang: str, trace_id, active_sim_id) -> int:
+    """Seed 3 backstory memories for the active sim's family (P13)."""
+    if not active_sim_id:
+        return 0
+    active = state.get_census(int(active_sim_id))
+    scheduled = 0
+    for link in active.get("family_links") or []:
+        target = int(link.get("target_sim_id") or 0) if isinstance(link, dict) else int(link or 0)
+        if not target or target in state.background_expanded:
+            continue
+        state.background_expanded.add(target)
+        sim = state.get_census(target)
+
+        def _expand_callback(result, target_id=target):
+            try:
+                data = result.data or {}
+                entries = data.get("backstory") or data.get("memories") or data.get("background") or []
+                if isinstance(entries, str):
+                    entries = [entries]
+                store = _store(state)
+                if store is not None:
+                    for text in list(entries)[:3]:
+                        if text:
+                            store.add_memory(
+                                target_id, "backstory", {"text": str(text)},
+                                search_text=str(text), created_sim_tick=tick,
+                            )
+                    state.incr("background_expanded")
+            except Exception:  # noqa: BLE001
+                logger.exception("background expand callback failed for sim %s", target_id)
+
+        state.scheduler.submit_bg(
+            "sim.background.expand",
+            {"sim_id": target, "sim_name": sim.get("name", ""), "world_sim_tick": tick},
+            lang, trace_id=trace_id,
+            dedup_key="{}:{}:bg_expand".format(state.active_save_id or 0, target),
+            callback=state.guard_callback("sim.background.expand", _expand_callback),
+        )
+        scheduled += 1
+    return scheduled
+
+
+# ── mem.relationship.review (P29) ─────────────────────────────────────────
+def _maybe_relationship_review(state: AppState, tick: int, lang: str, trace_id, active_sim_id) -> int:
+    """Review the active sim's strongest edge once per sim-day (P29)."""
+    if not active_sim_id:
+        return 0
+    sim_id = int(active_sim_id)
+    last = state.last_relationship_review_tick.get(sim_id, -(10 ** 12))
+    if tick - last < TICKS_PER_SIM_DAY:
+        return 0
+    edges = []
+    prefix = "{}:".format(sim_id)
+    for key, rel in state.relationships.items():
+        if not key.startswith(prefix):
+            continue
+        try:
+            target_id = int(key.split(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        strength = abs(float(rel.get("friendship", 0.0))) + abs(float(rel.get("romance", 0.0)))
+        edges.append((strength, target_id))
+    if not edges:
+        return 0
+    edges.sort(reverse=True)
+    _, target_id = edges[0]
+    state.last_relationship_review_tick[sim_id] = tick
+    sim = state.get_census(sim_id)
+    target = state.get_census(target_id)
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            note = data.get("qualitative_note") or data.get("note") or ""
+            store = _store(state)
+            if note and store is not None:
+                store.upsert_relationship(
+                    sim_id, target_id, qualitative_note=str(note), updated_sim_tick=tick,
+                )
+                state.incr("relationship_reviews")
+        except Exception:  # noqa: BLE001
+            logger.exception("relationship review callback failed for %s", sim_id)
+
+    state.scheduler.submit_bg(
+        "mem.relationship.review",
+        {"sim_id": sim_id, "sim_name": sim.get("name", ""),
+         "target_sim_id": target_id, "target_name": target.get("name", ""),
+         "world_sim_tick": tick},
+        lang, trace_id=trace_id,
+        dedup_key="{}:{}:{}:rel_review".format(state.active_save_id or 0, sim_id, target_id),
+        callback=state.guard_callback("mem.relationship.review", _callback),
+    )
+    return 1
+
+
+# ── ops.panel.summary (P33) ───────────────────────────────────────────────
+def _panel_summary(state: AppState) -> Dict[str, Any]:
+    """Deterministic 2-line diagnostic summary (P33), no LLM cost."""
+    arc = state.active_arc or {}
+    beats = arc.get("beats") or []
+    mode = str(state.config.god("director_mode", "AUTONOMOUS"))
+    line1 = "{} | arc {} | beat {}/{}".format(
+        mode, arc.get("id", "-"), int(arc.get("current_beat_idx", 0)), len(beats),
+    )
+    metrics = state.metrics_snapshot()
+    line2 = "epoch {} | intents {} | stale {} | rewinds {}".format(
+        state.session_epoch, metrics.get("intents_emitted", 0),
+        metrics.get("stale_epoch_dropped", 0), metrics.get("rewinds", 0),
+    )
+    return {"line1": line1, "line2": line2, "text": line1 + "\n" + line2}
 
 
 # ── speech policy (F11) ───────────────────────────────────────────────────
@@ -357,23 +691,48 @@ def handle_session_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     tick = int(payload.get("world_sim_tick", 0))
     lang = normalize_lang(payload.get("lang"))
     state.current_lang = lang
+    # reset_ram() bumps the epoch, invalidating callbacks from the prior session.
     state.reset_ram()
     result = state.save_vault.session_start(save_id, tick)
     state.active_save_id = save_id
+    if result.get("rewound"):
+        # A real rewind changed the memory timeline: invalidate in-flight jobs
+        # again so none of them writes into the restored store (2.4).
+        state.bump_epoch()
+        state.incr("rewinds")
+    # Seed just below the restored/current tick: the first autonomy pulse lands
+    # on the same tick as session-start and must not be rejected as a duplicate.
+    restored = result.get("restored_tick")
+    baseline = restored if restored is not None else tick
+    state.set_processed_tick(max(0, int(baseline) - 1))
 
-    recap_job_id = None
-    if result.get("bootstrap_needed"):
-        # Bootstrap: schedule zero-minute profile hydration in bg.
-        state.scheduler.submit_bg(
-            "ops.recap",
-            {"save_id": save_id, "world_sim_tick": tick},
-            lang, dedup_key="{}:{}:ops.recap".format(save_id, tick),
-        )
+    # BUG-02: self-heal a store polluted with duplicate active arcs. Keep the
+    # most recent one (ordered by created_sim_tick DESC) and abort the rest so
+    # the God Director has exactly one progressing narrative.
+    store = state.working_store()
+    if store is not None:
+        actives = store.list_arcs(status="active")
+        if len(actives) > 1:
+            removed = deactivate_stale_arcs(store, actives[0].get("id"))
+            state.incr("stale_arcs_deactivated", removed)
+            logger.info("BUG-02: deactivated %d stale active arc(s)", removed)
+        state.active_arc = actives[0] if actives else None
+
+    # P32: always generate the "Previously on…" recap at session-start and keep
+    # the (synthetic) job key so the client can correlate it via GET /v1/recap.
+    recap_job_id = "{}:{}:ops.recap".format(save_id, tick)
+    state.scheduler.submit_bg(
+        "ops.recap",
+        {"save_id": save_id, "world_sim_tick": tick},
+        lang, dedup_key=recap_job_id,
+        callback=state.guard_callback("ops.recap", _recap_callback(state, tick)),
+    )
 
     return {
         "ok": True,
         "restored_tick": result.get("restored_tick"),
         "bootstrap_needed": bool(result.get("bootstrap_needed")),
+        "rewound": bool(result.get("rewound")),
         "recap_job_id": recap_job_id,
     }
 
@@ -382,11 +741,15 @@ def handle_zone_transition(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     save_id = int(payload.get("save_id", 0))
     tick = int(payload.get("world_sim_tick", 0))
+    lang = normalize_lang(payload.get("lang")) or state.current_lang
+    # 4.5(a): consolidate live chat threads before the zone clears them.
+    consolidated = _consolidate_active_chats(state, tick, lang, limit=2)
     state.save_vault.zone_transition(save_id, tick)
     # Clear spatial intents only (REQ-MEM-02).
     cleared = state.drain_intents()
     state.conversations = {}
-    return {"ok": True, "cleared_spatial_intents": len(cleared)}
+    return {"ok": True, "cleared_spatial_intents": len(cleared),
+            "consolidated_sims": consolidated}
 
 
 def handle_save(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -394,6 +757,9 @@ def handle_save(payload: Dict[str, Any]) -> Dict[str, Any]:
     save_id = int(payload.get("save_id", 0))
     previous_save_id = payload.get("previous_save_id")
     tick = int(payload.get("world_sim_tick", 0))
+    lang = normalize_lang(payload.get("lang")) or state.current_lang
+    # 4.5(b): fold live chat threads into the store before it becomes committed.
+    _consolidate_active_chats(state, tick, lang, limit=3)
     result = state.save_vault.save(save_id, previous_save_id, tick)
     return {"ok": True, "committed_tick": result.get("committed_tick", tick), "snapshot_rev": result.get("snapshot_rev", tick)}
 
@@ -404,6 +770,9 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
     packs = payload.get("installed_packs")
     if isinstance(packs, list):
         state.installed_packs = {str(pack).upper() for pack in packs if pack}
+    mods = payload.get("detected_mods")
+    if isinstance(mods, list):
+        state.detected_mods = [str(mod) for mod in mods if mod]
     hydrated = 0
     store = _store(state)
     census_update: Dict[int, Dict[str, Any]] = {}
@@ -426,8 +795,39 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
                     generated_at_tick=int(payload.get("world_sim_tick", 0)),
                 )
                 store.upsert_sim_profile(sim_id, profile, int(payload.get("world_sim_tick", 0)))
+            # Aspiration collected by the Mod (2.2) seeds the profile ambition
+            # without clobbering a value already evolved by sim.aspiration.
+            if sim.get("aspiration") and not profile.get("ambition"):
+                profile["ambition"] = str(sim.get("aspiration"))
+                store.upsert_sim_profile(sim_id, profile, int(payload.get("world_sim_tick", 0)))
+    # Ingest relationship edges for later mem.relationship.review (P29).
+    relationships = payload.get("relationships") or []
+    imported_edges = 0
+    tick = int(payload.get("world_sim_tick", 0))
+    for rel in relationships:
+        if not isinstance(rel, dict):
+            continue
+        try:
+            sim_id = int(rel.get("sim_id", 0))
+            target_id = int(rel.get("target_sim_id", 0))
+        except (TypeError, ValueError):
+            continue
+        if not sim_id or not target_id:
+            continue
+        friendship = float(rel.get("friendship", 0.0) or 0.0)
+        romance = float(rel.get("romance", 0.0) or 0.0)
+        state.relationships["{}:{}".format(sim_id, target_id)] = {
+            "friendship": friendship, "romance": romance,
+        }
+        if store is not None:
+            store.upsert_relationship(
+                sim_id, target_id, friendship=friendship, romance=romance,
+                updated_sim_tick=tick,
+            )
+        imported_edges += 1
+
     state.update_census(census_update)
-    return {"ok": True, "hydrated_count": hydrated}
+    return {"ok": True, "hydrated_count": hydrated, "relationships_imported": imported_edges}
 
 
 # ── autonomy ─────────────────────────────────────────────────────────────
@@ -524,6 +924,24 @@ def _social_callback(
     return _callback
 
 
+def _reaction_callback(state: AppState, sim_id: int, category: str, tick: int):
+    """Enqueue the intents a realtime-async sim.reaction produced (4.2)."""
+
+    def _callback(result) -> None:
+        try:
+            data = result.data or {}
+            out: List[Dict[str, Any]] = []
+            for raw in (data.get("intents", []) or []):
+                if isinstance(raw, dict):
+                    out.append(normalize_intent(raw, default_source="agent"))
+            if out:
+                state.enqueue_intents(out)
+        except Exception:  # noqa: BLE001
+            logger.exception("reaction callback failed for sim %s", sim_id)
+
+    return _callback
+
+
 def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Merge the delta, schedule autonomous LLM work in the background and
     immediately return any intents that are ready.
@@ -543,11 +961,24 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     clock_speed = int(payload.get("clock_speed", 1))
     trace_id = payload.get("trace_id")
 
+    # Tick idempotency (2.3): a re-delivered or replayed tick must not re-run
+    # the ingestion side effects. Already-ready intents are still returned so a
+    # duplicate request cannot strand them.
+    if not state.accept_tick(tick):
+        state.incr("duplicate_ticks")
+        return {"ok": True, "scheduled": 0, "intents": state.drain_intents(),
+                "social_sessions": [], "duplicate_tick": True}
+
     _merge_delta(state, payload.get("sims_delta") or [])
 
     # Pause handling: freeze autonomy when paused (REQ-ARCH-04).
     if clock_speed == 0:
         return {"ok": True, "scheduled": 0, "intents": state.drain_intents(), "social_sessions": []}
+
+    # Panic switch (FC4/4.8): the player suspended autonomy from the Quick Menu.
+    if state.paused:
+        return {"ok": True, "scheduled": 0, "intents": state.drain_intents(),
+                "social_sessions": _social_sessions(state), "paused": True}
 
     intents: List[Dict[str, Any]] = []
     scheduled = 0
@@ -558,6 +989,19 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     # End-of-day pipeline: household chronicle + diary (P23/P10).
     _maybe_end_of_day(state, save_id, tick, lang, trace_id, active_sim_id)
 
+    # Silence-driven consolidation: one quiet chat thread per tick (4.5c).
+    _maybe_silence_consolidate(state, tick, lang)
+
+    # Conversation session edges -> sim.social.close (P06).
+    _track_conversations(state, tick, lang, trace_id)
+
+    # Long-horizon enrichment (bounded + deduped): family backstories, NPC
+    # backgrounds, recurring-townie stories and relationship reviews (P13/P21/P22/P29).
+    _maybe_expand_background(state, tick, lang, trace_id, active_sim_id)
+    _maybe_background(state, tick, lang, trace_id, active_sim_id)
+    _maybe_npc_backstory(state, tick, lang, trace_id)
+    _maybe_relationship_review(state, tick, lang, trace_id, active_sim_id)
+
     # Recompute seats (purely local, no LLM).
     catalyst_ids = list(state.catalyst_leases.keys())
     max_seats = int(state.config.gameplay("agent_seats", 12))
@@ -565,11 +1009,20 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     manager = SeatManager()
     state.set_seats(manager.assign(
         dict(state.census_items()), None, active_sim_id, catalyst_ids,
-        list(state.conversations.keys()), tick, max_seats, lease_min,
+        _conversing_sim_ids(state), tick, max_seats, lease_min,
         existing_seats=state.get_seats(),
     ))
 
     # Schedule idle impulses for the active sim + a bounded set of full seats.
+    # 4.1: throttle per sim and shrink the per-tick budget when the scheduler is
+    # already backed up, so a slow provider cannot make impulses bursty.
+    budget = MAX_IMPULSES_PER_TICK
+    queue_depth = int(state.scheduler.status().get("queue_depth", 0) or 0)
+    if queue_depth >= int(state.config.gameplay("impulse_backpressure_queue_depth", 6)):
+        budget = 1
+    cooldown_ticks = (
+        int(state.config.gameplay("impulse_cooldown_sim_minutes", 60)) * TICKS_PER_SIM_MINUTE
+    )
     seats_snapshot = state.get_seats()
     full_seats = [s for s in seats_snapshot.values() if s.get("tier") == "full" and s.get("role") == "household"]
     order = []
@@ -578,12 +1031,17 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     for seat in full_seats:
         if seat["sim_id"] not in [s["sim_id"] for s in order]:
             order.append(seat)
-    order = order[:MAX_IMPULSES_PER_TICK]
+    order = order[:budget]
 
     for seat in order:
+        sim_id = int(seat["sim_id"])
+        last_impulse = state.last_impulse_tick.get(sim_id)
+        if last_impulse is not None and cooldown_ticks > 0 and (tick - last_impulse) < cooldown_ticks:
+            continue
         sim = state.get_census(seat["sim_id"])
         if sim.get("is_sleeping") or sim.get("is_off_lot_duty"):
             continue
+        state.last_impulse_tick[sim_id] = tick
         physical_ok = physical_actions_allowed(
             sim.get("needs"), sim.get("schedule_blocks"), tick
         )
@@ -597,8 +1055,11 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         state.scheduler.submit_bg(
             "sim.impulse", ctx, lang, trace_id=trace_id,
             dedup_key="{}:{}:impulse".format(save_id, seat["sim_id"]),
-            callback=_impulse_callback(
-                state, int(seat["sim_id"]), tick, trace_id, physical_ok,
+            callback=state.guard_callback(
+                "sim.impulse",
+                _impulse_callback(
+                    state, int(seat["sim_id"]), tick, trace_id, physical_ok,
+                ),
             ),
         )
         scheduled += 1
@@ -612,11 +1073,15 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         b_id = int(sim_b.get("sim_id", 0))
         if gate.get("ok") and _speech_allowed(state, [a_id, b_id], time.time()):
             rumor = _pick_rumor(state, sim_a, sim_b)
-            ctx = build_social_context(sim_a, sim_b, tick, rumor=rumor)
+            # F04/P18: if one of the pair holds a catalyst lease, route the
+            # dialogue asymmetrically (sovereign agent answers a puppeteered NPC).
+            puppeteer = _puppeteer_context(state, sim_a, sim_b)
+            ctx = build_social_context(sim_a, sim_b, tick, rumor=rumor, puppeteer=puppeteer)
             state.scheduler.submit_bg(
                 "sim.social", ctx, lang, trace_id=trace_id,
                 dedup_key="{}:{}-{}:social".format(save_id, a_id, b_id),
-                callback=_social_callback(state, sim_a, sim_b, rumor, tick),
+                callback=state.guard_callback(
+                    "sim.social", _social_callback(state, sim_a, sim_b, rumor, tick)),
             )
             scheduled += 1
 
@@ -638,7 +1103,7 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         "ok": True,
         "scheduled": scheduled,
         "intents": intents,
-        "social_sessions": [],
+        "social_sessions": _social_sessions(state),
     }
 
 
@@ -649,17 +1114,77 @@ _CONVERSATION_MARKERS = ("social", "talk", "chat", "convers")
 
 
 def _is_conversing(sim: Dict[str, Any]) -> bool:
+    # BUG-01: the Mod reports a reliable boolean because the target of a social
+    # interaction is another Sim; class-name matching is only a fallback.
+    if sim.get("is_conversing"):
+        return True
     activity = (sim.get("activity") or "").lower()
     return any(marker in activity for marker in _CONVERSATION_MARKERS)
 
 
 def _find_conversational_pair(state: AppState, active_sim_id: Optional[int]):
-    candidates = [
-        sim for _sim_id, sim in state.census_items() if _is_conversing(sim)
-    ]
+    """Find a conversing pair, preferring the Mod's explicit signal (BUG-01).
+
+    1. A sim flagged ``is_conversing`` whose ``social_target_sim_id`` is known.
+    2. Two sims whose ``activity`` matches a conversation marker.
+    3. Relaxed fallback: two awake, visibly busy sims in the same room/range.
+    """
+    items = dict(state.census_items())
+
+    for sim_id, sim in items.items():
+        if not sim.get("is_conversing"):
+            continue
+        target_id = int(sim.get("social_target_sim_id") or 0)
+        target = items.get(target_id)
+        if target is not None and int(target.get("sim_id", target_id)) != int(sim_id):
+            return sim, target
+
+    candidates = [sim for _sid, sim in items.items() if _is_conversing(sim)]
     if len(candidates) >= 2:
         return candidates[0], candidates[1]
+
+    return _proximity_pair(items, active_sim_id)
+
+
+def _proximity_pair(items: Dict[int, Dict[str, Any]], active_sim_id: Optional[int]):
+    """Conservative fallback for social classes whose target we could not resolve."""
+    pool = [
+        sim for _sid, sim in items.items()
+        if not sim.get("is_sleeping")
+        and str(sim.get("activity") or "").lower() not in ("", "idle")
+        and sim.get("room_id") not in (None, 0)
+    ]
+    for i in range(len(pool)):
+        for j in range(i + 1, len(pool)):
+            a, b = pool[i], pool[j]
+            if a.get("room_id") != b.get("room_id"):
+                continue
+            gate = preflight(a, b, active_sim_id)
+            if gate.get("same_room") and gate.get("within_distance") and gate.get("capable_a") and gate.get("capable_b"):
+                return a, b
     return None
+
+
+def _puppeteer_context(
+    state: AppState, sim_a: Dict[str, Any], sim_b: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build the asymmetric-dialogue context when a catalyst lease is in play."""
+    lease = None
+    catalyst_id = 0
+    for sim in (sim_a, sim_b):
+        sid = int(sim.get("sim_id", 0))
+        if sid in state.catalyst_leases:
+            lease = state.catalyst_leases.get(sid) or {}
+            catalyst_id = sid
+            break
+    if catalyst_id == 0:
+        return None
+    other = sim_b if int(sim_a.get("sim_id", 0)) == catalyst_id else sim_a
+    return {
+        "objective": lease.get("objective", ""),
+        "catalyst_name": (state.get_census(catalyst_id) or {}).get("name", ""),
+        "agent_name": other.get("name", ""),
+    }
 
 
 def _pick_rumor(state: AppState, sim_a: Dict[str, Any], sim_b: Dict[str, Any]):
@@ -852,6 +1377,7 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     triggered_jobs = []
     store = _store(state)
+    save_id = state.active_save_id or int(payload.get("save_id", 0))
 
     # Lifecycle events (2.1) produce a decay-immune legacy memory (P28) and a
     # life-story chapter, regardless of the salience threshold.
@@ -877,11 +1403,14 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
             sim_id, sim.get("name", ""), target_id, target.get("name", ""),
             category, impact, salience, tick,
         )
-        result = state.scheduler.run_purpose("sim.reaction", ctx, lang)
-        data = result.data or {}
-        for raw in (data.get("intents", []) or []):
-            if isinstance(raw, dict):
-                state.enqueue_intents([normalize_intent(raw, default_source="agent")])
+        # 4.2: run the reaction on the realtime pool so /v1/events never blocks
+        # on provider latency. Intents land on the IntentBus via the callback.
+        state.scheduler.submit_async(
+            "sim.reaction", ctx, lang, trace_id=trace_id,
+            dedup_key="{}:{}:{}:reaction".format(sim_id, category, tick),
+            callback=state.guard_callback(
+                "sim.reaction", _reaction_callback(state, sim_id, category, tick)),
+        )
         triggered_jobs.append("sim.reaction")
 
         # Public salient events seed a neighborhood rumor (F22 / P24).
@@ -902,6 +1431,19 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
                     "source": "god",
                 }, default_source="god")])
 
+    # Post-climax aftermath: high-salience events nudge the zeitgeist and
+    # enqueue durable world intents (P25).
+    if salience >= AFTERMATH_SALIENCE_THRESHOLD:
+        sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
+        ctx = build_aftermath_context(sim, category, impact, salience, tick)
+        state.scheduler.submit_bg(
+            "world.aftermath", ctx, lang, trace_id=trace_id,
+            dedup_key="{}:{}:{}:aftermath".format(save_id, sim_id, tick),
+            callback=state.guard_callback(
+                "world.aftermath", _aftermath_callback(state, save_id, tick)),
+        )
+        triggered_jobs.append("world.aftermath")
+
     return {"ok": True, "salience": salience, "triggered_jobs": triggered_jobs}
 
 
@@ -913,6 +1455,21 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     store = _store(state)
     sim = state.get_census(sim_id) or {"name": ""}
     force_interactive = bool(payload.get("force_interactive", False))
+    tick = int(payload.get("world_sim_tick", 0))
+
+    # 4.1: accept a profile edited in the Web Studio and persist it (native
+    # traits/likes/dislikes/species/age remain ground truth via normalize).
+    posted = payload.get("profile")
+    if isinstance(posted, dict) and posted:
+        profile = normalize_profile(
+            posted, name=sim.get("name", ""), species=sim.get("species"),
+            age_stage=sim.get("age_stage"), traits=sim.get("traits"),
+            likes=sim.get("likes"), dislikes=sim.get("dislikes"),
+            generated_at_tick=tick,
+        )
+        if store:
+            store.upsert_sim_profile(sim_id, profile, tick)
+        return {"profile": profile}
 
     profile = None
     if store:
@@ -1002,6 +1559,46 @@ def handle_consolidate(payload: Dict[str, Any]) -> Dict[str, Any]:
     state.clear_chat_buffer(sim_id)
     compacted = _maybe_compact(state, sim_id, tick, lang)
     return {"consolidated": data, "compacted": compacted}
+
+
+def _consolidate_active_chats(state: AppState, tick: int, lang: str, limit: int = 1) -> int:
+    """Consolidate sims with live chat buffers (4.5). Returns the count handled."""
+    count = 0
+    for sim_id in list(state.chat_buffers.keys()):
+        if limit > 0 and count >= limit:
+            break
+        if not state.chat_turns(sim_id):
+            continue
+        try:
+            handle_consolidate({"sim_id": int(sim_id), "world_sim_tick": tick, "lang": lang})
+            count += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("consolidate on transition/save failed for sim %s", sim_id)
+    return count
+
+
+def _maybe_silence_consolidate(state: AppState, tick: int, lang: str) -> int:
+    """Consolidate one sim whose chat went quiet for ``silence_consolidate_seconds``.
+
+    Closes the black hole where ``silence_consolidate_seconds`` was dead config:
+    without a caller, ``consolidated``/``sleep_reflection``/``compact`` never
+    reached the DB (4.5c).
+    """
+    silence_seconds = float(state.config.gameplay("silence_consolidate_seconds", 300) or 0)
+    if silence_seconds <= 0:
+        return 0
+    threshold_ticks = int(silence_seconds * (TICKS_PER_SIM_MINUTE / 60.0))
+    for sim_id, buffer in list(state.chat_buffers.items()):
+        if not (buffer.get("turns") or []):
+            continue
+        last_tick = int(buffer.get("last_tick", 0))
+        if tick - last_tick >= threshold_ticks:
+            try:
+                handle_consolidate({"sim_id": int(sim_id), "world_sim_tick": tick, "lang": lang})
+                return 1
+            except Exception:  # noqa: BLE001
+                logger.exception("silence consolidate failed for sim %s", sim_id)
+    return 0
 
 
 # ── god ──────────────────────────────────────────────────────────────────
@@ -1095,6 +1692,96 @@ def handle_neighborhood(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ── arc / cast read (4.3) ─────────────────────────────────────────────────
+def handle_get_arc(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = get_state()
+    store = _store(state)
+    arc = state.active_arc
+    if arc is None and store is not None:
+        actives = store.list_arcs(status="active")
+        arc = actives[0] if actives else None
+    return {"ok": True, "arc": arc or {}}
+
+
+def handle_get_cast(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = get_state()
+    arc = state.active_arc or {}
+    return {"ok": True, "cast": arc.get("cast", [])}
+
+
+# ── aspiration (P12) ──────────────────────────────────────────────────────
+def handle_aspiration(payload: Dict[str, Any]) -> Dict[str, Any]:
+    state = get_state()
+    lang = normalize_lang(payload.get("lang"))
+    sim_id = int(payload.get("sim_id", 0))
+    tick = int(payload.get("world_sim_tick", 0))
+    store = _store(state)
+    sim = state.get_census(sim_id) or {"name": ""}
+    profile = (store.get_sim_profile(sim_id) or {}).get("profile") if store else {}
+    profile = profile or {}
+    ctx = {
+        "sim_id": sim_id, "sim_name": sim.get("name", ""),
+        "current_ambition": profile.get("ambition", ""),
+        "world_sim_tick": tick,
+    }
+    result = state.scheduler.run_purpose("sim.aspiration", ctx, lang)
+    data = result.data or {}
+    profile["ambition"] = data.get("ambition", profile.get("ambition", ""))
+    if store:
+        store.upsert_sim_profile(sim_id, profile, tick)
+    return {"ambition": profile.get("ambition", ""), "milestone": data.get("milestone", "")}
+
+
+# ── ops: recap + panel summary (P32/P33) ──────────────────────────────────
+def handle_recap_get(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = get_state()
+    return {"ok": True, "recap": state.recap}
+
+
+def handle_panel_summary() -> Dict[str, Any]:
+    state = get_state()
+    return {"ok": True, "summary": _panel_summary(state)}
+
+
+# ── config: provider credentials (4.2) + panic (4.8/FC4) ──────────────────
+def handle_provider_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    state = get_state()
+    provider = str(payload.get("provider") or "").strip()
+    if not provider:
+        return {"ok": False, "error": "provider required"}
+    providers = state.config.raw().setdefault("llm", {}).setdefault("providers", {})
+    entry = providers.setdefault(provider, {})
+    for key in ("enabled", "base_url", "api_key", "models", "rpm", "rpd", "tpm"):
+        if key in payload:
+            entry[key] = payload[key]
+    for limit in ("rpm", "rpd", "tpm"):
+        entry.setdefault(limit, 0)
+    try:
+        state.scheduler.reload_provider(provider)
+    except Exception:  # noqa: BLE001
+        logger.exception("provider reload failed for %s", provider)
+    return {
+        "ok": True, "provider": provider,
+        "enabled": bool(entry.get("enabled")),
+        "api_key_set": bool(entry.get("api_key")),
+        "models": entry.get("models", []),
+    }
+
+
+def handle_config_panic(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = get_state()
+    state.paused = True
+    drained = state.drain_intents()
+    state.incr("panic_activations")
+    return {"ok": True, "paused": True, "drained_intents": len(drained)}
+
+
+def handle_config_resume(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = get_state()
+    state.paused = False
+    return {"ok": True, "paused": False}
+
+
 def handle_controls_get() -> Dict[str, Any]:
     state = get_state()
     return {"controls": get_controls(state.panel, state.config)}
@@ -1102,7 +1789,14 @@ def handle_controls_get() -> Dict[str, Any]:
 
 def handle_controls_post(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
-    ok = set_control(state.panel, state.config, payload.get("key", ""), payload.get("value"))
+    key = str(payload.get("key", ""))
+    value = payload.get("value")
+    # 4.2: the Web Studio posts provider credentials as "provider.<name>.<field>".
+    if key.startswith("provider."):
+        parts = key.split(".")
+        if len(parts) >= 3:
+            return handle_provider_config({"provider": parts[1], ".".join(parts[2:]): value})
+    ok = set_control(state.panel, state.config, key, value)
     return {"ok": bool(ok)}
 
 
@@ -1155,6 +1849,16 @@ def status() -> Dict[str, Any]:
         "queue": {"depth": scheduler_status.get("queue_depth", 0)},
         "active_save": state.active_save_id,
         "installed_packs": sorted(state.installed_packs),
+        "detected_mods": list(state.detected_mods),
+        # 5.1: runtime counters, session epoch and tick/idle state.
+        "metrics": state.metrics_snapshot(),
+        "session_epoch": state.session_epoch,
+        "last_processed_tick": state.last_processed_tick,
+        "arc_planning": state.arc_planning,
+        "paused": state.paused,
+        "recap": state.recap,
+        # P33: deterministic 2-line diagnostic summary for the Quick Menu.
+        "panel_summary": _panel_summary(state),
     }
 
 
@@ -1169,11 +1873,34 @@ def handle_config_lang(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_compile_addon(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a supplemental language .package for a community locale."""
+    """Generate a supplemental language .package for a community locale (4.5)."""
+    from .i18n_compile import strings_to_stbl, write_locale_package
     from .i18n_engine import get_engine
+
+    state = get_state()
     engine = get_engine()
-    requested = payload.get("locale", "")
-    code = engine.resolve_locale(requested)
-    # Best-effort: report the resolved locale; actual DBPF compilation is done
-    # by the build_package.py tooling (kept sidecar-side free of heavy I/O).
-    return {"ok": True, "locale": code, "path": "Sensewright_Locale_{}.package".format(code)}
+    code = engine.resolve_locale(payload.get("locale", ""))
+    raw_strings = payload.get("strings") or payload.get("manifest") or {}
+    try:
+        strings = strings_to_stbl(raw_strings) if raw_strings else {}
+    except Exception:  # noqa: BLE001
+        logger.exception("compile-addon: could not flatten strings")
+        strings = {}
+    if not strings:
+        # Fall back to the engine's compiled content for the locale, if any.
+        content = getattr(engine, "content", None)
+        if callable(content):
+            try:
+                strings = content(code) or {}
+            except Exception:  # noqa: BLE001
+                strings = {}
+    try:
+        locale_byte = int(payload.get("locale_byte", 0) or 0)
+    except (TypeError, ValueError):
+        locale_byte = 0
+    out_dir = state.data_dir / "compiled"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = str(out_dir / "Sensewright_Locale_{}.package".format(code))
+    if strings:
+        write_locale_package(path, locale_byte, strings)
+    return {"ok": True, "locale": code, "path": path, "strings": len(strings)}

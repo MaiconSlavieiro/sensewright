@@ -15,6 +15,11 @@ log_level = "INFO"
 free_only = true
 # Embeddings backend: "none" (FTS5 BM25 only) | "local" (future).
 embeddings = "none"
+# Resilience (hardening 4.4): how long a model that returns HTTP 200 with
+# unusable output is benched, and how long a purpose backs off to the
+# deterministic fallback after every route failed.
+invalid_output_cooldown_seconds = 120
+purpose_cooldown_seconds = 120
 
 # ────────────────────────────────────────────────────────────────
 # Layer 1 — Providers, secrets & technical rate limits
@@ -119,6 +124,12 @@ min_interval_between_lines_seconds = 30
 player_lock_seconds = 15
 short_term_buffer_turns = 8
 silence_consolidate_seconds = 300
+# Impulse throttle (hardening 4.1): min sim-minutes between impulses per sim,
+# and the scheduler queue depth above which the per-tick budget drops to 1.
+impulse_cooldown_sim_minutes = 60
+impulse_backpressure_queue_depth = 6
+# Strict rewind tolerance (hardening 2.1); 3000 ticks = 3 sim-minutes.
+rewind_tolerance_ticks = 3000
 
 [god]
 director_mode = "AUTONOMOUS"   # AUTONOMOUS | CO_DIRECTOR | SANDBOX
@@ -128,3 +139,15 @@ intensity = 0.5
 mood_influence = 0.5
 autonomy_degree = 0.5
 chaos_degree = 0.5
+# Liveness window (BUG-03): an armed beat with no catalyst `beat-ended` within
+# this many in-game days is advanced automatically so arcs never stall.
+beat_timeout_sim_days = 1
+
+# ────────────────────────────────────────────────────────────────
+# Routing note (NOTE-01): JSON-only purposes (sim.reaction, god.plan,
+# god.scene, sim.impulse…) must resolve to a model that reliably emits JSON.
+# Route them explicitly instead of leaving them on a reasoning model:
+#   [llm.routes."sim.reaction"]
+#   provider = "openrouter"
+#   model = "meta-llama/llama-3.1-8b-instruct:free"
+# ────────────────────────────────────────────────────────────────

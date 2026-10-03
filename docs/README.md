@@ -14,6 +14,8 @@ below is the detailed reference (English).
 | [`development.md`](development.md) | Build system (Make targets, PowerShell scripts), build details, and test cycle. |
 | [`status.md`](status.md) | Implementation status: gap between spec and code, per milestone / feature / purpose. |
 | [`plan.md`](plan.md) | Execution plan to close all remaining gaps (phases, dependencies, risks, in-game checklist). |
+| [`hardening.md`](hardening.md) | Runtime reliability & concurrency hardening plan (audit findings, thread-safety, LLM pressure). |
+| [`bugs.md`](bugs.md) | Newly discovered bugs from the 2026-10-03 deploy/playtest, not previously mapped (dialogue detection, stale arcs, beat liveness). |
 
 ## Repository layout
 

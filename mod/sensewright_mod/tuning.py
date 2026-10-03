@@ -259,10 +259,14 @@ def register_all_tuning():
     native_moods = _native_mood_map()
     register_archetype_mappings(
         mood_map=native_moods,
+        # Activity tuning ids are not published by S4CL and applying an unknown
+        # id would spam exceptions; archetype steering is delivered through the
+        # verified mood/bias-buff levers instead (2.8).
         activity_map={},
         sentiment_map=_native_sentiment_map(),
         weather_map=_native_weather_map(),
-        archetype_map={},
+        # Archetype -> owning bias buff (safe: these ids are ours).
+        archetype_map=dict(bias_buffs),
         bias_buffs=bias_buffs,
     )
 

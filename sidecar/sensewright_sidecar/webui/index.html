@@ -260,6 +260,79 @@
           </div>
         </div>
       </details>
+
+      <!-- Arc Director Panel -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="god.arc_director">Arc Director</summary>
+        <div class="card-body">
+          <!-- Arc Header -->
+          <div id="arc-header" class="arc-header" style="display: none;">
+            <div class="field-row">
+              <label data-i18n="god.arc_theme">Theme</label>
+              <span id="arc-theme" class="arc-theme-value"></span>
+            </div>
+            <div class="field-row">
+              <label data-i18n="god.arc_status">Status</label>
+              <span id="arc-status" class="arc-status-value"></span>
+            </div>
+            <div class="field-row">
+              <label data-i18n="god.current_beat">Current Beat</label>
+              <span id="arc-current-beat" class="arc-current-beat-value"></span>
+            </div>
+          </div>
+
+          <!-- Beats List -->
+          <div class="field-row">
+            <label data-i18n="god.beats">Beats</label>
+          </div>
+          <div id="arc-beats-list" class="beats-list" data-i18n-empty="god.no_beats">No active arc or beats loaded.</div>
+
+          <!-- Cast List (from arc) -->
+          <div class="field-row" style="margin-top: 16px;">
+            <label data-i18n="god.arc_cast">Arc Cast</label>
+          </div>
+          <div id="arc-cast-list" class="casting-list" data-i18n-empty="god.no_cast">No cast members.</div>
+
+          <!-- Current Beat Actions -->
+          <div id="arc-beat-actions" class="arc-beat-actions" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+            <div class="field-row">
+              <label data-i18n="god.beat_actions">Beat Actions</label>
+            </div>
+            <div class="field-row actions" id="beat-action-buttons">
+              <button class="btn btn-primary" id="btn-approve-beat" data-i18n="god.approve_beat">Approve Beat</button>
+              <button class="btn btn-secondary" id="btn-skip-beat" data-i18n="god.skip_beat">Skip Beat</button>
+              <button class="btn btn-secondary" id="btn-rewrite-beat" data-i18n="god.rewrite_beat">Rewrite Beat</button>
+              <button class="btn btn-danger" id="btn-abort-arc" data-i18n="god.abort_arc">Abort Arc</button>
+            </div>
+          </div>
+
+          <!-- Panic / Resume -->
+          <div class="field-row" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+            <label data-i18n="god.panic_control">Panic Control</label>
+          </div>
+          <div class="field-row actions" id="panic-controls">
+            <button class="btn btn-danger" id="btn-panic" data-i18n="god.panic">Panic</button>
+            <button class="btn btn-success" id="btn-resume" data-i18n="god.resume" style="display: none;">Resume</button>
+            <span id="panic-state" class="panic-state" style="margin-left: 12px; padding-top: 4px;"></span>
+          </div>
+
+          <!-- Recap -->
+          <div id="arc-recap" class="arc-recap" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+            <div class="field-row">
+              <label data-i18n="god.recap">Latest Recap</label>
+            </div>
+            <div class="card-body" style="padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);">
+              <div id="recap-headline" class="recap-headline" style="font-weight: 600; margin-bottom: 8px;"></div>
+              <div id="recap-text" class="recap-text" style="font-size: 13px; color: var(--text-muted);"></div>
+              <div id="recap-tick" class="recap-tick" style="font-size: 11px; color: var(--text-dim); margin-top: 8px; font-family: var(--font-mono);"></div>
+            </div>
+          </div>
+
+          <div class="field-row actions">
+            <button class="btn btn-secondary" id="btn-refresh-arc" data-i18n="common.refresh">Refresh Arc</button>
+          </div>
+        </div>
+      </details>
     </section>
   </main>
 

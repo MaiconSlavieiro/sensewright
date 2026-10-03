@@ -121,10 +121,18 @@
       if (!btn) return;
       btn.addEventListener('click', function () {
         tabs.forEach(function (other) {
-          $('tab-' + other).classList.toggle('active', other === name);
-          $('tab-' + other).setAttribute('aria-selected', other === name ? 'true' : 'false');
-          $('panel-' + other).classList.toggle('hidden', other !== name);
+          var isActive = other === name;
+          $('tab-' + other).classList.toggle('active', isActive);
+          $('tab-' + other).setAttribute('aria-selected', isActive ? 'true' : 'false');
+          $('panel-' + other).classList.toggle('hidden', !isActive);
         });
+        // Load tab-specific data
+        if (name === 'god') {
+          loadArcPanel();
+          startArcPolling();
+        } else {
+          stopArcPolling();
+        }
       });
     });
   }
@@ -327,6 +335,8 @@
   /* ── God tab ────────────────────────────────────────────────────────── */
   var GOD_DIALS = ['intervention_frequency', 'intensity', 'mood_influence', 'autonomy_degree', 'chaos_degree'];
 
+  var arcPollTimer = null;
+
   function loadGodControls() {
     apiGet('/v1/god/controls').then(function (data) {
       var controls = (data && data.controls) || [];
@@ -341,6 +351,229 @@
         if ($('zeitgeist-weather')) $('zeitgeist-weather').value = zeitgeist.weather_preference || '';
       }
     }).catch(function () { renderDials(); });
+  }
+
+  /* ── Arc Director Panel ─────────────────────────────────────────────── */
+  function loadArcPanel() {
+    // Fetch arc, cast, and recap in parallel
+    Promise.all([
+      apiGet('/v1/god/arc').catch(function () { return null; }),
+      apiGet('/v1/god/cast').catch(function () { return null; }),
+      apiGet('/v1/recap').catch(function () { return null; }),
+      apiGet('/v1/config/panic').catch(function () { return null; }) // Check panic state
+    ]).then(function (results) {
+      var arcData = results[0];
+      var castData = results[1];
+      var recapData = results[2];
+      var panicData = results[3];
+
+      renderArcPanel(arcData, castData, recapData, panicData);
+    }).catch(function () {
+      renderArcPanel(null, null, null, null);
+    });
+  }
+
+  function renderArcPanel(arcData, castData, recapData, panicData) {
+    var arc = arcData && arcData.ok ? arcData.arc : null;
+    var cast = castData && castData.ok ? castData.cast : (arc && arc.cast ? arc.cast : []);
+    var recap = recapData && recapData.ok ? recapData.recap : null;
+    var panicPaused = panicData && panicData.ok ? panicData.paused : false;
+
+    // Arc Header
+    var arcHeader = $('arc-header');
+    var beatsList = $('arc-beats-list');
+    var castList = $('arc-cast-list');
+    var beatActions = $('arc-beat-actions');
+    var panicStateEl = $('panic-state');
+    var recapEl = $('arc-recap');
+    var btnPanic = $('btn-panic');
+    var btnResume = $('btn-resume');
+
+    if (!arc) {
+      if (arcHeader) arcHeader.style.display = 'none';
+      if (beatActions) beatActions.style.display = 'none';
+      if (beatsList) beatsList.innerHTML = '<div class="empty-state">' + t('god.no_beats') + '</div>';
+      if (castList) castList.innerHTML = '<div class="empty-state">' + t('god.no_cast') + '</div>';
+      if (recapEl) recapEl.style.display = 'none';
+      updatePanicUI(panicPaused);
+      return;
+    }
+
+    // Show arc header
+    if (arcHeader) arcHeader.style.display = 'flex';
+    if ($('arc-theme')) $('arc-theme').textContent = arc.theme || '—';
+    if ($('arc-status')) {
+      $('arc-status').textContent = t('god.arc_status_' + (arc.status || 'unknown')) || (arc.status || '—');
+      $('arc-status').className = 'arc-status-value ' + (arc.status || '');
+    }
+    var beatIdx = arc.current_beat_idx != null ? arc.current_beat_idx : -1;
+    if ($('arc-current-beat')) {
+      var totalBeats = arc.beats ? arc.beats.length : 0;
+      $('arc-current-beat').textContent = (beatIdx >= 0 ? (beatIdx + 1) : '—') + ' / ' + totalBeats;
+    }
+
+    // Render beats
+    renderBeats(arc.beats || [], beatIdx);
+
+    // Render cast
+    renderArcCast(cast);
+
+    // Show beat actions for current beat
+    var currentBeat = arc.beats && arc.beats[beatIdx];
+    if (currentBeat && beatActions) {
+      beatActions.style.display = 'block';
+      wireBeatActions(currentBeat.id || currentBeat.beat_id);
+    } else if (beatActions) {
+      beatActions.style.display = 'none';
+    }
+
+    // Recap
+    if (recap && recapEl) {
+      recapEl.style.display = 'block';
+      if ($('recap-headline')) $('recap-headline').textContent = recap.headline || '';
+      if ($('recap-text')) $('recap-text').textContent = recap.recap_text || '';
+      if ($('recap-tick')) $('recap-tick').textContent = 'Tick: ' + (recap.tick != null ? recap.tick : '—');
+    } else if (recapEl) {
+      recapEl.style.display = 'none';
+    }
+
+    // Panic state
+    updatePanicUI(panicPaused);
+  }
+
+  function renderBeats(beats, currentIdx) {
+    var list = $('arc-beats-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!beats || !beats.length) {
+      list.textContent = list.dataset.emptyText || '';
+      return;
+    }
+    beats.forEach(function (beat, idx) {
+      var card = document.createElement('div');
+      card.className = 'beat-card' + (idx === currentIdx ? ' current' : '');
+      card.dataset.beatId = beat.id || beat.beat_id || '';
+      var armed = beat.armed ? ' <span class="beat-armed" style="color: var(--warning); font-size: 11px;">[' + t('god.armed') + ']</span>' : '';
+      var castNames = (beat.cast || []).map(function (c) { return c.name || c.sim_id; }).join(', ') || '—';
+      card.innerHTML =
+        '<div class="beat-header">' +
+          '<div>' +
+            '<span class="beat-title">' + escapeHtml(beat.title || ('Beat ' + (idx + 1))) + '</span>' + armed +
+            '<span class="beat-meta"> #' + (idx + 1) + ' · Cast: ' + escapeHtml(castNames) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="beat-desc">' + escapeHtml(beat.scene_subtext || beat.scene_draft || '') + '</div>';
+      list.appendChild(card);
+    });
+  }
+
+  function renderArcCast(cast) {
+    var list = $('arc-cast-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!cast || !cast.length) {
+      list.textContent = list.dataset.emptyText || '';
+      return;
+    }
+    cast.forEach(function (member) {
+      var row = document.createElement('div');
+      row.className = 'cast-item';
+      row.innerHTML =
+        '<div class="cast-info">' +
+          '<span class="cast-name">' + escapeHtml(member.name || member.sim_id || 'Unknown') + '</span>' +
+          '<span class="cast-role">' + escapeHtml(member.role || '') + '</span>' +
+          '<span class="cast-role" style="color: var(--text-dim); font-size: 11px;">' + escapeHtml(member.objective || '') + '</span>' +
+        '</div>' +
+        '<span class="cast-status" style="font-size: 11px; color: ' + (member.spawned ? 'var(--success)' : 'var(--text-muted)') + ';">' +
+          (member.spawned ? t('god.spawned') : t('god.pending')) +
+        '</span>';
+      list.appendChild(row);
+    });
+  }
+
+  function wireBeatActions(beatId) {
+    var btnApprove = $('btn-approve-beat');
+    var btnSkip = $('btn-skip-beat');
+    var btnRewrite = $('btn-rewrite-beat');
+    var btnAbort = $('btn-abort-arc');
+
+    if (btnApprove) btnApprove.onclick = function () { steerArc('approve_beat', beatId); };
+    if (btnSkip) btnSkip.onclick = function () { steerArc('skip_beat', beatId); };
+    if (btnRewrite) btnRewrite.onclick = function () {
+      var instruction = prompt(t('god.rewrite_prompt'));
+      if (instruction !== null) steerArc('rewrite_beat', beatId, instruction);
+    };
+    if (btnAbort) btnAbort.onclick = function () {
+      if (confirm(t('god.abort_confirm'))) steerArc('abort_arc', beatId);
+    };
+  }
+
+  function steerArc(action, beatId, customInstruction) {
+    var body = { action: action, beat_id: beatId };
+    if (customInstruction) body.custom_instruction = customInstruction;
+    apiPost('/v1/god/arc/steer', body).then(function (res) {
+      if (res && res.ok) {
+        toast(t('toast.arc_steered'));
+        loadArcPanel(); // Refresh
+      } else {
+        toast(t('toast.arc_steer_failed'), true);
+      }
+    }).catch(function () {
+      toast(t('toast.arc_steer_failed'), true);
+    });
+  }
+
+  function updatePanicUI(paused) {
+    var btnPanic = $('btn-panic');
+    var btnResume = $('btn-resume');
+    var panicState = $('panic-state');
+    if (paused) {
+      if (btnPanic) btnPanic.style.display = 'none';
+      if (btnResume) btnResume.style.display = 'inline-block';
+      if (panicState) {
+        panicState.textContent = t('god.panic_active');
+        panicState.className = 'panic-state paused';
+      }
+    } else {
+      if (btnPanic) btnPanic.style.display = 'inline-block';
+      if (btnResume) btnResume.style.display = 'none';
+      if (panicState) {
+        panicState.textContent = t('god.panic_inactive');
+        panicState.className = 'panic-state running';
+      }
+    }
+  }
+
+  function togglePanic(panic) {
+    var path = panic ? '/v1/config/panic' : '/v1/config/resume';
+    apiPost(path).then(function (res) {
+      if (res && res.ok) {
+        toast(panic ? t('toast.panic_activated') : t('toast.resumed'));
+        loadArcPanel();
+      } else {
+        toast(t('toast.panic_failed'), true);
+      }
+    }).catch(function () {
+      toast(t('toast.panic_failed'), true);
+    });
+  }
+
+  function startArcPolling() {
+    if (arcPollTimer) clearInterval(arcPollTimer);
+    arcPollTimer = setInterval(function () {
+      // Only poll if God tab is active
+      var godPanel = $('panel-god');
+      if (godPanel && !godPanel.classList.contains('hidden')) {
+        loadArcPanel();
+      }
+    }, 5000);
+  }
+
+  function stopArcPolling() {
+    if (arcPollTimer) {
+      clearInterval(arcPollTimer);
+      arcPollTimer = null;
+    }
   }
 
   function renderDials() {
@@ -480,6 +713,11 @@
         var beats = $('god-beats-container');
         if (beats) beats.classList.toggle('spoiler-on', $('spoiler-shield').checked);
       });
+
+      // Arc Director panel buttons
+      if ($('btn-refresh-arc')) $('btn-refresh-arc').addEventListener('click', loadArcPanel);
+      if ($('btn-panic')) $('btn-panic').addEventListener('click', function () { togglePanic(true); });
+      if ($('btn-resume')) $('btn-resume').addEventListener('click', function () { togglePanic(false); });
 
       loadSims();
       loadGodControls();

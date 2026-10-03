@@ -66,6 +66,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                 "rpm": 60, "rpd": 10000, "tpm": 60000,
             },
         },
+        #: LLM resilience tuning (4.4): how long a model that returned HTTP 200
+        #: with unusable output is benched, and how long a purpose backs off to
+        #: the deterministic fallback after every route failed.
+        "invalid_output_cooldown_seconds": 120,
+        "purpose_cooldown_seconds": 120,
         "routes": {"default": {"provider": "openrouter", "model": "openai/gpt-4o-mini"}},
         "tiers": {
             "interactive": {"slo_seconds": 3.0, "max_input_tokens": 1500, "max_output_tokens": 250, "concurrency": 4},
@@ -83,6 +88,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "player_lock_seconds": 15,
         "short_term_buffer_turns": 8,
         "silence_consolidate_seconds": 300,
+        #: Impulse throttle (4.1): min sim-minutes between two impulses for the
+        #: same sim, and the scheduler queue depth above which the per-tick
+        #: impulse budget is reduced to 1 to apply backpressure.
+        "impulse_cooldown_sim_minutes": 60,
+        "impulse_backpressure_queue_depth": 6,
+        #: Strict rewind tolerance (2.1); 3000 ticks = 3 sim-minutes.
+        "rewind_tolerance_ticks": 3000,
     },
     "god": {
         "director_mode": "AUTONOMOUS",
@@ -92,6 +104,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "mood_influence": 0.5,
         "autonomy_degree": 0.5,
         "chaos_degree": 0.5,
+        #: Liveness window (BUG-03): an armed beat that does not receive a
+        #: catalyst `beat-ended` within this many in-game days is advanced so a
+        #: failed catalyst path can never stall an arc forever.
+        "beat_timeout_sim_days": 1,
     },
 }
 

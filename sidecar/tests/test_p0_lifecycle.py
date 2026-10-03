@@ -50,6 +50,11 @@ class _FakeScheduler:
             return types.SimpleNamespace(data=render_fallback(purpose_id, lang, context or {}))
         return types.SimpleNamespace(data=self.result)
 
+    def submit_async(self, purpose_id, context=None, lang="", trace_id=None, dedup_key=None, callback=None):
+        self.jobs.append({"purpose": purpose_id, "context": context, "dedup": dedup_key, "callback": callback})
+        if callback is not None:
+            callback(self.run_purpose(purpose_id, context, lang, trace_id))
+
     def purposes(self):
         return [job["purpose"] for job in self.jobs]
 

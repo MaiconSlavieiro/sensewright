@@ -501,6 +501,27 @@ class SqliteStore:
             result.append(arc)
         return result
 
+    def deactivate_stale_arcs(self, keep_id: Optional[str] = None, status: str = "aborted") -> int:
+        """Mark every active arc except ``keep_id`` as ``status`` (BUG-02).
+
+        Idempotent cleanup for orphaned duplicates left by pre-single-flight
+        builds; returns the number of arcs deactivated. The literal status is
+        used instead of importing ``god.arcs`` to avoid a circular import.
+        """
+        with self._lock:
+            conn = self._connect()
+            if keep_id:
+                cursor = conn.execute(
+                    "UPDATE arcs SET status = ? WHERE status = 'active' AND id != ?",
+                    (status, str(keep_id)),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE arcs SET status = ? WHERE status = 'active'", (status,)
+                )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
     # ── neighborhoods ────────────────────────────────────────────────────
     def get_neighborhood(self, save_id: int) -> Dict[str, Any]:
         conn = self._connect()

@@ -343,9 +343,14 @@ Acceptance criteria (`requirements.md` "Acceptance Criteria for M8"):
 
 ## 5. Progress
 
-- [x] Phase 1 — P1 residual (sidecar) — P0 done; **1.1, 1.2, 1.8 done** (1.3–1.7, 1.9–1.14 pending)
-- 🟡 Phase 2 — Mod: events & infra — **2.1, 2.4, 2.9 done** (2.2/2.3/2.5–2.8 pending)
-- 🟡 Phase 3 — P2 native hooks — **3.1–3.4, 3.8, 3.9 coded blind** (Phase 5 in-game validation pending)
+- 🟡 Phase 1 — P1 residual (sidecar) — **1.1–1.10, 1.12, 1.13, 1.14 done** (1.11 `ops.recap`
+  now consumed; only the physical Autobiography Book and in-game hooks remain)
+- 🟡 Phase 2 — Mod: events & infra — **2.1–2.5, 2.7, 2.8 done** (2.6 Onboarding Wizard pending)
+- 🟡 Phase 3 — P2 native hooks — **3.1–3.4, 3.8, 3.9 coded blind** (3.5–3.7 + Phase 5 in-game validation pending)
 - [x] Phase 4 — P3: LLM, Config & Observability — done (per-model cooldown, tier concurrency, asymmetric refund, trace_id, VACUUM)
+- 🟡 Phase 4b — Web Studio/P4 — **4.1, 4.2, 4.3, 4.5, 4.8 done** (4.4 spoiler, 4.6 FC2, 4.7 FC3 pending)
 - [ ] Phase 5 — M8 in-game validation
 - [ ] Close-out — docs/status.md + README
+
+See the 2026-10-03 changelog in [`status.md`](status.md) for the bug fixes (BUG-01/02/03)
+and the full list of purposes promoted to Full.

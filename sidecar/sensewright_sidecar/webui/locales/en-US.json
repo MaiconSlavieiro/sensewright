@@ -100,7 +100,34 @@
     "intensity": "Intensity",
     "mood_influence": "Mood Influence",
     "autonomy_degree": "Autonomy Degree",
-    "chaos_degree": "Chaos Degree"
+    "chaos_degree": "Chaos Degree",
+    "arc_director": "Arc Director",
+    "arc_theme": "Theme",
+    "arc_status": "Status",
+    "arc_status_running": "Running",
+    "arc_status_paused": "Paused",
+    "arc_status_completed": "Completed",
+    "arc_status_aborted": "Aborted",
+    "arc_status_unknown": "Unknown",
+    "current_beat": "Current Beat",
+    "beats": "Beats",
+    "arc_cast": "Arc Cast",
+    "beat_actions": "Beat Actions",
+    "approve_beat": "Approve Beat",
+    "skip_beat": "Skip Beat",
+    "rewrite_beat": "Rewrite Beat",
+    "abort_arc": "Abort Arc",
+    "rewrite_prompt": "Enter rewrite instruction:",
+    "abort_confirm": "Abort the entire arc? This cannot be undone.",
+    "armed": "ARMED",
+    "spawned": "Spawned",
+    "pending": "Pending",
+    "panic_control": "Panic Control",
+    "panic": "Panic",
+    "resume": "Resume",
+    "panic_active": "PANIC ACTIVE — Arc paused",
+    "panic_inactive": "Normal operation",
+    "recap": "Latest Recap"
   },
   "providers": {
     "title": "Providers & Diagnostics",
@@ -142,6 +169,11 @@
     "package_generated": "Language package generated",
     "package_failed": "Failed to generate package",
     "connection_ok": "Connection OK",
-    "connection_failed": "Connection failed"
+    "connection_failed": "Connection failed",
+    "arc_steered": "Arc steer action applied",
+    "arc_steer_failed": "Failed to steer arc",
+    "panic_activated": "Panic mode activated",
+    "resumed": "Resumed normal operation",
+    "panic_failed": "Panic action failed"
   }
 }

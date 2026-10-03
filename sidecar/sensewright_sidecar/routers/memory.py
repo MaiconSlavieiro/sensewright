@@ -7,8 +7,8 @@ from fastapi import APIRouter, Body, Query
 
 from ..schemas import sanitize_payload
 from ..services import (
-    handle_consolidate, handle_diary_get, handle_evolve, handle_profile,
-    handle_seats_get, handle_seats_post,
+    handle_aspiration, handle_consolidate, handle_diary_get, handle_evolve,
+    handle_profile, handle_seats_get, handle_seats_post,
 )
 
 router = APIRouter(prefix="/v1", tags=["memory"])
@@ -22,6 +22,11 @@ def profile(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
 @router.post("/evolve")
 def evolve(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
     return handle_evolve(sanitize_payload(payload))
+
+
+@router.post("/sim/aspiration")
+def aspiration(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+    return handle_aspiration(sanitize_payload(payload))
 
 
 @router.post("/memory/consolidate")

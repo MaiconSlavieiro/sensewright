@@ -30,7 +30,11 @@ MODEL_COOLDOWN_SECONDS = 120.0
 #: A model that answers HTTP 200 with unusable output (e.g. a reasoning model
 #: that spends its whole token budget "thinking" and never emits the requested
 #: JSON) is benched so we stop paying for the same wasted call every pulse.
-INVALID_OUTPUT_COOLDOWN_SECONDS = 300.0
+#: Configurable via ``llm.invalid_output_cooldown_seconds`` (4.4).
+INVALID_OUTPUT_COOLDOWN_SECONDS = 120.0
+#: When every route for a purpose fails, back that purpose off to the
+#: deterministic fallback for this long instead of retrying every tick (4.4).
+PURPOSE_COOLDOWN_SECONDS = 120.0
 
 
 class ProviderChain:
@@ -47,6 +51,20 @@ class ProviderChain:
         self._model_failures: Dict[Tuple[str, str], int] = {}
         self._model_cooldown_until: Dict[Tuple[str, str], float] = {}
         self._invalid_cooldown_until: Dict[Tuple[str, str], float] = {}
+        self._purpose_cold_until: Dict[str, float] = {}
+        llm_cfg = config.raw().get("llm", {}) if hasattr(config, "raw") else {}
+        try:
+            self._invalid_cooldown_seconds = float(
+                llm_cfg.get("invalid_output_cooldown_seconds", INVALID_OUTPUT_COOLDOWN_SECONDS)
+            )
+        except (TypeError, ValueError):
+            self._invalid_cooldown_seconds = INVALID_OUTPUT_COOLDOWN_SECONDS
+        try:
+            self._purpose_cooldown_seconds = float(
+                llm_cfg.get("purpose_cooldown_seconds", PURPOSE_COOLDOWN_SECONDS)
+            )
+        except (TypeError, ValueError):
+            self._purpose_cooldown_seconds = PURPOSE_COOLDOWN_SECONDS
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _limiter(self, name: str) -> ProviderRateLimiter:
@@ -61,6 +79,14 @@ class ProviderChain:
         if name not in self._clients:
             self._clients[name] = build_provider(name, self._config.provider(name))
         return self._clients[name]
+
+    def reload_provider(self, name: str) -> None:
+        """Drop cached client/limiter/circuit state so new credentials apply (4.2)."""
+        with self._lock:
+            self._clients.pop(name, None)
+            self._limiters.pop(name, None)
+            self._consecutive_failures.pop(name, None)
+            self._circuit_cold_until.pop(name, None)
 
     def _is_cold(self, name: str) -> bool:
         with self._lock:
@@ -77,10 +103,22 @@ class ProviderChain:
             until = self._invalid_cooldown_until.get((name, model), 0.0)
             return time.time() < until
 
+    def _purpose_cooling(self, purpose_id: str) -> bool:
+        with self._lock:
+            return time.time() < self._purpose_cold_until.get(purpose_id, 0.0)
+
+    def _record_purpose_failure(self, purpose_id: str) -> None:
+        with self._lock:
+            self._purpose_cold_until[purpose_id] = time.time() + self._purpose_cooldown_seconds
+
+    def _record_purpose_success(self, purpose_id: str) -> None:
+        with self._lock:
+            self._purpose_cold_until.pop(purpose_id, None)
+
     def _record_invalid(self, name: str, model: str) -> None:
         with self._lock:
             self._invalid_cooldown_until[(name, model)] = (
-                time.time() + INVALID_OUTPUT_COOLDOWN_SECONDS
+                time.time() + self._invalid_cooldown_seconds
             )
 
     def _record_failure(self, name: str, model: str) -> None:
@@ -127,6 +165,12 @@ class ProviderChain:
         caller reject HTTP-successful-but-unusable generations (e.g. a reasoning
         model that never emits JSON) instead of silently accepting them.
         """
+        # Per-purpose breaker: after every route failed, skip the whole chain for
+        # a cooldown instead of re-paying the same failing calls every tick (4.4).
+        if self._purpose_cooling(purpose_id):
+            logger.info("purpose %s cooling; using fallback", purpose_id)
+            return None, None, None
+
         candidates = self._router.plan(purpose_id)
         last_error: Optional[str] = None
 
@@ -150,12 +194,13 @@ class ProviderChain:
             limiter = self._limiter(name)
             prompt_text = self._messages_to_text(messages)
             est_tokens = estimate_tokens(prompt_text) + max_tokens
-            if not limiter.can_accept(est_tokens):
+            # Atomic check-and-record: concurrent HTTP threads must not both pass
+            # the capacity check before either records (3.6).
+            if not limiter.try_accept_and_record(est_tokens):
                 last_error = "provider {} rate-limited (RPM/RPD/TPM)".format(name)
                 continue
 
             # Dispatch.
-            limiter.record_request()
             try:
                 response = client.complete(
                     messages, model, max_tokens=max_tokens,
@@ -183,12 +228,14 @@ class ProviderChain:
                 last_error = "provider {} model {} returned unusable output".format(name, model)
                 logger.warning(
                     "route rejected provider=%s model=%s (unusable output; benched %.0fs)",
-                    name, model, INVALID_OUTPUT_COOLDOWN_SECONDS,
+                    name, model, self._invalid_cooldown_seconds,
                 )
                 continue
+            self._record_purpose_success(purpose_id)
             return response, name, model
 
         logger.warning("purpose %s: all routes failed (%s)", purpose_id, last_error)
+        self._record_purpose_failure(purpose_id)
         return None, None, None
 
     @staticmethod
@@ -197,6 +244,16 @@ class ProviderChain:
 
     def status(self) -> Dict[str, object]:
         """Snapshot of limiter states for the Web Studio."""
+        with self._lock:
+            now = time.time()
+            cooling_purposes = [
+                purpose for purpose, until in self._purpose_cold_until.items() if until > now
+            ]
         return {
-            name: limiter.snapshot() for name, limiter in self._limiters.items()
+            "limiters": {
+                name: limiter.snapshot() for name, limiter in self._limiters.items()
+            },
+            "purpose_cooldowns": cooling_purposes,
+            "invalid_output_cooldown_seconds": self._invalid_cooldown_seconds,
+            "purpose_cooldown_seconds": self._purpose_cooldown_seconds,
         }

@@ -105,6 +105,10 @@
       "title": "Sensewright paused",
       "body": "Open the Quick Menu to resume."
     },
+    "resumed": {
+      "title": "Sensewright resumed",
+      "body": "Your Sims' inner lives continue."
+    },
     "mirror": {
       "reflect_title": "A Moment of Reflection",
       "reflect_body": "You pause and look inward. Something settles into place."
@@ -140,6 +144,8 @@
       "director_mode": "Director Mode",
       "autonomy": "Autonomy",
       "web_studio": "Open Web Studio",
+      "panic": "Pause Sensewright",
+      "resume": "Resume Sensewright",
       "refresh": "Refresh"
     },
     "summary": {

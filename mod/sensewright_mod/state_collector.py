@@ -122,15 +122,70 @@ def _get_save_slot_guid():
 
 
 def _get_installed_packs():
-    """Get list of installed pack IDs."""
+    """Get list of installed pack IDs (BUG/REQ A10, plan 2.3).
+
+    Uses S4CL's pack utility when available; degrades to an empty list so the
+    sidecar never enables an expansion-gated lever on a false positive.
+    """
     packs = []
     try:
-        pack_manager = services.get_instance_manager(sims4.resources.Types.GAMEPLAY_DATA)
-        # This is a simplified version - real implementation would check specific packs
-        # For now return empty list, sidecar can infer from other data
+        from sims4communitylib.utils.common_pack_utils import CommonPackUtils
+        for pack_type in CommonPackUtils.get_installed_pack_types():
+            name = _safe_getattr(pack_type, '__name__', None) or str(pack_type)
+            if name:
+                packs.append(str(name).upper())
     except Exception:
-        pass
+        return packs
     return packs
+
+
+#: Interaction class-name fragments that mark a conversational interaction.
+#: The Mod also reports a reliable ``is_conversing`` flag (BUG-01); the markers
+#: are only a last-resort fallback because EA names social classes without them.
+_CONVERSATION_MARKERS = ('social', 'talk', 'chat', 'convers', 'get_to_know', 'getknow')
+
+
+def _as_sim_info(candidate):
+    """Return ``candidate`` as a SimInfo if it is a Sim/SimInfo, else None.
+
+    Guards against object targets (chairs, mirrors) that also expose an ``id``.
+    """
+    if candidate is None:
+        return None
+    if isinstance(candidate, SimInfo):
+        return candidate
+    inner = _safe_getattr(candidate, 'sim_info', None)
+    if isinstance(inner, SimInfo):
+        return inner
+    if _safe_getattr(candidate, 'is_sim', False) and inner is not None:
+        return inner
+    return None
+
+
+def _resolve_interaction_target_sim_id(current_interaction):
+    """Best-effort resolve the Sim id targeted by an interaction (BUG-01).
+
+    A conversational interaction has another Sim as its target. Matching the
+    interaction class name is unreliable (``MixerInteraction``, ``GetToKnow``,
+    ``TellJoke``… do not contain "social"), so we resolve the target Sim id.
+    """
+    if current_interaction is None:
+        return 0
+    candidates = []
+    for accessor in ('get_target_sim', 'get_target', 'get_target_sim_info'):
+        fn = _safe_getattr(current_interaction, accessor, None)
+        if callable(fn):
+            candidates.append(_safe_call(fn))
+    for attr in ('target_sim', 'target_sim_info', 'target', 'picked_sim'):
+        candidates.append(_safe_getattr(current_interaction, attr, None))
+    for candidate in candidates:
+        sim_info = _as_sim_info(candidate)
+        if sim_info is None:
+            continue
+        target_id = _coerce_int(_safe_getattr(sim_info, 'id', 0), 0)
+        if target_id:
+            return target_id
+    return 0
 
 
 def _collect_sim_delta(sim_info):
@@ -187,8 +242,10 @@ def _collect_sim_delta(sim_info):
         except Exception:
             pass
 
-        # Activity / Current interaction
+        # Activity / Current interaction / conversation signal (BUG-01)
         activity = 'idle'
+        is_conversing = False
+        social_target_sim_id = 0
         try:
             sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
             if sim is not None:
@@ -197,6 +254,11 @@ def _collect_sim_delta(sim_info):
                     current_interaction = _safe_getattr(si, 'current_interaction', None)
                     if current_interaction is not None:
                         activity = _safe_getattr(current_interaction, '__name__', str(current_interaction))
+                        social_target_sim_id = _resolve_interaction_target_sim_id(current_interaction)
+                        if social_target_sim_id and social_target_sim_id != sim_id:
+                            is_conversing = True
+                        elif any(marker in str(activity).lower() for marker in _CONVERSATION_MARKERS):
+                            is_conversing = True
         except Exception:
             pass
 
@@ -265,6 +327,8 @@ def _collect_sim_delta(sim_info):
             'room_id': room_id,
             'pos': pos,
             'activity': activity,
+            'is_conversing': is_conversing,
+            'social_target_sim_id': social_target_sim_id,
             'queue': queue_len,
             'is_sleeping': is_sleeping,
             'is_off_lot_duty': is_off_lot_duty,
@@ -353,6 +417,17 @@ def _collect_full_sim_census(sim_info):
         except Exception:
             pass
 
+        # Aspiration / ambition (P12 / plan task 2.2)
+        aspiration = ''
+        try:
+            aspiration_tracker = _safe_getattr(sim_info, 'aspiration_tracker', None)
+            if aspiration_tracker is not None:
+                current = _safe_getattr(aspiration_tracker, 'current_aspiration', None)
+                if current is not None:
+                    aspiration = str(_safe_getattr(current, '__name__', current))
+        except Exception:
+            pass
+
         # Household ID
         household_id = 0
         try:
@@ -380,6 +455,7 @@ def _collect_full_sim_census(sim_info):
             'likes': likes,
             'dislikes': dislikes,
             'career': career,
+            'aspiration': aspiration,
             'schedule_blocks': schedule_blocks,
             'family_links': family_links,
             'household_id': household_id,
@@ -478,6 +554,45 @@ def collect_full_census():
     return sims, households, relationships
 
 
+#: Compatible-mod signatures (plan task 2.7 / FC5): a lowercase folder/filename
+#: fragment that identifies a well-known mod, mapped to the display label.
+_COMPAT_MOD_SIGNATURES = {
+    'MCCC': ('mc_cmd_center', 'mccc', 'mc_'),
+    'WickedWhims': ('wickedwhims',),
+    'Basemental': ('basemental',),
+    'SliceOfLife': ('sliceoflife', 'slice_of_life'),
+}
+_detected_mods_cache = None
+
+
+def _detect_compatible_mods():
+    """Best-effort scan of the Mods folder for known mods (2.7). Cached per session."""
+    global _detected_mods_cache
+    if _detected_mods_cache is not None:
+        return _detected_mods_cache
+    detected = []
+    try:
+        import os
+        mods_dir = None
+        for module_name in ('paths', 'sims4.paths'):
+            try:
+                module = __import__(module_name, fromlist=['MODS_FOLDER'])
+                mods_dir = _safe_getattr(module, 'MODS_FOLDER', None)
+            except Exception:
+                mods_dir = None
+            if mods_dir:
+                break
+        if mods_dir and os.path.isdir(mods_dir):
+            names = [str(n).lower() for n in os.listdir(mods_dir)]
+            for label, needles in _COMPAT_MOD_SIGNATURES.items():
+                if any(any(needle in name for name in names) for needle in needles):
+                    detected.append(label)
+    except Exception as e:
+        log_exception('Compatibility scan failed: {}'.format(e))
+    _detected_mods_cache = detected
+    return detected
+
+
 def get_current_game_state():
     """Get current game state for autonomy tick."""
     return {
@@ -487,5 +602,6 @@ def get_current_game_state():
         'player_confidant_sim_id': _get_player_confidant_sim_id(),
         'zone_id': _get_zone_id(),
         'save_id': _get_save_slot_guid(),
-        'installed_packs': _get_installed_packs()
+        'installed_packs': _get_installed_packs(),
+        'detected_mods': _detect_compatible_mods()
     }

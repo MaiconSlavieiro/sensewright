@@ -279,6 +279,8 @@ textarea { resize: vertical; min-height: 60px; }
 .btn-secondary:hover:not(:disabled) { background: var(--border); }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover:not(:disabled) { background: #2ec966; }
 
 /* Empty State */
 .empty-state {
@@ -358,11 +360,36 @@ textarea { resize: vertical; min-height: 60px; }
   display: flex; flex-direction: column; gap: 8px;
 }
 .beat-card.hidden { display: none; }
+.beat-card.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 .beat-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .beat-title { font-weight: 600; }
 .beat-meta { font-size: 12px; color: var(--text-muted); }
 .beat-desc { font-size: 13px; color: var(--text); line-height: 1.5; }
 .beat-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Arc Director Panel */
+.arc-header { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.arc-theme-value { font-weight: 600; color: var(--accent); }
+.arc-status-value { text-transform: capitalize; }
+.arc-status-value.running { color: var(--success); }
+.arc-status-value.paused { color: var(--warning); }
+.arc-status-value.completed { color: var(--info); }
+.arc-status-value.aborted { color: var(--danger); }
+.arc-current-beat-value { font-family: var(--font-mono); color: var(--text); }
+
+.arc-beat-actions { display: flex; flex-direction: column; gap: 8px; }
+#beat-action-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.panic-state { font-size: 12px; color: var(--text-muted); }
+.panic-state.paused { color: var(--warning); font-weight: 600; }
+.panic-state.running { color: var(--success); }
+
+.arc-recap { display: flex; flex-direction: column; gap: 8px; }
+.recap-headline { color: var(--accent); }
+.recap-text { line-height: 1.6; }
 
 /* Casting List */
 .casting-list { display: flex; flex-direction: column; gap: 8px; }

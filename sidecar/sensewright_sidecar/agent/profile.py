@@ -16,7 +16,7 @@ from ..constants import LIFE_STORY_MAX_CHARS, LIFE_STORY_MAX_LINES
 PROFILE_SHAPE_KEYS = (
     "name", "species", "age_stage", "backstory",
     "core_personality", "current_demeanor", "speech_style",
-    "goals", "secrets", "quirks", "traits", "likes", "dislikes",
+    "goals", "ambition", "secrets", "quirks", "traits", "likes", "dislikes",
     "life_story", "source", "generated_at_tick",
 )
 
@@ -75,6 +75,7 @@ def normalize_profile(
         "current_demeanor": raw.get("current_demeanor", ""),
         "speech_style": raw.get("speech_style", ""),
         "goals": _list(raw.get("goals")),
+        "ambition": raw.get("ambition", ""),
         "secrets": _list(raw.get("secrets")),
         "quirks": _list(raw.get("quirks")),
         "traits": _list(traits) if traits is not None else _list(raw.get("traits")),

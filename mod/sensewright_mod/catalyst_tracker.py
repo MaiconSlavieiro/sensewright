@@ -12,13 +12,21 @@ from sensewright_mod.state_collector import get_current_game_state
 from sensewright_mod.i18n import get_current_language
 
 
-_CONVERSATION_MARKERS = ('social', 'talk', 'chat', 'convers')
+_CONVERSATION_MARKERS = ('social', 'talk', 'chat', 'convers', 'get_to_know', 'getknow')
 
 #: sim_id -> last delta observed while conversing.
 _conversing = {}
 
 
-def _is_conversing(activity):
+def _is_conversing(sim):
+    """True when a sim delta marks an active conversation (BUG-01).
+
+    Prefers the reliable ``is_conversing`` flag reported by the state collector
+    and only falls back to the interaction class-name markers.
+    """
+    if isinstance(sim, dict) and sim.get('is_conversing'):
+        return True
+    activity = sim.get('activity') if isinstance(sim, dict) else sim
     text = str(activity or '').lower()
     return any(marker in text for marker in _CONVERSATION_MARKERS)
 
@@ -41,7 +49,7 @@ def observe(sims_delta):
     for sim in sims_delta or []:
         if not isinstance(sim, dict):
             continue
-        if _is_conversing(sim.get('activity')):
+        if _is_conversing(sim):
             current[int(sim.get('sim_id', 0))] = sim
 
     ended = [(sim_id, _conversing[sim_id]) for sim_id in _conversing if sim_id not in current]

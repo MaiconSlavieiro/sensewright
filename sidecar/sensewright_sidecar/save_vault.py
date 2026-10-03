@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from .memory.sqlite_store import SqliteStore
 from .observability.logging import get_logger
@@ -24,6 +24,11 @@ from .observability.logging import get_logger
 logger = get_logger("save_vault")
 
 RING_BUFFER_SLOTS = 3
+
+#: A negative tick delta smaller than this is ordinary drift (e.g. reading the
+#: save clock after serialization, or a few lost ticks) and must not trigger a
+#: destructive rewind. 3000 ticks = 3 sim-minutes (1000 ticks/sim-min). (2.1)
+REWIND_TOLERANCE_TICKS = 3000
 
 
 def _copy_db(src: str, dst: str) -> None:
@@ -43,11 +48,12 @@ def _copy_db(src: str, dst: str) -> None:
 class SaveVault:
     """Owns the working/committed database files for all save slots."""
 
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, rewind_tolerance_ticks: int = REWIND_TOLERANCE_TICKS) -> None:
         self._saves_dir = Path(data_dir) / "saves"
         self._saves_dir.mkdir(parents=True, exist_ok=True)
         self._active_save_id: Optional[int] = None
         self._working_store: Optional[SqliteStore] = None
+        self._rewind_tolerance_ticks = max(0, int(rewind_tolerance_ticks))
 
     # ── path helpers ─────────────────────────────────────────────────────
     def committed_path(self, save_id: int) -> str:
@@ -75,15 +81,21 @@ class SaveVault:
         self._active_save_id = None
 
     # ── lifecycle ────────────────────────────────────────────────────────
-    def session_start(self, save_id: int, world_sim_tick: int) -> Dict[str, Optional[int]]:
+    def session_start(self, save_id: int, world_sim_tick: int) -> Dict[str, Any]:
         """Load (or create) a save slot, discarding any residual working db.
 
-        Returns ``{"restored_tick": int|None, "bootstrap_needed": bool}``.
+        Returns ``{"restored_tick": int|None, "bootstrap_needed": bool,
+        "rewound": bool}``.
+
+        A game tick *behind* our committed history only counts as an intentional
+        reload when the delta exceeds :data:`REWIND_TOLERANCE_TICKS`; ordinary
+        drift is ignored so it cannot destroy recent memories (2.1).
         """
         self._close_working()
         save_id = int(save_id)
         committed = self.committed_path(save_id)
         working = self.working_path(save_id)
+        rewound = False
 
         # 1. Discard residual working db (crash / exit-without-save).
         if os.path.exists(working):
@@ -95,14 +107,29 @@ class SaveVault:
             _copy_db(committed, working)
             committed_tick = self._peek_committed_tick(committed)
             if committed_tick is not None and world_sim_tick < committed_tick:
-                # 4. Rewind: the game save is older than our history (rollback).
-                logger.warning(
-                    "rewind requested: game tick %s < committed tick %s",
-                    world_sim_tick, committed_tick,
-                )
-                self._rewind_to_tick(save_id, world_sim_tick)
+                drift = committed_tick - world_sim_tick
+                if drift > self._rewind_tolerance_ticks:
+                    # 4. Rewind: the game save is genuinely older than our history.
+                    restored = self._rewind_to_tick(save_id, world_sim_tick)
+                    rewound = True
+                    logger.warning(
+                        "rewind: game tick %s is %s behind committed tick %s "
+                        "(> tolerance %s); restored at tick %s",
+                        world_sim_tick, drift, committed_tick,
+                        self._rewind_tolerance_ticks, restored,
+                    )
+                    restored_tick = restored
+                else:
+                    # 5. Drift within tolerance: never rewind, never warn the
+                    # player. This is the common post-serialization read case.
+                    logger.info(
+                        "ignoring tick drift of %s (< tolerance %s): game %s vs committed %s",
+                        drift, self._rewind_tolerance_ticks, world_sim_tick, committed_tick,
+                    )
+                    restored_tick = world_sim_tick
+            else:
+                restored_tick = world_sim_tick
             bootstrap_needed = False
-            restored_tick = world_sim_tick
         else:
             # 3. New save slot: fresh working db.
             store = SqliteStore(working)
@@ -118,7 +145,11 @@ class SaveVault:
         store.set_tick(world_sim_tick)
         self._working_store = store
         self._active_save_id = save_id
-        return {"restored_tick": restored_tick, "bootstrap_needed": bootstrap_needed}
+        return {
+            "restored_tick": restored_tick,
+            "bootstrap_needed": bootstrap_needed,
+            "rewound": rewound,
+        }
 
     def zone_transition(self, save_id: int, world_sim_tick: int) -> Dict[str, bool]:
         """Keep the working db intact; only tick metadata advances."""
@@ -144,11 +175,14 @@ class SaveVault:
         committed = self.committed_path(save_id)
 
         # Flush RAM buffers into working db (the active store already holds them;
-        # ensure the metadata tick is current).
+        # ensure the metadata tick is current). Drop the reference before the
+        # close so a concurrent callback cannot resolve a closed handle during
+        # the copy/reopen window (3.5).
         if self._working_store is not None and self._active_save_id == save_id:
             self._working_store.set_tick(world_sim_tick)
             self._working_store.set_committed_tick(world_sim_tick)
             self._working_store.close()
+            self._working_store = None
         else:
             store = SqliteStore(working)
             store.initialize()
@@ -200,10 +234,13 @@ class SaveVault:
         except sqlite3.Error:
             return None
 
-    def _rewind_to_tick(self, save_id: int, world_sim_tick: int) -> None:
+    def _rewind_to_tick(self, save_id: int, world_sim_tick: int) -> int:
         """Restore the ring-buffer snapshot nearest to (and <=) the game tick.
 
-        Falls back to deleting memories created after the target tick.
+        Falls back to deleting memories created after the target tick. Returns
+        the effective restored tick, which callers use to seed
+        ``last_processed_tick`` so ticks are not silently dropped after a
+        rollback (2.2).
         """
         working = self.working_path(save_id)
         best: Optional[str] = None
@@ -220,7 +257,7 @@ class SaveVault:
         if best is not None:
             _copy_db(best, working)
             logger.info("restored ring-buffer snapshot at tick %s", best_tick)
-            return
+            return best_tick
 
         # Fallback: surgical rewind (delegated to the store, under its lock).
         store = SqliteStore(working)
@@ -228,6 +265,7 @@ class SaveVault:
         store.rewind_to_tick(world_sim_tick)
         store.close()
         logger.info("surgical rewind to tick %s", world_sim_tick)
+        return world_sim_tick
 
     def shutdown(self) -> None:
         """Close the active store cleanly (called by the process watchdog)."""

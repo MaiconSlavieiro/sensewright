@@ -77,6 +77,8 @@ class SeatManager:
                 is_player, in_household, is_catalyst,
                 friendship=sim.get("friendship", 0.0),
                 bond_types=sim.get("bond_types"),
+                species=sim.get("species"),
+                age_stage=sim.get("age_stage"),
             )
             if tier == "off":
                 continue

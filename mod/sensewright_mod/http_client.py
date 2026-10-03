@@ -1,6 +1,7 @@
 # Sensewright v2 — HTTP Client (Worker Thread)
 # Python 3.7 compatible
 
+import collections
 import json
 import queue
 import threading
@@ -22,15 +23,57 @@ from sensewright_mod.debug_log import (
 )
 
 
-# Global queues for inter-thread communication
-_outbound_queue = queue.Queue()      # Main thread -> Worker thread (requests)
+# ── Outbound lanes (3.3) ─────────────────────────────────────────────────
+# The old single FIFO let a burst of ~100 /events starve lifecycle and chat for
+# ~100 s. There are now two lanes plus an "atomic slot":
+#   * _realtime_q — lifecycle/chat/events/beat-ended, FIFO, bounded, and on
+#     overflow it drops only stale events (never lifecycle or chat).
+#   * _slots      — one coalesced request per tick-like endpoint; the producer
+#     merges sims_delta by sim_id and keeps the latest clock/active sim.
+# A threading.Event wakes the worker instead of polling every 10 ms.
+_REALTIME_MAX = 256      # hard safety cap; lifecycle/chat are low-frequency
+_EVENTS_MAX = 48         # events are the only droppable class
 _inbound_intents_queue = queue.Queue()  # Worker thread -> Main thread (intents/responses)
+
+_realtime_q = collections.deque()       # List[dict] guarded by _realtime_lock
+_realtime_lock = threading.Lock()
+_slots = {}                             # endpoint -> dict guarded by _slot_lock
+_slot_lock = threading.Lock()
+_wakeup = threading.Event()
+
+#: Endpoints that must never be coalesced (every request is significant).
+_REALTIME_ENDPOINTS = frozenset([
+    '/lifecycle/attach', '/lifecycle/session-start', '/lifecycle/save',
+    '/lifecycle/zone-transition', '/census', '/chat', '/hey', '/events',
+    '/god/beat-ended', '/autonomy/intents',
+])
+#: Endpoints that are safe to coalesce to the latest state.
+_SLOT_ENDPOINTS = frozenset(['/autonomy/tick', '/config/player-activity'])
+
+_ENDPOINT_TIMEOUTS = {
+    '/chat': 20.0,
+    '/hey': 20.0,
+    '/census': 30.0,
+    '/autonomy/tick': 15.0,
+    '/lifecycle/attach': 10.0,
+    '/lifecycle/session-start': 10.0,
+    '/lifecycle/save': 10.0,
+    '/lifecycle/zone-transition': 10.0,
+}
 
 _worker_thread = None
 _worker_running = False
 _sidecar_process = None
 _game_pid = None
 _shutdown_event = threading.Event()
+
+#: Set once session-start has been queued; gates the idle intent pull (4.3).
+_session_started = [False]
+#: Intent pull exponential backoff 2 s -> 10 s (reset when intents arrive).
+_INTENT_PULL_MIN = 2.0
+_INTENT_PULL_MAX = 10.0
+_intent_pull_backoff = [_INTENT_PULL_MIN]
+_next_intent_pull_at = [0.0]
 
 # Trace ID counter
 _trace_counter = 0
@@ -45,12 +88,122 @@ def generate_trace_id():
         return 'tr_{:08x}'.format(_trace_counter)
 
 
+class _OutboundView(object):
+    """Read-only depth view for the diagnostics panel."""
+
+    def qsize(self):
+        with _realtime_lock:
+            depth = len(_realtime_q)
+        with _slot_lock:
+            depth += len(_slots)
+        return depth
+
+
+_outbound_view = _OutboundView()
+
+
 def get_outbound_queue():
-    return _outbound_queue
+    return _outbound_view
 
 
 def get_inbound_intents_queue():
     return _inbound_intents_queue
+
+
+def _timeout_for(endpoint):
+    if endpoint in _ENDPOINT_TIMEOUTS:
+        return _ENDPOINT_TIMEOUTS[endpoint]
+    if endpoint.startswith('/lifecycle/'):
+        return 10.0
+    return get_request_timeout()
+
+
+def _merge_sims_delta(existing, incoming):
+    """Merge two sims_delta lists by sim_id, last non-None value per field."""
+    by_id = {}
+    order = []
+    for sim in (existing or []) + (incoming or []):
+        if not isinstance(sim, dict):
+            continue
+        sim_id = sim.get('sim_id')
+        if sim_id is None:
+            continue
+        if sim_id not in by_id:
+            by_id[sim_id] = dict(sim)
+            order.append(sim_id)
+        else:
+            merged = by_id[sim_id]
+            for key, value in sim.items():
+                if value is not None:
+                    merged[key] = value
+    return [by_id[sim_id] for sim_id in order]
+
+
+def _coalesce_slot(item):
+    endpoint = item.get('endpoint', '')
+    with _slot_lock:
+        existing = _slots.get(endpoint)
+        if existing is None:
+            _slots[endpoint] = item
+            return
+        if endpoint == '/autonomy/tick':
+            payload = existing.get('payload') or {}
+            incoming = item.get('payload') or {}
+            payload['sims_delta'] = _merge_sims_delta(
+                payload.get('sims_delta'), incoming.get('sims_delta'))
+            # Latest scalar clock/state wins.
+            for key, value in incoming.items():
+                if key != 'sims_delta':
+                    payload[key] = value
+            existing['payload'] = payload
+            existing['trace_id'] = item.get('trace_id', existing.get('trace_id'))
+            existing['callback'] = item.get('callback')
+        else:
+            _slots[endpoint] = item
+
+
+def _enqueue_realtime(item):
+    with _realtime_lock:
+        if item.get('endpoint') == '/events':
+            event_count = sum(1 for q in _realtime_q if q.get('endpoint') == '/events')
+            if event_count >= _EVENTS_MAX or len(_realtime_q) >= _REALTIME_MAX:
+                worker_log_warn('Realtime lane saturated; dropping event')
+                return
+        elif len(_realtime_q) >= _REALTIME_MAX:
+            # Lifecycle/chat are never silently dropped in normal operation;
+            # this is a last-resort safety valve.
+            worker_log_warn('Realtime lane hard cap; dropping {}'.format(item.get('endpoint')))
+            return
+        _realtime_q.append(item)
+
+
+def _next_item():
+    with _realtime_lock:
+        if _realtime_q:
+            return _realtime_q.popleft()
+    with _slot_lock:
+        if _slots:
+            endpoint = next(iter(_slots))
+            return _slots.pop(endpoint)
+    return None
+
+
+def _submit(method, endpoint, payload, callback=None):
+    """Route a request to the realtime lane, the coalescing slot, or both."""
+    trace_id = generate_trace_id()
+    item = {
+        'method': method,
+        'endpoint': endpoint,
+        'payload': payload,
+        'callback': callback,
+        'trace_id': trace_id,
+    }
+    if endpoint in _SLOT_ENDPOINTS:
+        _coalesce_slot(item)
+    else:
+        _enqueue_realtime(item)
+    _wakeup.set()
+    return trace_id
 
 
 def _read_python_txt():
@@ -187,9 +340,38 @@ def _make_request(method, endpoint, payload=None, timeout=None):
         return {'ok': False, 'error': 'exception'}
 
 
+def _maybe_intent_pull():
+    """Light `GET /v1/autonomy/intents` when both lanes are idle (4.3).
+
+    Reactions/narration otherwise wait for the next 15 sim-min autonomy pulse.
+    Exponential backoff 2 s -> 10 s, reset as soon as intents arrive.
+    """
+    if not _session_started[0]:
+        return
+    now = time.monotonic()
+    if now < _next_intent_pull_at[0]:
+        return
+    response = _make_request('GET', '/autonomy/intents', None, timeout=5.0)
+    intents = []
+    if isinstance(response, dict):
+        intents = response.get('intents') or []
+    if intents:
+        _intent_pull_backoff[0] = _INTENT_PULL_MIN
+        # Hand off to the main thread so the IntentBus is only touched there.
+        _inbound_intents_queue.put({
+            'type': 'response',
+            'trace_id': generate_trace_id(),
+            'endpoint': '/autonomy/intents',
+            'response': response,
+        })
+    else:
+        _intent_pull_backoff[0] = min(_intent_pull_backoff[0] * 2, _INTENT_PULL_MAX)
+    _next_intent_pull_at[0] = time.monotonic() + _intent_pull_backoff[0]
+
+
 def _worker_loop():
-    """Main worker thread loop."""
-    global _worker_running
+    """Main worker thread loop: drain realtime lane first, then the slots."""
+    global _worker_running, _game_pid
     worker_log_info('Worker thread started')
 
     # Initialize worker logger
@@ -199,21 +381,21 @@ def _worker_loop():
     _ensure_sidecar_running()
 
     # Attach to game process
-    global _game_pid
     _game_pid = os.getpid()
     _make_request('POST', '/lifecycle/attach', {'game_pid': _game_pid})
 
     while _worker_running and not _shutdown_event.is_set():
         try:
-            # Process outbound queue (non-blocking)
-            try:
-                request = _outbound_queue.get_nowait()
+            request = _next_item()
+            if request is not None:
                 _process_outbound_request(request)
-            except queue.Empty:
-                pass
+                continue
 
-            # Small sleep to prevent busy-waiting
-            time.sleep(0.01)
+            # Both lanes idle: opportunistically pull pending intents, then
+            # block until a producer wakes us (no busy polling).
+            _maybe_intent_pull()
+            _wakeup.wait(0.5)
+            _wakeup.clear()
 
         except Exception as e:
             worker_log_exception('Worker loop error: {}'.format(e))
@@ -235,7 +417,7 @@ def _process_outbound_request(request):
         if isinstance(payload, dict) and 'trace_id' not in payload:
             payload['trace_id'] = trace_id
 
-        response = _make_request(method, endpoint, payload)
+        response = _make_request(method, endpoint, payload, timeout=_timeout_for(endpoint))
 
         # Put response in inbound queue for main thread
         if callback is not None:
@@ -274,7 +456,9 @@ def stop_worker():
     """Stop the worker thread."""
     global _worker_running, _worker_thread, _sidecar_process
     _worker_running = False
+    _session_started[0] = False
     _shutdown_event.set()
+    _wakeup.set()
 
     if _worker_thread is not None:
         _worker_thread.join(timeout=2.0)
@@ -295,28 +479,12 @@ def stop_worker():
 
 def post_async(endpoint, payload, callback=None):
     """Queue a POST request to be sent by the worker thread."""
-    trace_id = generate_trace_id()
-    _outbound_queue.put({
-        'method': 'POST',
-        'endpoint': endpoint,
-        'payload': payload,
-        'callback': callback,
-        'trace_id': trace_id
-    })
-    return trace_id
+    return _submit('POST', endpoint, payload, callback=callback)
 
 
 def get_async(endpoint, callback=None):
     """Queue a GET request to be sent by the worker thread."""
-    trace_id = generate_trace_id()
-    _outbound_queue.put({
-        'method': 'GET',
-        'endpoint': endpoint,
-        'payload': {},
-        'callback': callback,
-        'trace_id': trace_id
-    })
-    return trace_id
+    return _submit('GET', endpoint, {}, callback=callback)
 
 
 def process_inbound_queue():
@@ -379,6 +547,7 @@ def post_lifecycle_attach():
 
 
 def post_lifecycle_session_start(player_id, save_id, world_sim_tick, lang):
+    _session_started[0] = True
     return post_async('/lifecycle/session-start', {
         'player_id': player_id,
         'save_id': save_id,
@@ -407,7 +576,8 @@ def post_lifecycle_save(player_id, save_id, previous_save_id, world_sim_tick):
     return post_async('/lifecycle/save', payload)
 
 
-def post_census(player_id, save_id, world_sim_tick, sims, households, relationships, installed_packs):
+def post_census(player_id, save_id, world_sim_tick, sims, households, relationships,
+                installed_packs, detected_mods=None):
     return post_async('/census', {
         'player_id': player_id,
         'save_id': save_id,
@@ -415,7 +585,8 @@ def post_census(player_id, save_id, world_sim_tick, sims, households, relationsh
         'sims': sims,
         'households': households,
         'relationships': relationships,
-        'installed_packs': installed_packs
+        'installed_packs': installed_packs,
+        'detected_mods': detected_mods or []
     })
 
 
@@ -485,3 +656,13 @@ def post_player_activity(player_id, save_id, idle, clock_speed):
         'idle': idle,
         'clock_speed': clock_speed
     })
+
+
+def post_config_panic():
+    """FC4/4.8: tell the sidecar to suspend autonomy (Panic Button)."""
+    return post_async('/config/panic', {'player_id': 'player_1'})
+
+
+def post_config_resume():
+    """FC4/4.8: resume sidecar autonomy after a panic pause."""
+    return post_async('/config/resume', {'player_id': 'player_1'})

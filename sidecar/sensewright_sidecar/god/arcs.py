@@ -78,6 +78,23 @@ def save_arc(store: SqliteStore, arc: Dict[str, Any]) -> None:
     store.save_arc(arc)
 
 
+def deactivate_stale_arcs(store: SqliteStore, keep_id: Optional[str] = None) -> int:
+    """Abort every active arc except ``keep_id`` (BUG-02).
+
+    ``load_active_arc`` calls this so a store polluted with duplicate actives
+    (from builds predating the single-flight claim) self-heals on first load.
+    """
+    deactivate = getattr(store, "deactivate_stale_arcs", None)
+    if not callable(deactivate):
+        return 0
+    return int(deactivate(keep_id) or 0)
+
+
 def load_active_arc(store: SqliteStore) -> Optional[Dict[str, Any]]:
     arcs = store.list_arcs(status=ARC_ACTIVE)
-    return arcs[0] if arcs else None
+    if not arcs:
+        return None
+    keep = arcs[0]
+    if len(arcs) > 1:
+        deactivate_stale_arcs(store, keep.get("id"))
+    return keep

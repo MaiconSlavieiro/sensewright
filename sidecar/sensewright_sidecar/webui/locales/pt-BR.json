@@ -100,7 +100,34 @@
     "intensity": "Intensidade",
     "mood_influence": "Influência de Humor",
     "autonomy_degree": "Grau de Autonomia",
-    "chaos_degree": "Grau de Caos"
+    "chaos_degree": "Grau de Caos",
+    "arc_director": "Diretor de Arco",
+    "arc_theme": "Tema",
+    "arc_status": "Status",
+    "arc_status_running": "Em Execução",
+    "arc_status_paused": "Pausado",
+    "arc_status_completed": "Concluído",
+    "arc_status_aborted": "Abortado",
+    "arc_status_unknown": "Desconhecido",
+    "current_beat": "Beat Atual",
+    "beats": "Beats",
+    "arc_cast": "Elenco do Arco",
+    "beat_actions": "Ações do Beat",
+    "approve_beat": "Aprovar Beat",
+    "skip_beat": "Pular Beat",
+    "rewrite_beat": "Reescrever Beat",
+    "abort_arc": "Abortar Arco",
+    "rewrite_prompt": "Digite a instrução de reescrita:",
+    "abort_confirm": "Abortar o arco inteiro? Esta ação não pode ser desfeita.",
+    "armed": "ARMADO",
+    "spawned": "Spawnado",
+    "pending": "Pendente",
+    "panic_control": "Controle de Pânico",
+    "panic": "Pânico",
+    "resume": "Retomar",
+    "panic_active": "PÂNICO ATIVO — Arco pausado",
+    "panic_inactive": "Operação normal",
+    "recap": "Último Resumo"
   },
   "providers": {
     "title": "Provedores & Diagnóstico",
@@ -142,6 +169,11 @@
     "package_generated": "Pacote de idioma gerado",
     "package_failed": "Falha ao gerar pacote",
     "connection_ok": "Conexão OK",
-    "connection_failed": "Conexão falhou"
+    "connection_failed": "Conexão falhou",
+    "arc_steered": "Ação de direção de arco aplicada",
+    "arc_steer_failed": "Falha ao direcionar arco",
+    "panic_activated": "Modo pânico ativado",
+    "resumed": "Operação normal retomada",
+    "panic_failed": "Falha na ação de pânico"
   }
 }
