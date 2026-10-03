@@ -11,13 +11,15 @@ from typing import Any, Dict, List, Optional
 
 from . import __version__
 from .agent import (
-    SeatManager, apply_cognition, apply_reflection, build_chat_context,
-    build_cognition_context, build_dream_context, build_impulse_context,
-    build_reaction_context, build_reflect_context, compute_salience, decay_blocks,
-    enforce_life_story, extract_thought, hard_blocked_social, is_deferred, is_salient,
-    normalize_intent, normalize_profile, physical_actions_allowed, preflight,
-    record_speech, reinforce_block, resolve_limits, sleep_transition,
-    speech_allowed, strip_thought, trust_delta,
+    SeatManager, action_context, apply_cognition, apply_reflection,
+    build_chat_context, build_cognition_context, build_dream_context,
+    build_impulse_context, build_reaction_context, build_reflect_context,
+    coerce_float, compute_salience, decay_blocks, enforce_life_story,
+    extract_thought, family_relation_label, hard_blocked_social, is_deferred,
+    is_salient, location_context, normalize_intent, normalize_profile,
+    physical_actions_allowed, preflight, record_speech, reinforce_block,
+    relationship_context, resolve_limits, sleep_transition, speech_allowed,
+    strip_thought, trust_delta,
 )
 from .agent.psyche import block_for_category
 from .agent.social import build_social_context, has_rumor_to_spread
@@ -56,6 +58,46 @@ MAX_SOCIAL_PER_TICK = 1
 
 def _store(state: AppState):
     return state.working_store()
+
+
+def _resolve_family(state: AppState, sim_id: int) -> List[Dict[str, str]]:
+    """Resolve a sim's census ``family_links`` into named relatives.
+
+    The Mod stores ``family_links`` as ``{"target_sim_id": int, "relationship": str}``
+    (some older builds stored bare ints). This maps each edge to
+    ``{"name": ..., "relation": ...}`` using the census for the target's name and
+    :func:`family_relation_label` for a readable label. Returns ``[]`` when the sim
+    has no recorded relatives, so the chat prompt can explicitly ground (or omit)
+    the sim's family.
+    """
+    sim = state.get_census(int(sim_id))
+    links = sim.get("family_links") or []
+    resolved: List[Dict[str, str]] = []
+    seen: set = set()
+    for link in links:
+        if isinstance(link, dict):
+            target_id = link.get("target_sim_id")
+            relation = link.get("relationship") or link.get("relation") or ""
+        else:
+            target_id = link
+            relation = ""
+        try:
+            target_id = int(target_id or 0)
+        except (TypeError, ValueError):
+            continue
+        if not target_id or target_id == int(sim_id):
+            continue
+        if target_id in seen:
+            continue
+        seen.add(target_id)
+        target_name = state.get_census(target_id).get("name", "")
+        if not target_name:
+            continue
+        resolved.append({
+            "name": str(target_name),
+            "relation": family_relation_label(str(relation)),
+        })
+    return resolved
 
 
 # ── sleep cycle, cognition & evolution (F07 / P07-P09 / P30) ─────────────
@@ -981,6 +1023,12 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     _merge_delta(state, payload.get("sims_delta") or [])
 
+    # Venue context (venue_type / is_residential) grounds the location tone of
+    # social and chat prompts.
+    venue = payload.get("venue")
+    if isinstance(venue, dict):
+        state.zone_context = dict(venue)
+
     # Pause handling: freeze autonomy when paused (REQ-ARCH-04).
     if clock_speed == 0:
         return {"ok": True, "scheduled": 0, "intents": state.drain_intents(), "social_sessions": []}
@@ -1088,7 +1136,11 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
             # F04/P18: if one of the pair holds a catalyst lease, route the
             # dialogue asymmetrically (sovereign agent answers a puppeteered NPC).
             puppeteer = _puppeteer_context(state, sim_a, sim_b)
-            ctx = build_social_context(sim_a, sim_b, tick, rumor=rumor, puppeteer=puppeteer)
+            ctx = build_social_context(
+                sim_a, sim_b, tick, rumor=rumor, puppeteer=puppeteer,
+                location=location_context(state, sim_a, sim_b),
+                relationship=relationship_context(state, sim_a, sim_b),
+            )
             state.scheduler.submit_bg(
                 "sim.social", ctx, lang, trace_id=trace_id,
                 dedup_key="{}:{}-{}:social".format(save_id, a_id, b_id),
@@ -1301,10 +1353,20 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     memories = store.recent_memories(sim_id, limit=8) if store else []
     profile = (store.get_sim_profile(sim_id) or {}).get("profile") if store else None
 
+    # BUG: friendship was never available — the mod never sent it and the census
+    # omits it, so trust was pinned to the lowest tier. Prefer the wire value,
+    # fall back to the census, then to the relationship store.
+    friendship = coerce_float(payload.get("friendship"), sim.get("friendship", 0.0))
+    player_name = payload.get("player_name") or sim.get("player_name") or ""
+    history = state.chat_turns(sim_id)
+
     ctx = build_chat_context(
-        sim_id, sim.get("name", ""), payload.get("player_name", ""),
-        channel, message, sim.get("friendship", 0.0), profile, memories,
+        sim_id, sim.get("name", ""), player_name,
+        channel, message, friendship, profile, memories,
         sim.get("mood", ""), sim.get("activity", ""), tick,
+        history=history, family=_resolve_family(state, sim_id),
+        location=location_context(state, sim),
+        action=action_context(sim),
     )
     result = state.scheduler.run_purpose("sim.chat", ctx, lang)
     data = result.data or {}

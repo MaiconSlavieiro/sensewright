@@ -615,8 +615,8 @@ def post_census(player_id, save_id, world_sim_tick, sims, households, relationsh
 
 
 def post_autonomy_tick(trace_id, player_id, save_id, world_sim_tick, clock_speed,
-                       active_sim_id, player_confidant_sim_id, sims_delta, lang):
-    return post_async('/autonomy/tick', {
+                       active_sim_id, player_confidant_sim_id, sims_delta, lang, venue=None):
+    payload = {
         'trace_id': trace_id,
         'player_id': player_id,
         'save_id': save_id,
@@ -625,12 +625,15 @@ def post_autonomy_tick(trace_id, player_id, save_id, world_sim_tick, clock_speed
         'active_sim_id': active_sim_id,
         'player_confidant_sim_id': player_confidant_sim_id,
         'sims_delta': sims_delta,
-        'lang': lang
-    })
+        'lang': lang,
+    }
+    if venue is not None:
+        payload['venue'] = venue
+    return post_async('/autonomy/tick', payload)
 
 
-def post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, message, lang, callback=None):
-    return post_async('/chat', {
+def post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, message, lang, callback=None, player_name=None, friendship=None):
+    payload = {
         'trace_id': trace_id,
         'sim_id': sim_id,
         'channel': channel,
@@ -638,20 +641,30 @@ def post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, mes
         'save_id': save_id,
         'world_sim_tick': world_sim_tick,
         'message': message,
-        'lang': lang
-    }, callback=callback)
+        'lang': lang,
+    }
+    if player_name is not None:
+        payload['player_name'] = player_name
+    if friendship is not None:
+        payload['friendship'] = friendship
+    return post_async('/chat', payload, callback=callback)
 
 
-def post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, message, lang, callback=None):
-    return post_async('/hey', {
+def post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, message, lang, callback=None, player_name=None, friendship=None):
+    payload = {
         'trace_id': trace_id,
         'sim_id': sim_id,
         'player_id': player_id,
         'save_id': save_id,
         'world_sim_tick': world_sim_tick,
         'message': message,
-        'lang': lang
-    }, callback=callback)
+        'lang': lang,
+    }
+    if player_name is not None:
+        payload['player_name'] = player_name
+    if friendship is not None:
+        payload['friendship'] = friendship
+    return post_async('/hey', payload, callback=callback)
 
 
 def post_events(trace_id, sim_id, player_id, save_id, world_sim_tick,

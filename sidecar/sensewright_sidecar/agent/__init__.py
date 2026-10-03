@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from .chat import (
-    build_chat_context, extract_thought, is_deferred, strip_thought,
-    trust_delta, trust_level,
+    build_chat_context, extract_thought, family_relation_label, is_deferred,
+    strip_thought, trust_delta, trust_level,
 )
 from .cognition import apply_cognition, build_cognition_context, extract_autonomy_biases
 from .dreams import build_dream_context, surrealism_index
@@ -26,12 +26,16 @@ from .psyche import (
 )
 from .seats import SeatManager
 from .sleep import sleep_transition
-from .social import build_social_context, has_rumor_to_spread, preflight
+from .social import (
+    action_context, are_family, build_social_context, coerce_float,
+    has_rumor_to_spread, location_context, preflight, relationship_context,
+    relationship_tier, relationship_value,
+)
 from .speech import record_speech, resolve_limits, speech_allowed
 
 __all__ = [
-    "build_chat_context", "extract_thought", "is_deferred", "strip_thought",
-    "trust_delta", "trust_level",
+    "build_chat_context", "extract_thought", "family_relation_label",
+    "is_deferred", "strip_thought", "trust_delta", "trust_level",
     "apply_cognition", "build_cognition_context", "extract_autonomy_biases",
     "build_dream_context", "surrealism_index",
     "apply_reflection", "build_reflect_context", "build_trait_context",
@@ -44,6 +48,8 @@ __all__ = [
     "reinforce_block", "strongest_block",
     "SeatManager",
     "sleep_transition",
-    "build_social_context", "hard_blocked_social", "has_rumor_to_spread", "preflight",
+    "action_context", "are_family", "build_social_context", "coerce_float",
+    "hard_blocked_social", "has_rumor_to_spread", "location_context", "preflight",
+    "relationship_context", "relationship_tier", "relationship_value",
     "record_speech", "resolve_limits", "speech_allowed",
 ]

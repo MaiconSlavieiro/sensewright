@@ -168,7 +168,8 @@ class SensewrightService(object):
                 active_sim_id=state['active_sim_id'],
                 player_confidant_sim_id=get_player_confidant_sim_id(),
                 sims_delta=sims_delta,
-                lang=get_current_language()
+                lang=get_current_language(),
+                venue=state.get('venue'),
             )
         except Exception as e:
             log_exception('Autonomy pulse error: {}'.format(e))

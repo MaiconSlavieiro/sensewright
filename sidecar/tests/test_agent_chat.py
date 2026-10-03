@@ -10,6 +10,7 @@ from sensewright_sidecar.agent.chat import (
     extract_thought,
     strip_thought,
     build_chat_context,
+    family_relation_label,
 )
 from sensewright_sidecar.agent.chat import TRUST_ACQUAINTANCE, TRUST_CONFIDANT
 
@@ -157,7 +158,7 @@ class TestBuildChatContext:
         expected_keys = {
             "sim_id", "sim_name", "player_name", "channel", "message",
             "friendship", "trust", "mood", "activity", "profile",
-            "memories", "world_sim_tick"
+            "memories", "world_sim_tick", "history", "family"
         }
         assert set(ctx.keys()) == expected_keys
 
@@ -188,6 +189,51 @@ class TestBuildChatContext:
         assert ctx["profile"] == {"backstory": "A tale"}
         assert ctx["memories"] == [{"text": "mem1"}]
         assert ctx["world_sim_tick"] == 500
+
+    def test_history_and_family_passed_through(self):
+        ctx = build_chat_context(
+            sim_id=42, sim_name="Bob", player_name="Alice",
+            channel="phone_sms", message="Hi", friendship=10.0,
+            profile={}, memories=[], mood="fine", activity="idle", tick=100,
+            history=[{"role": "user", "content": "hello"},
+                     {"role": "assistant", "content": "hi there"}],
+            family=[{"name": "Carol", "relation": "sibling"}],
+        )
+        assert ctx["history"] == [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+        ]
+        assert ctx["family"] == [{"name": "Carol", "relation": "sibling"}]
+
+    def test_history_and_family_default_empty(self):
+        ctx = build_chat_context(
+            sim_id=42, sim_name="Bob", player_name="Alice",
+            channel="phone_sms", message="Hi", friendship=10.0,
+            profile={}, memories=[], mood="fine", activity="idle", tick=100
+        )
+        assert ctx["history"] == []
+        assert ctx["family"] == []
+
+
+class TestFamilyRelationLabel:
+    """Tests for family_relation_label."""
+
+    def test_raw_ea_bits(self):
+        assert family_relation_label("FAMILY_BROTHER_SISTER") == "sibling"
+        assert family_relation_label("FAMILY_PARENT") == "parent"
+        assert family_relation_label("FAMILY_SON_DAUGHTER") == "child"
+        assert family_relation_label("FAMILY_HUSBAND_WIFE") == "spouse"
+
+    def test_clean_labels_pass_through(self):
+        assert family_relation_label("sibling") == "sibling"
+        assert family_relation_label("parent") == "parent"
+        assert family_relation_label("aunt_uncle") == "aunt/uncle"
+        assert family_relation_label("niece_nephew") == "niece/nephew"
+        assert family_relation_label("step_sibling") == "step-sibling"
+
+    def test_empty_and_none(self):
+        assert family_relation_label("") == ""
+        assert family_relation_label(None) == ""
 
 
 if __name__ == "__main__":

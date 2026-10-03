@@ -70,13 +70,14 @@ def priority_class(state: Any, sim: dict, active_sim_id: int | None = None) -> s
         ):
             return "HOUSEHOLD"
 
-    # RELATED check: family_links intersection with player/active sim ids
+    # RELATED check: family_links intersection with player/active sim ids.
+    # ``family_links`` is a list of ``{"target_sim_id": int, "relationship": str}``
+    # in the census (older builds stored bare ints); handle both shapes.
     target_ids = player_sim_ids.copy()
     if active_sim_id is not None:
         target_ids.add(int(active_sim_id))
 
-    sim_family_links = sim.get("family_links") or []
-    sim_family_set = {int(x) for x in sim_family_links if x}
+    sim_family_set = _family_link_ids(sim.get("family_links") or [])
     if sim_family_set & target_ids:
         return "RELATED"
 
@@ -84,11 +85,33 @@ def priority_class(state: Any, sim: dict, active_sim_id: int | None = None) -> s
     for cid, cdata in census_items:
         cid = int(cid)
         if cid in target_ids:
-            other_links = cdata.get("family_links") or []
-            if sim_id in {int(x) for x in other_links if x}:
+            other_links = _family_link_ids(cdata.get("family_links") or [])
+            if sim_id in other_links:
                 return "RELATED"
 
     return "OTHER"
+
+
+def _family_link_ids(links: list) -> set[int]:
+    """Extract the target sim ids from a ``family_links`` list.
+
+    Handles both the canonical ``{"target_sim_id": int, ...}`` dict shape and the
+    legacy bare-int shape so a malformed entry can never raise inside
+    ``priority_class``.
+    """
+    ids: set[int] = set()
+    for link in links:
+        if isinstance(link, dict):
+            raw = link.get("target_sim_id")
+        else:
+            raw = link
+        try:
+            sim_id = int(raw or 0)
+        except (TypeError, ValueError):
+            continue
+        if sim_id:
+            ids.add(sim_id)
+    return ids
 
 
 def select_targets(

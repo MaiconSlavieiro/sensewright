@@ -318,3 +318,138 @@ failure paths), so a single session pinpoints any dead feature:
 - `python mod/build.py` → `Sensewright.ts4script` (95,981 B, 3.7 bytecode).
 - Deployed with `scripts/install-mod.ps1`.
 - Installed sidecar boot-tested (`/v1/health` 200, `handle_chat` returns `ok`).
+
+---
+
+# Playtest #3 (2026-10-03) — chat grounding & family-tree hallucination
+
+> **Status:** ✅ CLOSED — BUG-08/09 fixed with regression tests.
+> **Basis:** sidecar log `llm.route purpose=sim.chat ... tokens≈600` with every reply
+> generic, plus an SMS chat in which a Sim mentioned a brother absent from the
+> genealogy. Root causes traced from the wire contract, the prompt templates and the
+> census family-link collection.
+
+## Summary
+
+| ID | Bug | Severity | Status |
+|----|-----|----------|--------|
+| BUG-08 | Chat replies are generic/repetitive — `player_name`, `friendship` and the conversation history never reach the LLM | High | ✅ Fixed |
+| BUG-09 | Sims hallucinate relatives (a "brother") — the family tree is collected but never grounded into the prompt | High | ✅ Fixed |
+
+## BUG-08 — chat context was almost empty (player name, trust, history) ✅
+
+**Symptom.** Every SMS reply looked like the same generic greeting.
+
+**Root cause.** Four independent gaps made the `sim.chat` prompt degenerate:
+1. The Mod never sent `player_name` — `post_chat`/`post_hey` omitted it, so the prompt
+   rendered `"Trust with : 1"` / `"Message from : ..."`.
+2. `friendship` was never available — the full census (`_collect_full_sim_census`)
+   does not emit a per-sim friendship and the Mod did not send one, so
+   `sim.get("friendship", 0.0)` was always `0.0` → `trust` pinned at the lowest tier.
+3. The short-term chat buffer (`state.chat_buffers`) was written by
+   `append_chat_turn` but **never read** by `handle_chat`, so every message was
+   processed as a standalone greeting with no prior turns.
+4. The `user_phone_sms` prompt dropped `memories_text` (only `pc_chat` had it), so SMS
+   had no memory/backstory grounding.
+
+**Fix.**
+- Mod (`http_client.py`, `chat_ui.py`): resolve the hidden confidant's name and the
+  `sim ↔ confidant` friendship track and send both as `player_name`/`friendship`.
+- Sidecar (`services.handle_chat`): prefer the wire `friendship`, fall back to census;
+  pass `state.chat_turns(sim_id)` as `history` and the resolved family as `family`.
+- `llm/context.py` renders `history_hint` and `family_hint`; the locale `sim.chat`
+  templates now include history + memories for all three channels.
+
+## BUG-09 — relatives hallucinated because the family tree never reached the LLM ✅
+
+**Symptom.** An SMS Sim mentioned a brother that does not exist in the family tree.
+
+**Root cause.** `_collect_full_sim_census` attempted to read `rel.target_sim_id` and
+`rel.relationship_bits`, neither of which exists on TS4's `Relationship` object (it
+exposes `sim_id_a`/`sim_id_b` and `get_all_bits`). The `family_links` list was
+therefore always empty, and nothing in `build_chat_context`/`handle_chat` ever fed
+family data into the prompt — the model, asked to roleplay a real person with no
+family grounding, invented a sibling. (A second latent crash: `background_scheduler.
+priority_class` treated `family_links` as `list[int]` and would `int(dict)` on the
+real dict shape.)
+
+**Fix.**
+- Mod (`state_collector._collect_family_links`): use S4CL
+  `CommonRelationshipUtils.get_sim_info_of_all_sims_with_relationship_bit_generator`
+  with `instanced_only=False` and `CommonRelationshipBitId` to build a stable,
+  language-independent `[{target_sim_id, relationship}]` list.
+- Sidecar (`services._resolve_family` + `agent.chat.family_relation_label`): resolve
+  each edge to `{name, relation}` and inject a localized `family_hint`
+  ("Sua família: … Nunca invente parentes que não estejam listados aqui.").
+- Sidecar (`god.background_scheduler._family_link_ids`): accept both the canonical dict
+  shape and the legacy bare-int shape.
+
+## Verification performed (2026-10-03)
+
+- `cd sidecar && python -m pytest -q` → **647 passed** (10 new: chat history/family,
+  `family_relation_label`, dict-shape `family_links`, `services._resolve_family`).
+- `py -3.7 -m py_compile` on changed Mod files → clean.
+- `python -m py_compile` on changed Sidecar files → clean.
+
+---
+
+# Context-awareness pass (2026-10-03) — every interaction carries scene context
+
+> **Status:** ✅ CLOSED — the scene context (location / relationship / selected action)
+> is now collected and grounded into every dialogue path.
+> **Basis:** requirement review — "any interaction must consider context". Validated the
+> three paradigms (sim↔sim `sim.social`, player↔sim `sim.chat`, god↔sim `god.puppeteer`)
+> and found the setting, the pair relationship and the chosen interaction text were never
+> sent to the LLM.
+
+## BUG-10 — dialogues ignored location, relationship and the selected action ✅
+
+**Symptom.** The tone never changed between "chatting on a sofa at home" vs "outdoors in
+a public park with a stranger"; the specific pie-menu action (tell a joke / complain about
+the weather / kiss) and the queued follow-up action against the same Sim were invisible to
+the model, so dialogue could not reference what was actually happening.
+
+**Root cause.** The wire + prompt carried only mood/activity class-names:
+- The Mod reported `activity = interaction.__name__` (a Python class name, e.g.
+  `MixerInteraction`), never the localized menu title.
+- No venue / indoor-outdoor / home-away signals were collected.
+- No per-pair friendship/romance was read from the imported relationship edges.
+- `build_social_context`/`build_chat_context`/`run_puppeteer` never carried any of this.
+
+**Fix.**
+- Mod (`state_collector`): collect per-Sim `is_outside`/`is_at_home`, the localized
+  `interaction_text` (via `LocalizationHelperTuning.get_raw_text(display_name)`), and
+  `queued_interaction_texts`; collect zone `venue_type`/`is_residential`.
+- Mod (`http_client`/`main`): send `venue` on the autonomy tick; store it in
+  `state.zone_context`.
+- Sidecar (`agent.social`): add `location_context` / `relationship_context` /
+  `action_context` + `relationship_tier` (stranger→acquaintance→friend→close→family).
+- Sidecar (`services`): `sim.social` now passes location + relationship + action;
+  `sim.chat` passes location + action (on top of family/history/trust from BUG-08/09).
+- Sidecar (`god.puppeteer.run_puppeteer`): ground the orchestrated approach in the same
+  scene context.
+- `llm/context.py`: renders `location_hint` / `relationship_hint` / `action_hint` (and the
+  previously-unused `asymmetric_directive` for catalyst puppeteering) into the prompts.
+- Locales: added `enums.inside_outside`/`home_away`/`relationship`/`venue` and the hint
+  anchors in en-US + pt-BR.
+
+### Native relationship feedback (friendship/rivalry delta)
+
+The in-game outcome of an interaction (friendship up/down, rivalry up) is read **before**
+the prompt is sent, so the tone follows the real feedback:
+
+- Mod (`state_collector`): when a social target is resolved, read the fresh
+  `social_friendship`/`social_romance` via `CommonRelationshipUtils` and report them in
+  the delta.
+- Sidecar (`agent.social.relationship_context`): compare the fresh value against the census
+  baseline and derive `friendship_delta`/`romance_delta`; `relationship_tier` now maps
+  negative friendship to `rival`.
+- `llm/context.py`: renders the delta, e.g. `Relação: amigos, amizade 45 (+5)` or
+  `Relação: rivais, amizade -22 (-8)`.
+
+## Verification performed (2026-10-03)
+
+- `cd sidecar && python -m pytest -q` → **656 passed** (9 new: scene-context helpers,
+  `build_social_context` location/relationship/action, native feedback delta).
+- `py -3.7 -m py_compile` on changed Mod files → clean.
+- `python -m py_compile` on changed Sidecar files → clean.

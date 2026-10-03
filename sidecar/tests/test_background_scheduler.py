@@ -115,6 +115,27 @@ def test_priority_class_related_reverse_lookup():
     assert priority_class(state, sim2, active_sim_id=None) == "RELATED"
 
 
+def test_priority_class_family_links_dict_shape():
+    """RELATED works with the canonical dict-shape family_links (census).
+
+    The census stores ``family_links`` as ``[{"target_sim_id": int, "relationship": str}]``;
+    the legacy bare-int shape must also keep working. A dict entry must never raise
+    ``int(dict)`` inside priority_class.
+    """
+    census = [
+        (1, {"sim_id": 1, "is_player": True, "household_id": 10,
+             "family_links": [{"target_sim_id": 2, "relationship": "sibling"}]}),
+        (2, {"sim_id": 2, "is_player": False, "household_id": 20,
+             "family_links": [{"target_sim_id": 1, "relationship": "sibling"}]}),
+        (3, {"sim_id": 3, "is_player": False, "household_id": 30, "family_links": []}),
+    ]
+    state = FakeState(census)
+
+    sim2 = {"sim_id": 2, "is_player": False, "household_id": 20,
+            "family_links": [{"target_sim_id": 1, "relationship": "sibling"}]}
+    assert priority_class(state, sim2, active_sim_id=3) == "RELATED"
+
+
 def test_priority_class_other_default():
     """OTHER when no other criteria match."""
     census = [

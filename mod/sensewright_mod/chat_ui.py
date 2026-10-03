@@ -117,10 +117,16 @@ def _on_chat_submitted(input_text, sim_info, channel, player_id, save_id, world_
     sim_id = sim_info.id
     trace_id = generate_trace_id()
 
+    # Resolve the player identity (hidden confidant SimInfo) and the friendship
+    # between this sim and the player. Without these the sidecar prompt renders
+    # "Trust with : 1" and "Message from : ...", which produced the same generic
+    # reply every time.
+    player_name, friendship = _get_player_name_and_friendship(sim_info)
+
     # Diagnostic heartbeat: log the player message + channel so a session log
     # shows whether the chat entry point fired and what it sent.
-    worker_log_info('chat submitted: sim={} channel={} msg="{}"'.format(
-        sim_info.full_name, channel, input_text.strip()[:80]))
+    worker_log_info('chat submitted: sim={} channel={} player={} friendship={} msg="{}"'.format(
+        sim_info.full_name, channel, player_name, friendship, input_text.strip()[:80]))
 
     # Show typing balloon immediately
     _show_typing_balloon(sim_info)
@@ -136,9 +142,39 @@ def _on_chat_submitted(input_text, sim_info, channel, player_id, save_id, world_
 
     # Send to sidecar (callback is dispatched on the main thread by GAME_TICK)
     if channel == 'phone_sms':
-        post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, input_text.strip(), lang, callback=_on_response)
+        post_hey(trace_id, sim_id, player_id, save_id, world_sim_tick, input_text.strip(), lang,
+                 callback=_on_response, player_name=player_name, friendship=friendship)
     else:
-        post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, input_text.strip(), lang, callback=_on_response)
+        post_chat(trace_id, sim_id, channel, player_id, save_id, world_sim_tick, input_text.strip(), lang,
+                  callback=_on_response, player_name=player_name, friendship=friendship)
+
+
+def _get_player_name_and_friendship(sim_info):
+    """Return (player_name, friendship) for the chat target sim.
+
+    The player is represented in-game by the hidden confidant SimInfo; its first
+    name is the player's identity and the friendship track between the target sim
+    and the confidant is the trust value the sidecar should use. Both degrade to
+    safe defaults so a missing confidant can never break the chat flow.
+    """
+    player_name = ''
+    friendship = None
+    try:
+        from sensewright_mod.native_hooks import get_player_confidant_sim_id
+        confidant_id = get_player_confidant_sim_id()
+        if confidant_id and confidant_id > 0:
+            confidant_info = services.sim_info_manager().get(confidant_id)
+            if confidant_info is not None:
+                player_name = _safe_getattr(confidant_info, 'first_name', None) or \
+                    _safe_getattr(confidant_info, 'full_name', '') or ''
+                try:
+                    from sims4communitylib.utils.sims.common_relationship_utils import CommonRelationshipUtils
+                    friendship = CommonRelationshipUtils.get_friendship_level(sim_info, confidant_info)
+                except Exception:
+                    friendship = None
+    except Exception as e:
+        log_exception('Failed to resolve player identity for chat: {}'.format(e))
+    return player_name, friendship
 
 
 def _on_chat_cancelled(sim_info):

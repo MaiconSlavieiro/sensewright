@@ -217,3 +217,61 @@ class TestReactionSimId:
         callback(types.SimpleNamespace(data={"intents": ["not-a-dict", None]}))
 
         assert state.drain_intents() == []
+
+
+# ── chat family grounding ──────────────────────────────────────────────────
+class TestResolveFamily:
+    """The chat prompt must ground relatives from the census family_links."""
+
+    def test_resolves_named_family_edges(self):
+        from sensewright_sidecar import services
+
+        state = get_state()
+        state.update_census({
+            1: {"sim_id": 1, "name": "Bob",
+                "family_links": [
+                    {"target_sim_id": 2, "relationship": "sibling"},
+                    {"target_sim_id": 3, "relationship": "parent"},
+                ]},
+            2: {"sim_id": 2, "name": "Carol"},
+            3: {"sim_id": 3, "name": "Derek"},
+        })
+        family = services._resolve_family(state, 1)
+        assert family == [
+            {"name": "Carol", "relation": "sibling"},
+            {"name": "Derek", "relation": "parent"},
+        ]
+
+    def test_skips_missing_targets_and_self(self):
+        from sensewright_sidecar import services
+
+        state = get_state()
+        state.update_census({
+            1: {"sim_id": 1, "name": "Bob",
+                "family_links": [
+                    {"target_sim_id": 2, "relationship": "sibling"},
+                    {"target_sim_id": 1, "relationship": "parent"},
+                    {"target_sim_id": 999, "relationship": "cousin"},
+                ]},
+            2: {"sim_id": 2, "name": "Carol"},
+        })
+        family = services._resolve_family(state, 1)
+        assert family == [{"name": "Carol", "relation": "sibling"}]
+
+    def test_legacy_int_links(self):
+        from sensewright_sidecar import services
+
+        state = get_state()
+        state.update_census({
+            1: {"sim_id": 1, "name": "Bob", "family_links": [2]},
+            2: {"sim_id": 2, "name": "Carol"},
+        })
+        family = services._resolve_family(state, 1)
+        assert family == [{"name": "Carol", "relation": ""}]
+
+    def test_no_links_returns_empty(self):
+        from sensewright_sidecar import services
+
+        state = get_state()
+        state.update_census({1: {"sim_id": 1, "name": "Bob", "family_links": []}})
+        assert services._resolve_family(state, 1) == []

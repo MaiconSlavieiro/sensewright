@@ -254,6 +254,57 @@ def _get_room_id(sim_info):
     return 0
 
 
+def _get_interaction_text(interaction):
+    """Return the localized display text of an interaction (menu title).
+
+    Falls back to the Python class name when the localized string cannot be
+    resolved, so the caller always gets a usable action label.
+    """
+    if interaction is None:
+        return ''
+    try:
+        from sims4.localization import LocalizationHelperTuning
+        display_name = _safe_getattr(interaction, 'display_name', None)
+        if display_name is not None:
+            text = LocalizationHelperTuning.get_raw_text(display_name)
+            if text:
+                return str(text)
+    except Exception:
+        pass
+    try:
+        short = _safe_getattr(interaction, '__name__', None)
+        if short:
+            return str(short)
+    except Exception:
+        pass
+    return str(interaction)
+
+
+def _get_sim_location_flags(sim_info):
+    """Return ``(is_outside, is_at_home)`` for a sim, both degrading to False."""
+    is_outside = False
+    is_at_home = False
+    try:
+        from sims4communitylib.utils.sims.common_sim_location_utils import CommonSimLocationUtils
+        is_outside = bool(CommonSimLocationUtils.is_outside(sim_info))
+        is_at_home = bool(CommonSimLocationUtils.is_at_home(sim_info))
+    except Exception:
+        pass
+    return is_outside, is_at_home
+
+
+def _get_venue_context():
+    """Return ``{'venue_type': str, 'is_residential': bool}`` for the active zone."""
+    try:
+        from sims4communitylib.utils.location.common_location_utils import CommonLocationUtils
+        venue_type = CommonLocationUtils.get_current_venue_type()
+        name = _safe_getattr(venue_type, 'name', None) or str(venue_type)
+        is_residential = bool(CommonLocationUtils.is_current_venue_residential())
+        return {'venue_type': str(name), 'is_residential': is_residential}
+    except Exception:
+        return {'venue_type': '', 'is_residential': False}
+
+
 def _collect_sim_delta(sim_info):
     """Collect volatile state delta for a single sim."""
     if sim_info is None:
@@ -305,6 +356,7 @@ def _collect_sim_delta(sim_info):
 
         # Activity / Current interaction / conversation signal (BUG-01/BUG-02)
         activity = 'idle'
+        interaction_text = ''
         is_conversing = False
         social_target_sim_id = 0
         try:
@@ -321,6 +373,9 @@ def _collect_sim_delta(sim_info):
                     current_interaction = _safe_getattr(si, 'current_interaction', None)
                     if current_interaction is not None:
                         activity = _safe_getattr(current_interaction, '__name__', str(current_interaction))
+                        # The localized menu title (e.g. "Tell a Joke") grounds the
+                        # dialogue in the specific action the sim chose to perform.
+                        interaction_text = _get_interaction_text(current_interaction)
                         # 2. Fallback: resolve the interaction's Sim target directly.
                         if not is_conversing:
                             social_target_sim_id = _resolve_interaction_target_sim_id(current_interaction)
@@ -332,16 +387,41 @@ def _collect_sim_delta(sim_info):
         except Exception:
             pass
 
-        # Interaction queue length
+        # Interaction queue length + queued action labels (next actions the sim
+        # will perform; a queued social action against the same Sim must continue
+        # the dialogue with that context).
         queue_len = 0
+        queued_interaction_texts = []
         try:
-            sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
-            if sim is not None:
-                si_state = _safe_getattr(sim, 'si_state', None)
-                if si_state is not None:
-                    queue_len = len(_safe_getattr(si_state, 'interaction_queue', []))
+            from sims4communitylib.utils.sims.common_sim_interaction_utils import CommonSimInteractionUtils
+            queued = list(CommonSimInteractionUtils.get_queued_interactions_gen(sim_info))
+            queue_len = len(queued)
+            for queued_interaction in queued[:3]:
+                text = _get_interaction_text(queued_interaction)
+                if text:
+                    queued_interaction_texts.append(text)
         except Exception:
             pass
+
+        # Location flags (indoors vs outdoors, at home vs away) — the tone of a
+        # conversation depends on the setting.
+        is_outside, is_at_home = _get_sim_location_flags(sim_info)
+
+        # Native relationship feedback: the friendship/romance level between this
+        # sim and its social target. The game already applied the outcome of the
+        # interaction (friendship up/down, rivalry up); reading it fresh here lets
+        # the sidecar direct the conversation tone from the real in-game feedback.
+        social_friendship = None
+        social_romance = None
+        if social_target_sim_id:
+            try:
+                from sims4communitylib.utils.sims.common_relationship_utils import CommonRelationshipUtils
+                target_info = _get_sim_info(social_target_sim_id)
+                if target_info is not None:
+                    social_friendship = CommonRelationshipUtils.get_friendship_level(sim_info, target_info)
+                    social_romance = CommonRelationshipUtils.get_romance_level(sim_info, target_info)
+            except Exception:
+                pass
 
         # Is sleeping
         is_sleeping = False
@@ -397,6 +477,12 @@ def _collect_sim_delta(sim_info):
             'room_id': room_id,
             'pos': pos,
             'activity': activity,
+            'interaction_text': interaction_text,
+            'queued_interaction_texts': queued_interaction_texts,
+            'is_outside': is_outside,
+            'is_at_home': is_at_home,
+            'social_friendship': social_friendship,
+            'social_romance': social_romance,
             'is_conversing': is_conversing,
             'social_target_sim_id': social_target_sim_id,
             'queue': queue_len,
@@ -408,6 +494,54 @@ def _collect_sim_delta(sim_info):
     except Exception as e:
         log_exception('Error collecting sim delta for {}: {}'.format(sim_id, e))
         return None
+
+
+def _collect_family_links(sim_info):
+    """Collect the sim's family-tree edges as ``[{target_sim_id, relationship}]``.
+
+    Uses S4CL's relationship utilities so the collection is version-stable and
+    language-independent. Each edge stores a short canonical relation label
+    (``parent``, ``sibling``, ``child``, ``spouse``, …) that the sidecar renders
+    into the chat prompt, grounding the model so it does not hallucinate relatives
+    that do not exist in the genealogy.
+    """
+    family_links = []
+    if sim_info is None:
+        return family_links
+
+    try:
+        from sims4communitylib.utils.sims.common_relationship_utils import CommonRelationshipUtils
+        from sims4communitylib.enums.relationship_bits_enum import CommonRelationshipBitId
+
+        relation_map = (
+            (CommonRelationshipBitId.FAMILY_PARENT, 'parent'),
+            (CommonRelationshipBitId.FAMILY_BROTHER_SISTER, 'sibling'),
+            (CommonRelationshipBitId.FAMILY_SON_DAUGHTER, 'child'),
+            (CommonRelationshipBitId.FAMILY_GRANDCHILD, 'grandchild'),
+            (CommonRelationshipBitId.FAMILY_GRANDPARENT, 'grandparent'),
+            (CommonRelationshipBitId.FAMILY_AUNT_UNCLE, 'aunt_uncle'),
+            (CommonRelationshipBitId.FAMILY_COUSIN, 'cousin'),
+            (CommonRelationshipBitId.FAMILY_NIECE_NEPHEW, 'niece_nephew'),
+            (CommonRelationshipBitId.FAMILY_HUSBAND_WIFE, 'spouse'),
+            (CommonRelationshipBitId.FAMILY_STEP_SIBLING, 'step_sibling'),
+        )
+        seen = set()
+        for bit_id, label in relation_map:
+            try:
+                for target in CommonRelationshipUtils.get_sim_info_of_all_sims_with_relationship_bit_generator(
+                        sim_info, bit_id, instanced_only=False):
+                    target_id = _coerce_int(_safe_getattr(target, 'id', 0), 0)
+                    if target_id and target_id != sim_info.id and target_id not in seen:
+                        seen.add(target_id)
+                        family_links.append({'target_sim_id': target_id, 'relationship': label})
+            except Exception:
+                continue
+    except Exception:
+        # S4CL relationship utilities unavailable: degrade to no family data
+        # rather than guessing from fragile attribute names.
+        pass
+
+    return family_links
 
 
 def _collect_full_sim_census(sim_info):
@@ -471,21 +605,7 @@ def _collect_full_sim_census(sim_info):
             pass
 
         # Family links
-        family_links = []
-        try:
-            relationship_tracker = _safe_getattr(sim_info, 'relationship_tracker', None)
-            if relationship_tracker is not None:
-                for rel in _safe_getattr(relationship_tracker, 'relationships', []):
-                    target_id = _safe_getattr(rel, 'target_sim_id', 0)
-                    if target_id > 0:
-                        rel_bits = _safe_getattr(rel, 'relationship_bits', [])
-                        for bit in rel_bits:
-                            bit_name = _safe_getattr(bit, '__name__', str(bit))
-                            if 'family' in bit_name.lower() or 'parent' in bit_name.lower() or 'child' in bit_name.lower() or 'sibling' in bit_name.lower() or 'spouse' in bit_name.lower():
-                                family_links.append({'target_sim_id': target_id, 'relationship': bit_name})
-                                break
-        except Exception:
-            pass
+        family_links = _collect_family_links(sim_info)
 
         # Aspiration / ambition (P12 / plan task 2.2)
         aspiration = ''
@@ -730,6 +850,7 @@ def get_current_game_state():
         'player_confidant_sim_id': _get_player_confidant_sim_id(),
         'zone_id': _get_zone_id(),
         'save_id': _get_save_slot_guid(),
+        'venue': _get_venue_context(),
         'installed_packs': _get_installed_packs(),
         'detected_mods': _detect_compatible_mods()
     }

@@ -10,6 +10,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from ..agent.intents import normalize_intent
+from ..agent.social import action_context, location_context, relationship_context
 from ..state import AppState
 from .coordinator import set_catalyst_lease
 
@@ -25,6 +26,12 @@ def run_puppeteer(
     tick: int,
 ) -> Dict[str, Any]:
     """Run the puppeteer for a catalyst -> target approach and return intents."""
+    catalyst_sim = state.get_census(int(catalyst_id)) or {
+        "sim_id": int(catalyst_id), "name": catalyst_name,
+    }
+    target_sim = state.get_census(int(target_sim_id)) or {
+        "sim_id": int(target_sim_id), "name": target_name,
+    }
     context = {
         "sim_id": int(catalyst_id),
         "sim_name": catalyst_name,
@@ -34,6 +41,11 @@ def run_puppeteer(
         "catalyst_name": catalyst_name,
         "agent_name": target_name,
         "world_sim_tick": tick,
+        # Ground the orchestrated scene in the same context as sim.social: where
+        # this is happening, how the pair relate, and what they are doing.
+        "location": location_context(state, catalyst_sim, target_sim),
+        "relationship": relationship_context(state, catalyst_sim, target_sim),
+        "action": action_context(catalyst_sim, target_sim),
     }
     result = state.scheduler.run_purpose("god.puppeteer", context, lang)
     data = result.data or {}

@@ -54,6 +54,9 @@ class AppState:
         self.current_lang: str = ""
         self.census: Dict[int, Dict[str, Any]] = {}
         self.relationships: Dict[str, Dict[str, Any]] = {}
+        #: Zone/venue context reported by the Mod (venue_type, is_residential).
+        #: Used to ground social/chat prompts in the setting.
+        self.zone_context: Dict[str, Any] = {}
         #: Expansion packs installed in the running game (A10 / EP guards).
         self.installed_packs: set = set()
         #: Well-known compatible mods detected by the Mod scan (2.7 / FC5).
@@ -280,6 +283,7 @@ class AppState:
             self.player_lock_until = {}
             self.census = {}
             self.relationships = {}
+            self.zone_context = {}
             self.installed_packs = set()
             self.detected_mods = []
             self.rumors_cache = {}

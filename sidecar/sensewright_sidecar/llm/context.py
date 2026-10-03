@@ -83,7 +83,45 @@ class ContextAssembler:
         zeitgeist = context.get("zeitgeist_tags") or []
         if isinstance(zeitgeist, str):
             zeitgeist = [zeitgeist]
-        bias_archetypes = (engine.content(lang).get("anchors") or {}).get("bias_archetypes") or []
+        anchors = engine.content(lang).get("anchors") or {}
+        bias_archetypes = anchors.get("bias_archetypes") or []
+
+        family_text = self._family_text(context.get("family"))
+        history_text = self._history_text(context.get("history"))
+        family_hint = ""
+        if family_text:
+            family_hint = str(anchors.get("family_hint", "")).replace("{family_text}", family_text)
+        history_hint = ""
+        if history_text:
+            history_hint = str(anchors.get("history_hint", "")).replace("{history_text}", history_text)
+
+        location_text = self._location_text(context.get("location"), lang, engine)
+        relationship_text = self._relationship_text(context.get("relationship"), lang, engine)
+        action_text = self._action_text(context.get("action"), lang, engine)
+        location_hint = ""
+        if location_text:
+            location_hint = str(anchors.get("location_hint", "")).replace("{location_text}", location_text)
+        relationship_hint = ""
+        if relationship_text:
+            relationship_hint = str(anchors.get("relationship_hint", "")).replace("{relationship_text}", relationship_text)
+        action_hint = ""
+        if action_text:
+            action_hint = str(anchors.get("action_hint", "")).replace("{action_text}", action_text)
+
+        # Asymmetric directive: when a catalyst lease is in play, inject the
+        # god.puppeteer objective into the sim.social prompt so the puppet NPC
+        # drives the scene while the agent answers freely.
+        asymmetric_directive = ""
+        puppeteer_objective = context.get("puppeteer_objective", "")
+        if puppeteer_objective:
+            asymmetric_directive = engine.render_prompt(
+                "god.puppeteer", "asymmetric_directive", lang,
+                {
+                    "catalyst_name": context.get("catalyst_name", ""),
+                    "puppeteer_objective": puppeteer_objective,
+                    "agent_name": context.get("agent_name", ""),
+                },
+            ).strip()
 
         return {
             "sim_name": sim_name,
@@ -91,6 +129,7 @@ class ContextAssembler:
             "core_personality": profile.get("core_personality", ""),
             "current_demeanor": profile.get("current_demeanor", ""),
             "speech_style": profile.get("speech_style", ""),
+            "backstory": profile.get("backstory", ""),
             "age_label": engine.enum("age_stage", profile.get("age_stage") or context.get("age_stage"), lang, gender),
             "career_label": context.get("career_label", ""),
             "mood_label": engine.enum("mood", context.get("mood"), lang, gender),
@@ -98,6 +137,14 @@ class ContextAssembler:
             "trust_label": str(trust),
             "message": context.get("message", ""),
             "memories_text": self._memories_text(context.get("memories"), lang),
+            "history_text": history_text,
+            "family_text": family_text,
+            "family_hint": family_hint,
+            "history_hint": history_hint,
+            "location_hint": location_hint,
+            "relationship_hint": relationship_hint,
+            "action_hint": action_hint,
+            "asymmetric_directive": asymmetric_directive,
             "surrealism_index": str(context.get("surrealism_index", "0.5")),
             "zeitgeist_tags": ", ".join(zeitgeist),
             "target_name": context.get("target_name", ""),
@@ -107,6 +154,104 @@ class ContextAssembler:
             "mood_options": ", ".join(engine.enum_keys("mood", lang)),
             "bias_options": ", ".join(str(a) for a in bias_archetypes),
         }
+
+    def _location_text(self, location: Any, lang: str, engine: Any) -> str:
+        """Render the setting (venue, indoor/outdoor, home/away) as text."""
+        if not isinstance(location, dict) or not location:
+            return ""
+        parts = []
+        is_outside = location.get("is_outside")
+        if is_outside is not None:
+            parts.append(engine.enum("inside_outside", "outside" if is_outside else "inside", lang))
+        is_at_home = location.get("is_at_home")
+        if is_at_home is not None:
+            parts.append(engine.enum("home_away", "home" if is_at_home else "away", lang))
+        venue = location.get("venue")
+        if venue:
+            parts.append(engine.enum("venue", str(venue), lang))
+        return ", ".join(parts)
+
+    def _relationship_text(self, relationship: Any, lang: str, engine: Any) -> str:
+        """Render the pair relationship (tier + friendship/romance + native delta)."""
+        if not isinstance(relationship, dict) or not relationship:
+            return ""
+        anchors = engine.content(lang).get("anchors") or {}
+        parts = []
+        tier = relationship.get("tier", "")
+        if tier:
+            label = engine.enum("relationship", str(tier), lang)
+            if label:
+                parts.append(str(label))
+        friendship = relationship.get("friendship")
+        if friendship is not None:
+            friendship_hint = anchors.get("relationship_friendship_hint", "friendship {value}")
+            text = str(friendship_hint).replace("{value}", str(int(round(float(friendship)))))
+            delta = relationship.get("friendship_delta")
+            if delta not in (None, 0, 0.0):
+                delta_hint = anchors.get("relationship_delta_hint", " ({value})")
+                sign = "+" if float(delta) > 0 else "-"
+                text += str(delta_hint).replace("{value}", "{}{}".format(sign, abs(int(round(float(delta))))))
+            parts.append(text)
+        romance = relationship.get("romance")
+        if romance not in (None, 0, 0.0):
+            romance_hint = anchors.get("relationship_romance_hint", "romance {value}")
+            text = str(romance_hint).replace("{value}", str(int(round(float(romance)))))
+            rdelta = relationship.get("romance_delta")
+            if rdelta not in (None, 0, 0.0):
+                delta_hint = anchors.get("relationship_delta_hint", " ({value})")
+                sign = "+" if float(rdelta) > 0 else "-"
+                text += str(delta_hint).replace("{value}", "{}{}".format(sign, abs(int(round(float(rdelta))))))
+            parts.append(text)
+        return ", ".join(parts)
+
+    def _action_text(self, action: Any, lang: str, engine: Any) -> str:
+        """Render the selected/queued interaction menu text for the actor(s)."""
+        if not isinstance(action, dict) or not action:
+            return ""
+        next_anchor = (engine.content(lang).get("anchors") or {}).get("action_next_hint", "next: {value}")
+        parts = []
+        for prefix in ("a", "b"):
+            name = action.get("{}_name".format(prefix), "")
+            current = action.get("{}_current".format(prefix), "")
+            if current:
+                parts.append("{}: {}".format(name or "Sim", current))
+            for queued in action.get("{}_queued".format(prefix)) or []:
+                if queued:
+                    parts.append(str(next_anchor).replace("{value}", str(queued)))
+        return "; ".join(parts)
+
+    def _history_text(self, history: Any) -> str:
+        """Render the short-term chat buffer as a readable transcript."""
+        if not isinstance(history, list) or not history:
+            return ""
+        parts = []
+        for turn in history[-6:]:
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get("role", "")
+            content = turn.get("content", "")
+            if not content:
+                continue
+            if role == "assistant":
+                parts.append("You: {}".format(content))
+            else:
+                parts.append("Player: {}".format(content))
+        return "\n".join(parts)
+
+    def _family_text(self, family: Any) -> str:
+        """Render resolved family edges as ``name (relation)`` pairs."""
+        if not isinstance(family, list) or not family:
+            return ""
+        parts = []
+        for member in family:
+            if not isinstance(member, dict):
+                continue
+            name = member.get("name", "")
+            if not name:
+                continue
+            relation = member.get("relation", "")
+            parts.append("{} ({})".format(name, relation) if relation else str(name))
+        return ", ".join(parts)
 
     def _memories_text(self, memories: Any, lang: str) -> str:
         if not isinstance(memories, list) or not memories:
@@ -144,6 +289,7 @@ class ContextAssembler:
             "message", "event", "target", "directives", "active_arc", "zeitgeist",
             "dream_urge", "schedule_blocks", "obligatory_tasks", "native_wants",
             "relationship", "rumor", "player_facts", "scene_subtext", "puppeteer_objective",
+            "location", "action", "family", "history",
         ):
             if key in context:
                 payload[key] = context[key]

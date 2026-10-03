@@ -8,6 +8,53 @@ that remain. Complements [`status.md`](status.md) (spec↔code gap) and [`bugs.m
 
 ---
 
+## 2026-10-03 — Chat grounding + context-aware dialogue + native relationship feedback
+
+Requirement review: "any interaction must consider context", plus the native
+relationship feedback of a sim↔sim interaction, must be grounded into the LLM prompt.
+Closed **BUG-08/09/10** (see [`bugs.md`](bugs.md)).
+
+### A. Chat grounding (player↔sim `sim.chat`)
+
+| # | Change | Files |
+|---|--------|-------|
+| 1 | The Mod now sends `player_name` (hidden confidant) + `friendship` (sim↔confidant) on `/chat` and `/hey`, so the prompt no longer renders "Trust with : 1" / "Message from : …". | `mod/sensewright_mod/http_client.py`, `chat_ui.py` |
+| 2 | `handle_chat` prefers the wire friendship, falls back to census, and passes the short-term chat buffer (`state.chat_turns`) as `history`. | `sidecar/.../services.py` |
+| 3 | `build_chat_context` accepts `history`/`family`/`location`/`action`; `sim.chat` prompt now includes history + memories for all channels. | `agent/chat.py`, `llm/context.py`, `locales/content/*.json` |
+
+### B. Family-tree grounding (BUG-09)
+
+- `_collect_full_sim_census` read nonexistent `Relationship.target_sim_id`/`relationship_bits`;
+  replaced with S4CL `CommonRelationshipUtils` + `CommonRelationshipBitId` (stable, instanced=False).
+- `services._resolve_family` + `agent.chat.family_relation_label` inject a localized
+  `family_hint` ("Sua família: … Nunca invente parentes…"). `background_scheduler._family_link_ids`
+  now accepts both dict and legacy int shapes (was `int(dict)` crash). | `state_collector.py`, `services.py`, `agent/chat.py`, `god/background_scheduler.py` |
+
+### C. Scene context (BUG-10) — location / relationship / selected action
+
+- Mod collects `is_outside`/`is_at_home`, localized `interaction_text`
+  (`LocalizationHelperTuning.get_raw_text(display_name)`) and `queued_interaction_texts`,
+  plus zone `venue_type`/`is_residential` (sent on the autonomy tick). | `state_collector.py`, `http_client.py`, `main.py` |
+- Sidecar adds `location_context`/`relationship_context`/`action_context` +
+  `relationship_tier`; `sim.social`, `sim.chat` and `god.puppeteer.run_puppeteer` now carry
+  the scene context. `llm/context.py` renders `location_hint`/`relationship_hint`/`action_hint`
+  and the previously-unused `asymmetric_directive`. | `agent/social.py`, `services.py`, `god/puppeteer.py`, `llm/context.py`, `state.py`, `locales/content/*.json` |
+
+### D. Native relationship feedback (friendship/rivalry delta)
+
+- Mod reports fresh `social_friendship`/`social_romance` when a social target is resolved.
+- `relationship_context` derives `friendship_delta`/`romance_delta` vs the census baseline;
+  `relationship_tier` maps negative friendship to `rival`; the prompt renders
+  e.g. `Relação: amigos, amizade 45 (+5)` / `Relação: rivais, amizade -22 (-8)`. | `state_collector.py`, `agent/social.py`, `llm/context.py`, `locales/content/*.json` |
+
+### Verification
+
+- `cd sidecar && python -m pytest -q` → **656 passed** (19 new across the three waves).
+- `py -3.7 -m py_compile` over changed Mod files → clean.
+- `python -m py_compile` over changed Sidecar files → clean.
+
+---
+
 ## 2026-10-03 — Review hardening + Web Studio / Director / background fixes
 
 ### A. Code-review hardening (review of `a314bbf`)

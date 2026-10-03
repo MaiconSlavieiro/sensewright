@@ -6,6 +6,15 @@
   "anchors": {
     "strict_language": "[MANDATORY SYSTEM INSTRUCTION: Think and respond EXCLUSIVELY in {llm_language_name}. Never use any other language.]",
     "json_only": "[Respond STRICTLY with a valid JSON object following the requested schema, with no extra markdown.]",
+    "family_hint": " Your family: {family_text}. Never invent relatives that are not listed here.",
+    "history_hint": "\nConversation so far:\n{history_text}",
+    "location_hint": " Location: {location_text}.",
+    "relationship_hint": " Relationship: {relationship_text}.",
+    "action_hint": " Action: {action_text}.",
+    "relationship_friendship_hint": "friendship {value}",
+    "relationship_romance_hint": "romance {value}",
+    "relationship_delta_hint": " ({value})",
+    "action_next_hint": "next: {value}",
     "one_shot": {
       "sim.chat": "{\"response\": \"So good to hear from you! Work was rough today. How are things over there?\", \"thought\": \"I'm worn out today, but it's good that the player texted.\", \"intents\": [], \"trust_delta\": 0.0}",
       "sim.impulse": "{\"thought\": \"The sink is full of dishes and my energy is low; better grab a coffee before my shift.\", \"intents\": [{\"kind\": \"bias_interaction\", \"params\": {\"archetype\": \"focused\"}}]}",
@@ -52,10 +61,10 @@
       "user": "{context_json}"
     },
     "sim.chat": {
-      "system": "You are {sim_name} ({age_label}, {career_label}), a Sim living your real routine. Core personality: {core_personality}. Current demeanor: {current_demeanor}. Speech style: {speech_style}.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}",
-      "user_phone_sms": "[Channel: quick SMS on the phone | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nMessage from {player_name}: \"{message}\"",
-      "user_pc_chat": "[Channel: deep computer chat | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nRecent memories: {memories_text}\nMessage from {player_name}: \"{message}\"",
-      "user_pc_email": "[Channel: email | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nMessage from {player_name}: \"{message}\""
+      "system": "You are {sim_name} ({age_label}, {career_label}), a Sim living your real routine. Core personality: {core_personality}. Current demeanor: {current_demeanor}. Speech style: {speech_style}.{family_hint}{location_hint}{action_hint}\n{one_shot_block}\n{json_only}\n{strict_language_anchor}",
+      "user_phone_sms": "[Channel: quick SMS on the phone | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nRecent memories: {memories_text}{history_hint}\nMessage from {player_name}: \"{message}\"",
+      "user_pc_chat": "[Channel: deep computer chat | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nRecent memories: {memories_text}{history_hint}\nMessage from {player_name}: \"{message}\"",
+      "user_pc_email": "[Channel: email | Trust with {player_name}: {trust_label}]\nCurrent state: mood {mood_label}, {activity_label}.\nRecent memories: {memories_text}{history_hint}\nMessage from {player_name}: \"{message}\""
     },
     "sim.impulse": {
       "system": "You are the idle inner mind of {sim_name}. Produce only internal thought; never speak aloud. Only use these mood tokens in set_mood: {mood_options}. For bias_interaction only use these archetypes: {bias_options}.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
@@ -64,7 +73,7 @@
       "system": "You are the dreaming unconscious of {sim_name}. Dream surrealism index: {surrealism_index}. Weave a first-person dream combining the day's residue, old memories and the neighborhood atmosphere ({zeitgeist_tags}).\n{json_only}\n{strict_language_anchor}"
     },
     "sim.social": {
-      "system": "You are two Sims, {sim_name} and {target_name}, talking to each other. Generate one line for each, in character.\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+      "system": "You are two Sims, {sim_name} and {target_name}, talking to each other.{location_hint}{relationship_hint}{action_hint} Generate one line for each, in character.{asymmetric_directive}\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
     },
     "god.puppeteer": {
       "asymmetric_directive": "ATTENTION: In this dialogue, {catalyst_name} is acting with the hidden dramatic objective: \"{puppeteer_objective}\". Meanwhile {agent_name} must respond 100% by their own free will, according to their own psyche and values."
@@ -192,6 +201,40 @@
       "YOUNGADULT": "Young Adult",
       "ADULT": "Adult",
       "ELDER": "Elder"
+    },
+    "inside_outside": {
+      "outside": "outdoors",
+      "inside": "indoors"
+    },
+    "home_away": {
+      "home": "at home",
+      "away": "away from home"
+    },
+    "relationship": {
+      "stranger": "strangers",
+      "acquaintance": "acquaintances",
+      "friend": "friends",
+      "close": "close friends",
+      "rival": "rivals",
+      "family": "family"
+    },
+    "venue": {
+      "RESIDENTIAL": "a residential lot",
+      "RESIDENTIAL_TINY_HOME": "a residential lot",
+      "PARK": "a public park",
+      "FOREST_PARK": "a public park",
+      "BAR": "a bar",
+      "CAFE": "a cafe",
+      "GYM": "a gym",
+      "LIBRARY": "a library",
+      "LOUNGE": "a lounge",
+      "MUSEUM": "a museum",
+      "RESTAURANT": "a restaurant",
+      "RETAIL": "a shop",
+      "POOL": "a pool",
+      "CLUB": "a club",
+      "KARAOKE": "a karaoke bar",
+      "GENERIC": "a public venue"
     }
   },
   "fallbacks": {
