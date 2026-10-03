@@ -60,7 +60,9 @@ _OWNED_NAMES = {
     "bias_social": "buff_bias_social",
     # Emotion buffs that actually hold a mood (mood_type + mood_weight). The
     # native mood statistic cannot be set directly, so set_mood applies these.
-    "mood_buff_fine": "buff_mood_fine",
+    # NOTE: "fine" is intentionally absent — it is the neutral default mood, and
+    # a buff holding Mood_Fine has no client MoodKey (floods lastUIException with
+    # `BuffInfo/MoodKey()` null references).
     "mood_buff_happy": "buff_mood_happy",
     "mood_buff_sad": "buff_mood_sad",
     "mood_buff_angry": "buff_mood_angry",
@@ -75,9 +77,10 @@ _OWNED_NAMES = {
     "mood_buff_energized": "buff_mood_energized",
 }
 
-#: Semantic mood keys that have a dedicated emotion buff.
+#: Semantic mood keys that have a dedicated emotion buff. "fine" (neutral) is
+#: deliberately excluded: it has no client MoodKey and needs no buff.
 _MOOD_BUFF_KEYS = (
-    "fine", "happy", "sad", "angry", "tense", "flirty", "inspired",
+    "happy", "sad", "angry", "tense", "flirty", "inspired",
     "focused", "dazed", "bored", "uncomfortable", "confident", "energized",
 )
 

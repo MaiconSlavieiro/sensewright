@@ -161,6 +161,7 @@ class TestChatEndpoints:
         })
         assert response.status_code == 200
         data = response.json()
+        assert data["ok"] is True
         assert "response" in data
         assert isinstance(data["response"], str)
         assert len(data["response"]) > 0  # Fallback should be non-empty
@@ -186,6 +187,7 @@ class TestChatEndpoints:
         })
         assert response.status_code == 200
         data = response.json()
+        assert data["ok"] is True
         assert "response" in data
         assert len(data["response"]) > 0
 

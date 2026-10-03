@@ -256,7 +256,12 @@ class GameLever(object):
 
     @staticmethod
     def _execute_approach(sim_id, target_sim_id, params):
-        """Route sim to target sim."""
+        """Route sim to target sim.
+
+        BUG-04 fix: ``Sim.push_route_to_target`` does not exist on the engine's
+        ``Sim`` object (``object_sim``). S4CL exposes a stable ``send_near_position``
+        that enqueues the vanilla Go-Here interaction toward the target's block.
+        """
         if target_sim_id is None:
             return False, {'error': 'no_target'}
 
@@ -271,10 +276,13 @@ class GameLever(object):
             return False, {'error': 'not_instanced'}
 
         try:
-            # Push route interaction
-            from sims.sim import Sim
-            sim.push_route_to_target(target, routing_surface=target.routing_surface)
-            return True, {'routed': True}
+            from sims4communitylib.utils.sims.common_sim_location_utils import CommonSimLocationUtils
+            position = CommonSimLocationUtils.get_position(target_info)
+            level = CommonSimLocationUtils.get_surface_level(target_info)
+            result = CommonSimLocationUtils.send_near_position(sim_info, position, level)
+            if result is not None and getattr(result, 'is_success', True):
+                return True, {'routed': True}
+            return False, {'error': 'approach_failed', 'details': str(result)}
         except Exception as e:
             log_exception('Approach execution error: {}'.format(e))
             return False, {'error': 'approach_failed'}
@@ -284,6 +292,13 @@ class GameLever(object):
         """Apply a mood to sim (Types.MOOD statistic)."""
         mood = params.get('mood', '')
         duration = params.get('duration_sim_minutes', 60)
+
+        # BUG-07: "fine"/neutral means "no mood change". There is no emotion buff
+        # for it (Mood_Fine has no client MoodKey), so treat it as a clean no-op
+        # instead of failing the intent.
+        token = _normalize_token(mood)
+        if token == 'fine' or _MOOD_ALIASES.get(token) == 'fine':
+            return True, {'neutral': True, 'note': 'no_mood_change'}
 
         mood_id = ArchetypeResolver.resolve_mood(mood)
         if mood_id is None:

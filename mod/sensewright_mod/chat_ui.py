@@ -11,7 +11,7 @@ from sims4communitylib.dialogs.common_choice_outcome import CommonChoiceOutcome
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
 from sims4communitylib.modinfo import ModInfo
 
-from sensewright_mod.debug_log import log_error, log_exception, log_info
+from sensewright_mod.debug_log import log_error, log_exception, log_info, worker_log_info
 from sensewright_mod.http_client import post_chat, post_hey, generate_trace_id
 from sensewright_mod.i18n import t, get_current_language
 from sensewright_mod.native_hooks import (
@@ -117,6 +117,11 @@ def _on_chat_submitted(input_text, sim_info, channel, player_id, save_id, world_
     sim_id = sim_info.id
     trace_id = generate_trace_id()
 
+    # Diagnostic heartbeat: log the player message + channel so a session log
+    # shows whether the chat entry point fired and what it sent.
+    worker_log_info('chat submitted: sim={} channel={} msg="{}"'.format(
+        sim_info.full_name, channel, input_text.strip()[:80]))
+
     # Show typing balloon immediately
     _show_typing_balloon(sim_info)
 
@@ -149,6 +154,9 @@ def _handle_chat_response(response, trace_id, sim_info, channel, player_id, save
     _hide_typing_balloon(sim_info)
 
     if not response or not response.get('ok', False):
+        # Diagnostic heartbeat: log the failed response so a session log shows
+        # whether the sidecar replied at all (vs. the notification failing).
+        worker_log_info('chat response FAILED: sim={} resp={}'.format(sim_info.full_name, response))
         # Show error notification
         _show_error_notification(sim_info, t('chat.error_failed'))
         return
@@ -159,6 +167,10 @@ def _handle_chat_response(response, trace_id, sim_info, channel, player_id, save
     trust_delta = response.get('trust_delta', 0)
     deferred = response.get('deferred', False)
     message_key = response.get('message_key', None)
+
+    # Diagnostic heartbeat: confirm a non-empty reply reached the client.
+    worker_log_info('chat response: sim={} deferred={} len={} intents={}'.format(
+        sim_info.full_name, deferred, len(response_text), len(intents)))
 
     # Extract thought if embedded in response
     if not thought:
@@ -261,6 +273,9 @@ def start_chat(sim_info, channel='phone_sms'):
     """Start a chat session with a sim."""
     if sim_info is None:
         return False
+
+    # Diagnostic heartbeat: confirm the chat entry point fired.
+    worker_log_info('chat entry point: sim={} channel={}'.format(sim_info.full_name, channel))
 
     # Ensure player confidant exists
     confidant = get_or_create_player_confidant()

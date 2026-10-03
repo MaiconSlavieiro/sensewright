@@ -140,9 +140,15 @@ class SensewrightService(object):
         try:
             from sensewright_mod.http_client import post_autonomy_tick, generate_trace_id
             from sensewright_mod.native_hooks import get_player_confidant_sim_id
+            from sensewright_mod.lifecycle_hooks import mark_lifecycle_ready
 
             state = get_current_game_state()
             trace_id = generate_trace_id()
+
+            # BUG-05: the first pulse means the save is fully loaded and the clock
+            # is running; only now do real lifecycle events (death/marriage/birth)
+            # become meaningful. Absorbs the load-time rehydration burst.
+            mark_lifecycle_ready()
 
             # Collect sims delta
             sims_delta = collect_sims_delta()

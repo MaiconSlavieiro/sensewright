@@ -935,8 +935,15 @@ def _reaction_callback(state: AppState, sim_id: int, category: str, tick: int):
             data = result.data or {}
             out: List[Dict[str, Any]] = []
             for raw in (data.get("intents", []) or []):
-                if isinstance(raw, dict):
-                    out.append(normalize_intent(raw, default_source="agent"))
+                if not isinstance(raw, dict):
+                    continue
+                intent = normalize_intent(raw, default_source="agent")
+                # The reaction is the causer's own mind: never trust a sim_id the
+                # model may have hallucinated (mirrors _impulse_callback). Without
+                # this, `speak` intents carried sim_id=0 and were dropped by the
+                # Mod as `sim_not_found`.
+                intent["sim_id"] = int(sim_id)
+                out.append(intent)
             if out:
                 state.enqueue_intents(out)
         except Exception:  # noqa: BLE001
@@ -1074,6 +1081,8 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         gate = preflight(sim_a, sim_b, active_sim_id)
         a_id = int(sim_a.get("sim_id", 0))
         b_id = int(sim_b.get("sim_id", 0))
+        if gate.get("ok"):
+            logger.info("sim.social pair %s/%s gate=%s", a_id, b_id, gate)
         if gate.get("ok") and _speech_allowed(state, [a_id, b_id], time.time()):
             rumor = _pick_rumor(state, sim_a, sim_b)
             # F04/P18: if one of the pair holds a catalyst lease, route the
@@ -1280,6 +1289,7 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
     if is_deferred(sim, channel):
         return {
+            "ok": True,
             "response": render_fallback("sim.chat", lang, {"sim_name": sim.get("name", "")}).get("response", ""),
             "thought": "",
             "intents": [],
@@ -1312,6 +1322,7 @@ def handle_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     state.enqueue_intents(intents)
 
     return {
+        "ok": True,
         "response": response,
         "thought": "",
         "intents": intents,

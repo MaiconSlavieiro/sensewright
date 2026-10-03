@@ -24,6 +24,23 @@ _MARRIAGE_MARKERS = ('married', 'spouse', 'fiance', 'engaged', 'soulmate')
 _known_marriage_pairs = set()
 _suppress_marriage_events = [False]
 
+#: BUG-05: the load-time rehydration burst (relationship bits + pregnancy/death
+#: callbacks) fires before the worker thread starts, flooding the realtime lane
+#: (66 dropped events in the playtest). Until the first autonomy pulse marks the
+#: session ready, lifecycle events are absorbed instead of posted.
+_lifecycle_ready = [False]
+_suppress_logged = [False]
+
+
+def mark_lifecycle_ready():
+    """Enable lifecycle event posting (called after the first autonomy pulse)."""
+    _lifecycle_ready[0] = True
+    log_info('lifecycle: session ready, events enabled')
+
+
+def is_lifecycle_ready():
+    return _lifecycle_ready[0]
+
 
 def begin_marriage_snapshot():
     """Enter the census window: absorb existing marriage bits without events."""
@@ -57,6 +74,13 @@ def _sim_id(sim_info):
 def _post_lifecycle(category, sim_info, target_sim_info=None, impact=1.0, content=""):
     """Post one lifecycle event to /v1/events. Never raises."""
     try:
+        if not _lifecycle_ready[0]:
+            # Diagnostic: log the suppression once per burst so a session log
+            # shows the load-time rehydration is being absorbed, not lost.
+            if not _suppress_logged[0]:
+                _suppress_logged[0] = True
+                log_info('lifecycle: suppressing events until first autonomy pulse (load rehydration)')
+            return False
         sim_id = _sim_id(sim_info)
         if not sim_id:
             return False

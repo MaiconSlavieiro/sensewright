@@ -9,7 +9,7 @@ from sims4communitylib.utils.common_injection_utils import CommonInjectionUtils
 from sims4communitylib.mod_support.mod_identity import CommonModIdentity
 from sims4communitylib.modinfo import ModInfo
 
-from sensewright_mod.debug_log import log_error, log_exception, log_info
+from sensewright_mod.debug_log import log_error, log_exception, log_info, worker_log_info
 from sensewright_mod.chat_ui import start_chat, start_chat_by_sim_picker
 from sensewright_mod.panel_ui import show_quick_menu
 
@@ -50,6 +50,9 @@ def _on_provoke_scene_interaction(sim_info, target_sim_info):
     trace_id = generate_trace_id()
 
     from sensewright_mod.i18n import get_current_language
+
+    worker_log_info('pie menu: provoke scene clicked target={}'.format(
+        target_sim_info.id if target_sim_info is not None else None))
 
     post_async('/god/direct-scene', {
         'trace_id': trace_id,

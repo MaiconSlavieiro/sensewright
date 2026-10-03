@@ -8,7 +8,7 @@ from collections import deque
 from sensewright_mod.config import (
     get_intent_default_ttl, get_intent_max_retries
 )
-from sensewright_mod.debug_log import log_error, log_exception, log_warn
+from sensewright_mod.debug_log import log_error, log_exception, log_warn, worker_log_warn
 
 
 # Intent kinds
@@ -119,6 +119,7 @@ class IntentBus(object):
         self._last_tick = 0
         self._paused = False
         self._next_sleep_tick = {}  # sim_id -> tick when they next sleep
+        self._last_expiry_log_at = 0.0
 
     def add_intent(self, intent_data):
         """Add an intent from sidecar response."""
@@ -191,10 +192,12 @@ class IntentBus(object):
 
             ready_intents = []
             remaining_intents = []
+            expired_intents = []
 
             for intent in self._intents:
                 # Check expiration
                 if self._is_expired(intent, current_tick):
+                    expired_intents.append(intent)
                     continue  # Drop expired intent
 
                 # Update delay
@@ -211,7 +214,28 @@ class IntentBus(object):
                     remaining_intents.append(intent)
 
             self._intents = remaining_intents
+
+            # Diagnostic heartbeat: intents that expired are a *silent loss* and
+            # previously left zero trace, so surface them (throttled).
+            if expired_intents:
+                self._log_expired(expired_intents)
+
             return ready_intents
+
+    def _log_expired(self, expired_intents):
+        """Log a throttled summary of expired intents (previously silent)."""
+        now = time.monotonic()
+        if now - self._last_expiry_log_at < 30.0:
+            return
+        self._last_expiry_log_at = now
+        by_kind = {}
+        by_sim = {}
+        for intent in expired_intents:
+            by_kind[intent.kind] = by_kind.get(intent.kind, 0) + 1
+            if intent.sim_id:
+                by_sim[intent.sim_id] = by_sim.get(intent.sim_id, 0) + 1
+        worker_log_warn('intent bus: expired {} intents kinds={} sims={} (ttl/sleep/zone loss)'.format(
+            len(expired_intents), by_kind, by_sim))
 
     def _is_expired(self, intent, current_tick):
         """Check if intent has expired."""

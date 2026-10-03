@@ -191,3 +191,29 @@ class TestBeatTimeout:
         state.config = Config({"god": {"beat_timeout_sim_days": 0, "intervention_frequency": 0.0}})
         result = god_tick(state, 1, TICKS_PER_SIM_DAY * 5, "en-US")
         assert result["active_arc"]["current_beat_idx"] == 0
+
+
+# ── BUG-01 follow-up: reaction intents must carry the causer's sim_id ──────
+class TestReactionSimId:
+    def test_reaction_speak_intent_gets_causer_sim_id(self):
+        from sensewright_sidecar import services
+
+        state = get_state()
+        callback = services._reaction_callback(state, 7, "death", 1000)
+        callback(types.SimpleNamespace(data={
+            "intents": [{"kind": "speak", "params": {"text": "they are gone"}}],
+        }))
+
+        intents = state.drain_intents()
+        assert len(intents) == 1
+        assert intents[0]["kind"] == "speak"
+        assert intents[0]["sim_id"] == 7
+
+    def test_reaction_ignores_non_dict_intents(self):
+        from sensewright_sidecar import services
+
+        state = get_state()
+        callback = services._reaction_callback(state, 7, "death", 1000)
+        callback(types.SimpleNamespace(data={"intents": ["not-a-dict", None]}))
+
+        assert state.drain_intents() == []

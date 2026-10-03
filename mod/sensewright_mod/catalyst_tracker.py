@@ -6,7 +6,7 @@
 # conversing set across autonomy pulses and reports the end of a beat to
 # /v1/god/beat-ended, together with a best-effort agent decision.
 
-from sensewright_mod.debug_log import log_debug, log_exception
+from sensewright_mod.debug_log import log_exception, worker_log_info
 from sensewright_mod.http_client import post_async, generate_trace_id
 from sensewright_mod.state_collector import get_current_game_state
 from sensewright_mod.i18n import get_current_language
@@ -55,24 +55,39 @@ def observe(sims_delta):
     ended = [(sim_id, _conversing[sim_id]) for sim_id in _conversing if sim_id not in current]
     _conversing = current
 
+    # Diagnostic heartbeat: the God arc only advances when a catalyst conversation
+    # ends; this was previously invisible (log_debug). Surface starts/ends so a
+    # session log shows whether the tracker is actually seeing conversations.
+    if ended:
+        worker_log_info('catalyst tracker: {} conversation(s) ended -> beat-ended (sims={})'.format(
+            len(ended), [sim_id for sim_id, _sim in ended]))
+    elif current and not _catalyst_seen_logged[0]:
+        _catalyst_seen_logged[0] = True
+        worker_log_info('catalyst tracker: first conversation detected (sims={})'.format(
+            sorted(current.keys())))
+
     for sim_id, sim in ended:
         _report(sim_id, sim)
     return [sim_id for sim_id, _sim in ended]
 
 
+_catalyst_seen_logged = [False]
+
+
 def _report(sim_id, sim):
     try:
         state = get_current_game_state()
+        decision = _infer_decision(sim)
         post_async('/god/beat-ended', {
             'trace_id': generate_trace_id(),
             'sim_id': sim_id,
             'agent_sim_id': sim_id,
-            'decision': _infer_decision(sim),
+            'decision': decision,
             'player_id': 'player_1',
             'save_id': state['save_id'],
             'world_sim_tick': state['world_sim_tick'],
             'lang': get_current_language(),
         })
-        log_debug('catalyst_tracker: reported beat-ended for sim={}'.format(sim_id))
+        worker_log_info('catalyst tracker: beat-ended posted sim={} decision={}'.format(sim_id, decision))
     except Exception as e:
         log_exception('catalyst_tracker: report failed: {}'.format(e))

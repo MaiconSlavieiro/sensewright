@@ -7,7 +7,7 @@ from sims.sim_info import SimInfo
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
 from sims4communitylib.utils.sims.common_mood_utils import CommonMoodUtils
 
-from sensewright_mod.debug_log import log_error, log_exception, safe_call
+from sensewright_mod.debug_log import log_error, log_exception, safe_call, worker_log_info
 from sensewright_mod.config import get_agent_seats
 
 
@@ -188,6 +188,72 @@ def _resolve_interaction_target_sim_id(current_interaction):
     return 0
 
 
+def _member_sim_id(member):
+    """Coerce a social-group member (Sim or SimInfo) to its numeric id."""
+    if member is None:
+        return 0
+    sim_info = _safe_getattr(member, 'sim_info', None)
+    if sim_info is not None:
+        return _coerce_int(_safe_getattr(sim_info, 'id', 0), 0)
+    return _coerce_int(_safe_getattr(member, 'id', 0), 0)
+
+
+def _resolve_social_group_peer(sim, sim_id):
+    """Return the id of another Sim conversing with ``sim``, or 0 (BUG-02).
+
+    The conversation participants live on each *social interaction* in the Sim's
+    ``si_state`` (``si.social_group``) — not on the Sim itself. ``Sim`` has no
+    ``social_group`` attribute, which made the previous implementation always
+    return 0 (observed: ``delta: 12 sims, 0 conversing``).
+    """
+    for source_name in ('si_state', 'queue'):
+        collection = _safe_getattr(sim, source_name, None)
+        if collection is None:
+            continue
+        try:
+            for social_interaction in collection:
+                social_group = _safe_getattr(social_interaction, 'social_group', None)
+                if social_group is None:
+                    continue
+                try:
+                    for member in social_group:
+                        member_id = _member_sim_id(member)
+                        if member_id and member_id != sim_id:
+                            return member_id
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return 0
+
+
+def _get_room_id(sim_info):
+    """Return the id of the room ``sim_info`` is in, or 0 if unknown (BUG-02).
+
+    S4CL's accessor computes the block id from position + surface level and is
+    version-stable. The previous ``routing_component.current_room_id`` attribute
+    does not exist and silently returned 0.
+    """
+    try:
+        from sims4communitylib.utils.sims.common_sim_location_utils import CommonSimLocationUtils
+        room_id = CommonSimLocationUtils.get_current_room_id(sim_info)
+        if room_id is not None and room_id >= 0:
+            return int(room_id)
+    except Exception:
+        pass
+    # Fallback: raw routing component access (defensive; may not exist).
+    try:
+        sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
+        routing_component = _safe_getattr(sim, 'routing_component', None)
+        if routing_component is not None:
+            room_id = _safe_getattr(routing_component, 'current_room_id', 0)
+            if room_id:
+                return int(room_id)
+    except Exception:
+        pass
+    return 0
+
+
 def _collect_sim_delta(sim_info):
     """Collect volatile state delta for a single sim."""
     if sim_info is None:
@@ -220,16 +286,11 @@ def _collect_sim_delta(sim_info):
         except Exception:
             pass
 
-        # Room ID
-        room_id = 0
-        try:
-            sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
-            if sim is not None:
-                routing_component = _safe_getattr(sim, 'routing_component', None)
-                if routing_component is not None:
-                    room_id = _safe_getattr(routing_component, 'current_room_id', 0)
-        except Exception:
-            pass
+        # Room ID (BUG-02 fix: `routing_component.current_room_id` does not exist
+        # on the Sim object and always returned 0, which disabled the social
+        # proximity fallback and the `same_room` pre-flight gate. S4CL exposes a
+        # reliable accessor; degrade to 0 (unknown) on any failure.
+        room_id = _get_room_id(sim_info)
 
         # Position
         pos = {'x': 0.0, 'y': 0.0, 'z': 0.0}
@@ -242,22 +303,31 @@ def _collect_sim_delta(sim_info):
         except Exception:
             pass
 
-        # Activity / Current interaction / conversation signal (BUG-01)
+        # Activity / Current interaction / conversation signal (BUG-01/BUG-02)
         activity = 'idle'
         is_conversing = False
         social_target_sim_id = 0
         try:
             sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
             if sim is not None:
+                # 1. Social-group membership is the most reliable conversation
+                #    signal: TS4 keeps the other Sim(s) in the group, while the
+                #    current interaction target is often the mixer (None target).
+                social_target_sim_id = _resolve_social_group_peer(sim, sim_id)
+                if social_target_sim_id:
+                    is_conversing = True
                 si = _safe_getattr(sim, 'si_state', None)
                 if si is not None:
                     current_interaction = _safe_getattr(si, 'current_interaction', None)
                     if current_interaction is not None:
                         activity = _safe_getattr(current_interaction, '__name__', str(current_interaction))
-                        social_target_sim_id = _resolve_interaction_target_sim_id(current_interaction)
-                        if social_target_sim_id and social_target_sim_id != sim_id:
-                            is_conversing = True
-                        elif any(marker in str(activity).lower() for marker in _CONVERSATION_MARKERS):
+                        # 2. Fallback: resolve the interaction's Sim target directly.
+                        if not is_conversing:
+                            social_target_sim_id = _resolve_interaction_target_sim_id(current_interaction)
+                            if social_target_sim_id and social_target_sim_id != sim_id:
+                                is_conversing = True
+                        # 3. Last resort: class-name marker matching.
+                        if not is_conversing and any(marker in str(activity).lower() for marker in _CONVERSATION_MARKERS):
                             is_conversing = True
         except Exception:
             pass
@@ -498,6 +568,19 @@ def collect_sims_delta(active_only=False):
             delta = _collect_sim_delta(sim_info)
             if delta is not None:
                 sims_delta.append(delta)
+
+        # Diagnostic heartbeat (BUG-02 visibility): report the conversation
+        # signal and room-id coverage so a session log reveals whether the
+        # social layer has anything to work with.
+        conversing = [d for d in sims_delta if d.get('is_conversing')]
+        with_room = [d for d in sims_delta if d.get('room_id') not in (None, 0)]
+        worker_log_info(
+            'delta: {} sims, {} conversing, {} room_id, {} sleeping, {} activity-idle'.format(
+                len(sims_delta), len(conversing), len(with_room),
+                sum(1 for d in sims_delta if d.get('is_sleeping')),
+                sum(1 for d in sims_delta if str(d.get('activity') or '').lower() == 'idle'),
+            )
+        )
 
     except Exception as e:
         log_exception('Error in collect_sims_delta: {}'.format(e))

@@ -186,3 +186,135 @@ purpose) to a JSON-capable model. Not a code defect; no engineering item require
    - DB: `...\Mods\Sensewright\sidecar\data\saves\slot_<save>.committed.db`
 2. Look for `sim.social`, `sim.social.close`, `god_beat_timeouts`,
    `stale_arcs_deactivated` and the `arcs` table (exactly one `active` row).
+
+---
+
+# Post-deploy playtest #2 (2026-10-03 12:34–12:44) — observability pass + BUG-04..07
+
+> **Status:** ✅ CLOSED — BUG-04/05/06/07 fixed with regression tests/asserts.
+> **Basis:** first in-game session after the observability instrumentation
+> (`.ts4script` 95,687 B). Logs: `mod_logs/Sensewright_Worker.log` (12:34–12:44),
+> `sidecar/data/logs/sensewright-sidecar.log`, `lastUIException.txt`.
+
+This playtest used the instrumented build and, for the first time, produced
+**deterministic evidence** for why four previously-unmapped features were dead.
+The observability pass added a "heartbeat" log line to every feature path so a
+session log now shows, per feature, whether it fired and what it did (see the
+"Observability coverage" table at the end).
+
+## Summary
+
+| ID | Bug | Severity | Evidence (this session) | Status |
+|----|-----|----------|--------------------------|--------|
+| BUG-04 | Object interactions never appear: `_object_name` returns `<definition: NNNN>` | High | `mirror handler first object name="<definition: 30457>"` | ✅ Fixed |
+| BUG-05 | `sim.social` never fires: `Sim` has no `social_group` attr | High | `delta: 12 sims, 0 conversing, 12 activity-idle` | ✅ Fixed |
+| BUG-06 | Chat shows "not delivered": `handle_chat` omits `ok` | High | sidecar `sim.chat tokens=317` + pt-BR `chat.error_failed` | ✅ Fixed |
+| BUG-07 | `lastUIException` flood: `BuffInfo/MoodKey()` null (mood_type `<T>` not `<E>`) | Medium | `Error #1009 ... BuffInfo/MoodKey()` (force-close) | ✅ Fixed |
+
+## BUG-04 — object menus (mirror/diary/mailbox) never appear ✅
+
+**Symptom.** Right-clicking a mirror/diary/mailbox shows no Sensewright option.
+
+**Evidence.**
+```
+object_interactions: mirror handler first object name="<definition: 30457>"
+object_interactions: diary  handler first object name="<definition: 30457>"
+object_interactions: mailbox handler first object name="<definition: 30457>"
+```
+
+**Root cause.** `_object_name` read `script_object.definition.name`, which is
+`None` for these base-game objects, then fell back to `str(definition)` →
+`"<definition: 30457>"`. The `mirror`/`diary`/`mailbox` markers therefore never
+matched and `should_add` always returned `False`.
+
+**Fix.** Prefer the Python class name (`script_object.__class__.__name__` →
+`Mirror`, `Mailbox`, …), which is stable and contains the marker; keep the
+definition-name path as a fallback. Also added a per-handler diagnostic that logs
+the first object seen + the first match, and a tuning-load check
+(`tuning interaction.mirror_reflect ... loaded=True/False`).
+
+**Files.** `mod/sensewright_mod/object_interactions.py`.
+
+## BUG-05 — `sim.social` never fires ✅
+
+**Symptom.** No Sim-to-Sim dialogue; `sim.social` = 0 all session.
+
+**Evidence.**
+```
+delta: 12 sims, 0 conversing, 5 room_id, 0 sleeping, 12 activity-idle
+```
+
+**Root cause.** The conversation signal read `sim.social_group`, but `Sim` has no
+such attribute (the S4CL source only ever reads `si.social_group` on each social
+*interaction* in `sim.si_state`). The social peer therefore always resolved to 0.
+
+**Fix.** `_resolve_social_group_peer` now iterates `sim.si_state` and `sim.queue`,
+reading `social_group` off each social interaction and returning the first other
+Sim id. `room_id` was already correct (5/12 instanced sims had a valid id).
+
+**Files.** `mod/sensewright_mod/state_collector.py`.
+
+## BUG-06 — chat shows "not delivered" despite a successful sidecar reply ✅
+
+**Symptom.** Player message → "A mensagem não pôde ser entregue" even though the
+sidecar answered.
+
+**Evidence.** Sidecar: `llm.route purpose=sim.chat ... tokens=317` (a real reply);
+mod side rendered `t('chat.error_failed')`.
+
+**Root cause.** `handle_chat` returned `{"response": ..., "deferred": ...}` without
+an `ok` key, but `chat_ui._handle_chat_response` gates on `response.get('ok', False)`
+→ always `False` → error path. No test asserted `ok`, so it regressed silently.
+
+**Fix.** `handle_chat` returns `"ok": True` on both the normal and deferred paths.
+`tests/test_services_endpoints.py` now asserts `data["ok"] is True` on `/chat` and
+`/hey`.
+
+**Files.** `sidecar/sensewright_sidecar/services.py`, `sidecar/tests/test_services_endpoints.py`.
+
+## BUG-07 — `lastUIException` flood: `BuffInfo/MoodKey()` null ✅
+
+**Symptom.** Client throws `TypeError: Error #1009 ... BuffInfo/MoodKey()` repeatedly
+(the session ended with a force-close).
+
+**Root cause.** The emotion buffs wrote `mood_type` as a plain numeric tunable
+(`<T n="mood_type">14632</T>`), but `mood_type` is a `TunableEnumEntry` — the XML
+must use `<E n="mood_type">ANGRY</E>` (the same `<E>` element used by `buff_type`).
+The misparse made the buff resolve to `Mood.FINE`, which has no client `MoodKey`.
+
+**Fix.** All 12 `buff_mood_*.xml` now use `<E n="mood_type">ANGRY|BORED|CONFIDENT|DAZED|
+ENERGIZED|FLIRTY|FOCUSED|HAPPY|INSPIRED|SAD|STRESSED|UNCOMFORTABLE</E>`
+(enum member names from S4CL `CommonMoodId`). `buff_mood_fine` was already removed in
+the previous wave (Mood_Fine has no MoodKey).
+
+**Files.** `mod/tuning/buffs/buff_mood_*.xml`.
+
+---
+
+## Observability coverage (added across this + previous wave)
+
+Every feature now logs a decisive line to `Sensewright_Worker.log` (success *and*
+failure paths), so a single session pinpoints any dead feature:
+
+| Feature | Log line |
+|---|---|
+| Mod loaded / tunings | `tuning interaction.chat ... loaded=True/False` |
+| Pie menu reachable | `pie menu: interaction hook reached a Sim instance` |
+| Chat entry / submit / reply | `chat entry point` · `chat submitted` · `chat response` / `chat response FAILED` |
+| Sim-to-Sim dialogue | `delta: N sims, M conversing, K room_id` + sidecar `sim.social pair ... gate=...` |
+| Reaction speech / mood | `intent ... [speak]/[set_mood] ... success=True` |
+| Intent TTL loss | `intent bus: expired N intents ...` |
+| God/catalyst | sidecar `god.plan created` / `god.puppeteer` / `god beat timeout` · mod `catalyst tracker: ... -> beat-ended` · `visit_situation: started native visit` |
+| Object interactions | `tuning interaction.mirror_reflect ... loaded=` · `mirror handler first object name` · `mirror MATCHED` · `mirror reflect clicked` |
+| Lifecycle events | `lifecycle: suppressing events until first autonomy pulse` → `lifecycle event posted` |
+| Save/Shadow DB | sidecar `committed save ... at tick` |
+
+## Verification performed (2026-10-03)
+
+- `cd sidecar && python -m pytest -q` → **637 passed** (regression: reaction `sim_id`
+  in `test_bugs.py`, `ok` asserts in `test_services_endpoints.py`).
+- `py -3.7 -m py_compile` on all changed Mod files → clean.
+- `python mod/build_package.py` → `Sensewright.package` (16,864 B, 43 resources, mood_type `<E>`).
+- `python mod/build.py` → `Sensewright.ts4script` (95,981 B, 3.7 bytecode).
+- Deployed with `scripts/install-mod.ps1`.
+- Installed sidecar boot-tested (`/v1/health` 200, `handle_chat` returns `ok`).

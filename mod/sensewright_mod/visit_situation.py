@@ -96,30 +96,15 @@ def _create_visitor_sim_info():
 
 
 def _start_visit(sim_info):
-    """Start the Sensewright visit situation, or the native visit as fallback."""
-    situation_type = None
-    try:
-        if _situation_visit_id:
-            from sims4.resources import Types
-            manager = services.get_instance_manager(Types.SITUATION)
-            situation_type = manager.get(_situation_visit_id) if manager is not None else None
-    except Exception as e:
-        log_debug('visit_situation: custom tuning lookup failed: {}'.format(e))
+    """Start the native visit situation so the NPC walks up to the lot.
 
-    if situation_type is not None:
-        try:
-            from sims4communitylib.utils.sims.common_sim_situation_utils import CommonSimSituationUtils
-            situation_id = CommonSimSituationUtils.create_situation_for_sim(
-                sim_info, situation_type, 'sensewright',
-                invite_only=False, user_facing=False,
-            )
-            if situation_id:
-                log_info('visit_situation: started custom situation {}'.format(situation_id))
-                return 'custom'
-        except Exception as e:
-            log_exception('visit_situation: custom start failed: {}'.format(e))
-
-    # Native fallback: the base-game visit situation walks the Sim to the lot.
+    The custom ``sw_visit_situation`` tuning was removed from this path (BUG-03):
+    ``CommonSimSituationUtils.create_situation_for_sim`` builds a
+    ``SituationGuestInfo.construct_from_purpose(..., situation_type.default_job(), ...)``
+    and our tuning had no default job, so ``default_job()`` returned ``None`` and
+    the call raised ``'NoneType' object has no attribute 'no_show_action'``. The
+    native visit situation is engine-tested and covers the walk-up behaviour.
+    """
     try:
         from sims4communitylib.utils.sims.common_sim_situation_utils import CommonSimSituationUtils
         CommonSimSituationUtils.create_visit_situation(sim_info)

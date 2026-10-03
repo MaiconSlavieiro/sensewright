@@ -18,7 +18,7 @@ from sims4communitylib.services.interactions.interaction_registration_service im
 )
 from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
 
-from sensewright_mod.debug_log import log_debug, log_exception, log_info, log_warn
+from sensewright_mod.debug_log import log_debug, log_exception, log_info, log_warn, worker_log_info
 from sensewright_mod.tuning import resolve_owned_id
 
 
@@ -42,12 +42,81 @@ def _resolve_sim_info(interaction_sim):
 
 
 def _object_name(script_object):
-    """Best-effort lowercased object-definition name for matching."""
+    """Best-effort lowercased name for matching (class name first).
+
+    BUG (observed): ``script_object.definition.name`` is ``None`` for many
+    base-game objects, and the ``str(definition)`` fallback produced
+    ``"<definition: 30457>"`` — so the mirror/diary/mailbox markers never
+    matched and the interactions never appeared. The Python class name
+    (``Mirror``, ``Mailbox``, …) is stable and contains the marker, so prefer it.
+    """
+    if script_object is not None:
+        cls = _safe_getattr(script_object, '__class__', None)
+        class_name = _safe_getattr(cls, '__name__', None)
+        if class_name:
+            return str(class_name).lower()
     definition = _safe_getattr(script_object, 'definition', None)
     name = _safe_getattr(definition, 'name', None)
     if not name:
         name = _safe_getattr(definition, '__name__', None) or str(definition or '')
     return str(name or '').lower()
+
+
+# ── Diagnostics: why an object interaction may not appear (BUG-02 style) ──
+_tuning_status_logged = False
+_seen_log = {}
+
+
+def _log_object_tuning_status():
+    """Log (once) whether each object-interaction tuning actually loaded.
+
+    This mirrors ``interactions._log_tuning_load_status``. If a tuning id does not
+    resolve or the engine never loaded the resource, the interaction can never
+    appear in a pie menu — this line is what makes that visible.
+    """
+    global _tuning_status_logged
+    if _tuning_status_logged:
+        return
+    _tuning_status_logged = True
+    try:
+        import services
+        from sims4.resources import Types
+        interaction_type = getattr(Types, 'INTERACTION', None)
+        manager = services.get_instance_manager(interaction_type) if interaction_type is not None else None
+        for label, key in (
+            ('interaction.mirror_reflect', 'interaction_mirror_reflect'),
+            ('interaction.diary_read', 'interaction_diary_read'),
+            ('interaction.diary_snoop', 'interaction_diary_snoop'),
+            ('interaction.mailbox', 'interaction_mailbox'),
+        ):
+            tuning_id = resolve_owned_id(key)
+            loaded = False
+            if manager is not None and tuning_id:
+                try:
+                    loaded = manager.get(tuning_id) is not None
+                except Exception:
+                    loaded = False
+            worker_log_info('tuning {} id={} loaded={}'.format(label, tuning_id, loaded))
+    except Exception as e:
+        worker_log_warn('object tuning check error: {}'.format(e))
+
+
+def _note_object_seen(handler_name, matched, object_name, tuning_id):
+    """Throttled diagnostic: log the first object seen + first match per handler.
+
+    ``should_add`` fires for every object in the zone, so we log only the first
+    object (proves the handler is invoked and shows the real object-definition
+    name) and the first match (proves the interaction was actually attached).
+    """
+    seen_key = handler_name + ':seen'
+    match_key = handler_name + ':matched'
+    if seen_key not in _seen_log:
+        _seen_log[seen_key] = True
+        worker_log_info('object_interactions: {} handler first object name="{}"'.format(handler_name, object_name))
+    if matched and match_key not in _seen_log:
+        _seen_log[match_key] = True
+        worker_log_info('object_interactions: {} MATCHED "{}" -> adding interaction id={}'.format(
+            handler_name, object_name, tuning_id))
 
 
 def _show_notification(title, body):
@@ -89,6 +158,8 @@ class SensewrightMirrorReflectInteraction(_SensewrightObjectInteraction):
 
             sim_info = _resolve_sim_info(interaction_sim)
             state = get_current_game_state()
+            worker_log_info('object_interactions: mirror reflect clicked sim={}'.format(
+                _safe_getattr(sim_info, 'id', 0)))
             post_async('/evolve', {
                 'trace_id': generate_trace_id(),
                 'sim_id': _safe_getattr(sim_info, 'id', 0),
@@ -115,6 +186,8 @@ def _request_diary(interaction_sim, interaction_target=None, snoop=False):
         sim_info = _resolve_sim_info(interaction_sim)
         sim_id = _safe_getattr(sim_info, 'id', 0)
         state = get_current_game_state()
+        worker_log_info('object_interactions: diary {} clicked sim={}'.format(
+            'snoop' if snoop else 'read', sim_id))
 
         def _callback(response, trace_id=None):
             entry = ''
@@ -170,6 +243,7 @@ class SensewrightMailboxInteraction(_SensewrightObjectInteraction):
 
             state = get_current_game_state()
             save_id = state['save_id']
+            worker_log_info('object_interactions: mailbox clicked save={}'.format(save_id))
 
             def _callback(response, trace_id=None):
                 data = response if isinstance(response, dict) else {}
@@ -233,7 +307,11 @@ class _MirrorInteractionHandler(CommonScriptObjectInteractionHandler):
         return (tuning_id,) if tuning_id else ()
 
     def should_add(self, script_object, *args, **kwargs):
-        return any(marker in _object_name(script_object) for marker in _MIRROR_MARKERS)
+        _log_object_tuning_status()
+        name = _object_name(script_object)
+        matched = any(marker in name for marker in _MIRROR_MARKERS)
+        _note_object_seen('mirror', matched, name, resolve_owned_id('interaction_mirror_reflect'))
+        return matched
 
 
 class _DiaryInteractionHandler(CommonScriptObjectInteractionHandler):
@@ -247,7 +325,10 @@ class _DiaryInteractionHandler(CommonScriptObjectInteractionHandler):
         )
 
     def should_add(self, script_object, *args, **kwargs):
+        _log_object_tuning_status()
         is_diary = any(marker in _object_name(script_object) for marker in _DIARY_MARKERS)
+        _note_object_seen('diary', is_diary, _object_name(script_object),
+                          resolve_owned_id('interaction_diary_read'))
         if is_diary:
             # Refresh the object's TooltipComponent from the cached entry, when set.
             text = _safe_getattr(script_object, '_sensewright_diary_tooltip', '')
@@ -263,7 +344,11 @@ class _MailboxInteractionHandler(CommonScriptObjectInteractionHandler):
         return (tuning_id,) if tuning_id else ()
 
     def should_add(self, script_object, *args, **kwargs):
-        return any(marker in _object_name(script_object) for marker in _MAILBOX_MARKERS)
+        _log_object_tuning_status()
+        name = _object_name(script_object)
+        matched = any(marker in name for marker in _MAILBOX_MARKERS)
+        _note_object_seen('mailbox', matched, name, resolve_owned_id('interaction_mailbox'))
+        return matched
 
 
 _register = CommonInteractionRegistry().register_handler

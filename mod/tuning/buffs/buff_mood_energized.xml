@@ -2,7 +2,7 @@
 <I c="Buff" i="buff" m="buffs.buff" n="buff_mood_energized" s="0">
   <E n="buff_type">POSITIVE</E>
   <T n="duration">90</T>
-  <T n="mood_type">14636</T>
+  <E n="mood_type">ENERGIZED</E>
   <T n="mood_weight">3</T>
   <T n="visible">True</T>
   <V n="buff_name" t="localized_string" p="STBL">stbl.buff.mood_energized.name</V>
