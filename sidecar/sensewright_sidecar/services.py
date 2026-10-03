@@ -614,12 +614,15 @@ def _maybe_relationship_review(state: AppState, tick: int, lang: str, trace_id, 
         return 0
     edges.sort(reverse=True)
     _, target_id = edges[0]
-    state.last_relationship_review_tick[sim_id] = tick
     sim = state.get_census(sim_id)
     target = state.get_census(target_id)
 
     def _callback(result) -> None:
         try:
+            # Advance the cadence only once the job actually landed, so a job
+            # dropped by a stale session epoch is retried instead of silently
+            # skipping a whole sim-day (P29).
+            state.last_relationship_review_tick[sim_id] = tick
             data = result.data or {}
             note = data.get("qualitative_note") or data.get("note") or ""
             store = _store(state)
@@ -1782,6 +1785,16 @@ def handle_config_resume(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
     return {"ok": True, "paused": False}
 
 
+def handle_config_panic_state(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Read-only view of the panic switch so the Web Studio can render its state.
+
+    ``GET /v1/config/panic`` is required because the Web Studio polls it; without
+    this route the client received HTTP 405 and always showed "not paused".
+    """
+    state = get_state()
+    return {"ok": True, "paused": bool(state.paused)}
+
+
 def handle_controls_get() -> Dict[str, Any]:
     state = get_state()
     return {"controls": get_controls(state.panel, state.config)}
@@ -1803,7 +1816,62 @@ def handle_controls_post(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ── seats / player activity / health / status ────────────────────────────
 def handle_seats_get() -> Dict[str, Any]:
     state = get_state()
-    return SeatManager.snapshot(state.get_seats(), int(state.config.gameplay("agent_seats", 12)))
+    max_seats = int(state.config.gameplay("agent_seats", 12))
+    seats = state.get_seats()
+    store = _store(state)
+
+    # The raw seat dict only carries sim_id/role/tier/lease; merge in the census
+    # identity + stored profile/background + relationship edges so the Web Studio
+    # Sims tab can show names and backstories (they previously rendered "Sim <id>"
+    # with empty profiles).
+    enriched = []
+    for seat in seats.values():
+        sim_id = int(seat.get("sim_id", 0))
+        census = state.get_census(sim_id) or {}
+        profile: Dict[str, Any] = {}
+        background = ""
+        if store is not None:
+            row = store.get_sim_profile(sim_id)
+            if row:
+                profile = row.get("profile") or {}
+                background = row.get("background") or ""
+        name = census.get("name") or profile.get("name") or ""
+
+        relationships = []
+        prefix = "{}:".format(sim_id)
+        for key, rel in state.relationships.items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                target_id = int(key.split(":", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            target_census = state.get_census(target_id) or {}
+            target_profile: Dict[str, Any] = {}
+            if store is not None:
+                trow = store.get_sim_profile(target_id)
+                if trow:
+                    target_profile = trow.get("profile") or {}
+            relationships.append({
+                "target_id": target_id,
+                "target_name": target_census.get("name") or target_profile.get("name") or "",
+                "friendship": rel.get("friendship", 0.0),
+                "romance": rel.get("romance", 0.0),
+            })
+
+        enriched.append({
+            "sim_id": sim_id,
+            "role": seat.get("role"),
+            "tier": seat.get("tier"),
+            "lease_expires_tick": seat.get("lease_expires_tick"),
+            "name": name,
+            "household_id": census.get("household_id"),
+            "profile": profile,
+            "background": background,
+            "relationships": relationships,
+        })
+
+    return {"seats": enriched, "pool": max(0, max_seats - len(enriched))}
 
 
 def handle_seats_post(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1842,7 +1910,9 @@ def status() -> Dict[str, Any]:
     return {
         "chain": scheduler_status.get("chain", {}),
         "providers": providers,
-        "limits": scheduler_status.get("chain", {}),
+        # Flat provider->limiter map for the diagnostics panel; `chain` keeps the
+        # richer nested shape (limiters + purpose cooldowns + cooldown seconds).
+        "limits": (scheduler_status.get("chain") or {}).get("limiters", {}),
         "pool": {},
         "routes": state.config.raw().get("llm", {}).get("routes", {}),
         "tiers": state.config.raw().get("llm", {}).get("tiers", {}),

@@ -175,7 +175,7 @@
     }
     if ($('chain-status')) renderChainStatus(s);
     if ($('diag-queue')) $('diag-queue').textContent = JSON.stringify(s.queue || {}, null, 2);
-    if ($('diag-limits')) $('diag-limits').textContent = JSON.stringify(s.chain || s.limits || {}, null, 2);
+    if ($('diag-limits')) $('diag-limits').textContent = JSON.stringify(s.limits || {}, null, 2);
     if ($('diag-pool')) $('diag-pool').textContent = JSON.stringify(s.pool || {}, null, 2);
     if ($('diag-tiers')) $('diag-tiers').textContent = JSON.stringify(s.tiers || {}, null, 2);
   }
@@ -251,6 +251,7 @@
     setVal('pf-species', profile.species || '');
     setVal('pf-age', profile.age_stage || '');
     setVal('pf-household', sim.household_id != null ? String(sim.household_id) : '');
+    setVal('pf-background', sim.background || profile.backstory || '');
     setVal('pf-core', profile.core_personality || '');
     setVal('pf-demeanor', profile.current_demeanor || '');
     setVal('pf-speech', profile.speech_style || '');

@@ -565,6 +565,59 @@ _COMPAT_MOD_SIGNATURES = {
 _detected_mods_cache = None
 
 
+def _resolve_mods_folder():
+    """Best-effort resolve of the user's Mods folder (plan 2.7 / FC5).
+
+    Tries, in order: a walk-up from this module's own ``__file__`` (a
+    ``.ts4script`` is loaded from inside ``<user>/Mods``), S4CL's path utility,
+    and the game's ``paths`` module. Every strategy is guarded; returns None if
+    nothing resolves so the caller degrades to an empty scan.
+    """
+    import os
+
+    # 1. Walk up from this loaded module, e.g.
+    #    <user>/Mods/Sensewright.ts4script/sensewright_mod/state_collector.py.
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        parts = here.replace('/', os.sep).split(os.sep)
+        for index in range(len(parts) - 1, -1, -1):
+            if parts[index].lower() == 'mods':
+                candidate = os.sep.join(parts[:index + 1])
+                if os.path.isdir(candidate):
+                    return candidate
+    except Exception:
+        pass
+
+    # 2. S4CL path utility (method name varies by build; guarded).
+    s4cl_candidates = (
+        ('sims4communitylib.utils.common_path_utils', 'CommonPathUtils',
+         ('get_mods_folder', 'get_mods_folder_path')),
+    )
+    for module_name, class_name, method_names in s4cl_candidates:
+        try:
+            module = __import__(module_name, fromlist=[class_name])
+            cls = _safe_getattr(module, class_name, None)
+            for method_name in method_names:
+                method = _safe_getattr(cls, method_name, None)
+                if callable(method):
+                    path = _safe_call(method)
+                    if path and os.path.isdir(path):
+                        return path
+        except Exception:
+            continue
+
+    # 3. Game ``paths`` module(s).
+    for module_name in ('paths', 'sims4.paths'):
+        try:
+            module = __import__(module_name, fromlist=['MODS_FOLDER'])
+            path = _safe_getattr(module, 'MODS_FOLDER', None)
+            if path and os.path.isdir(path):
+                return path
+        except Exception:
+            continue
+    return None
+
+
 def _detect_compatible_mods():
     """Best-effort scan of the Mods folder for known mods (2.7). Cached per session."""
     global _detected_mods_cache
@@ -573,15 +626,7 @@ def _detect_compatible_mods():
     detected = []
     try:
         import os
-        mods_dir = None
-        for module_name in ('paths', 'sims4.paths'):
-            try:
-                module = __import__(module_name, fromlist=['MODS_FOLDER'])
-                mods_dir = _safe_getattr(module, 'MODS_FOLDER', None)
-            except Exception:
-                mods_dir = None
-            if mods_dir:
-                break
+        mods_dir = _resolve_mods_folder()
         if mods_dir and os.path.isdir(mods_dir):
             names = [str(n).lower() for n in os.listdir(mods_dir)]
             for label, needles in _COMPAT_MOD_SIGNATURES.items():

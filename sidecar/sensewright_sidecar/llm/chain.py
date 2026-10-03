@@ -208,20 +208,23 @@ class ProviderChain:
                 )
             except LLMRateLimited as exc:
                 last_error = str(exc)
+                limiter.release_reservation(est_tokens)
                 self._record_failure(name, model)
                 continue
             except LLMError as exc:
                 last_error = str(exc)
+                limiter.release_reservation(est_tokens)
                 self._record_failure(name, model)
                 continue
             except Exception as exc:  # noqa: BLE001 - defensive: never crash the chain
                 last_error = "unexpected error from {}: {}".format(name, exc)
                 logger.exception("chain unexpected error")
+                limiter.release_reservation(est_tokens)
                 self._record_failure(name, model)
                 continue
 
             # Success: reconcile tokens and reset failures.
-            limiter.record_tokens(response.total_tokens or est_tokens)
+            limiter.settle_reservation(est_tokens, response.total_tokens or est_tokens)
             self._record_success(name, model)
             if validator is not None and not validator(response):
                 self._record_invalid(name, model)

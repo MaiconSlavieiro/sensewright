@@ -364,6 +364,29 @@ class TestPlayerActivityEndpoint:
         assert data["deep_window_open"] is True
 
 
+class TestPanicEndpoints:
+    """FC4 panic switch: POST toggles, GET reads (Web Studio polls GET)."""
+
+    def test_get_panic_defaults_to_running(self, client):
+        response = client.get("/v1/config/panic")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "paused": False}
+
+    def test_post_then_get_reflects_paused(self, client):
+        assert client.post("/v1/config/panic", json={}).json()["paused"] is True
+        assert client.get("/v1/config/panic").json()["paused"] is True
+        assert client.post("/v1/config/resume", json={}).json()["paused"] is False
+        assert client.get("/v1/config/panic").json()["paused"] is False
+
+    def test_status_exposes_flat_limits(self, client):
+        data = client.get("/v1/status").json()
+        assert "limits" in data
+        assert isinstance(data["limits"], dict)
+        # Flat provider->limiter map, not the nested chain dict.
+        assert "limiters" not in data["limits"]
+
+
+
 class TestConversationalPairDetection:
     """The mod reports interaction class names, not semantic activities."""
 

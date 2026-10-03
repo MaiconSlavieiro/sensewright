@@ -12,11 +12,19 @@ PRIORITY_ORDER = ("PLAYER", "HOUSEHOLD", "ACTIVE", "RELATED", "OTHER")
 def priority_class(state: Any, sim: dict, active_sim_id: int | None = None) -> str:
     """Return the priority class for a sim.
 
-    Priority order (highest first):
-    - PLAYER: sim.get("is_player") is truthy
-    - ACTIVE: sim_id matches active_sim_id (if provided)
-    - HOUSEHOLD: shares non-empty household_id with active sim or any player sim
-    - RELATED: family_links intersects player/active sim ids, or vice versa
+    Classification precedence: PLAYER, then ACTIVE (the selected sim itself),
+    then HOUSEHOLD, RELATED, OTHER. The selected sim is classified as ACTIVE
+    *before* the household check so it can never be mistaken for a household
+    member via its own ``household_id``.
+
+    The resulting classes are then ranked by :data:`PRIORITY_ORDER`
+    (``PLAYER > HOUSEHOLD > ACTIVE > RELATED > OTHER``, REQ-GOD-03), so a
+    household Agent still outranks the active sim during selection.
+
+    - PLAYER: ``sim.get("is_player")`` is truthy
+    - ACTIVE: ``sim_id`` matches ``active_sim_id`` (if provided)
+    - HOUSEHOLD: shares a non-empty ``household_id`` with the active or a player sim
+    - RELATED: ``family_links`` intersects player/active sim ids, or vice versa
     - OTHER: everything else
     """
     # PLAYER check
@@ -25,7 +33,7 @@ def priority_class(state: Any, sim: dict, active_sim_id: int | None = None) -> s
 
     sim_id = int(sim.get("sim_id", 0))
 
-    # ACTIVE check
+    # ACTIVE check (before HOUSEHOLD so the selected sim is never "household").
     if active_sim_id is not None and sim_id == int(active_sim_id):
         return "ACTIVE"
 

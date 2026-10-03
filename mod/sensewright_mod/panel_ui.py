@@ -226,7 +226,9 @@ def _show_preset_menu():
 
 def _set_preset(preset_id):
     """Set director preset."""
-    _send_god_control('director_preset', preset_id)
+    # The sidecar control is named `preset` (not `director_preset`); the old key
+    # was silently rejected by set_control and never reached the Web Studio.
+    _send_god_control('preset', preset_id)
     log_info('Director preset set to: {}'.format(preset_id))
     show_quick_menu()
 
@@ -248,8 +250,10 @@ def _show_mode_menu():
 
 def _set_mode(mode_id):
     """Set director mode."""
-    _send_god_control('director_mode', mode_id)
-    log_info('Director mode set to: {}'.format(mode_id))
+    # The sidecar's GOD_MODES are uppercase ("AUTONOMOUS", "CO_DIRECTOR",
+    # "SANDBOX"); lowercase values were rejected and never persisted.
+    _send_god_control('director_mode', mode_id.upper())
+    log_info('Director mode set to: {}'.format(mode_id.upper()))
     show_quick_menu()
 
 

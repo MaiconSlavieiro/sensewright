@@ -1,0 +1,72 @@
+# Sensewright v2 — Changelog
+
+> **Branch:** `v2-remake`
+
+Reverse-chronological record of what **changed** per session, plus the **open items**
+that remain. Complements [`status.md`](status.md) (spec↔code gap) and [`bugs.md`](bugs.md)
+(playtest findings) — this file records the actual edits, not the plan.
+
+---
+
+## 2026-10-03 — Review hardening + Web Studio / Director / background fixes
+
+### A. Code-review hardening (review of `a314bbf`)
+
+| # | Change | Files |
+|---|--------|-------|
+| 1 | Panic state is now **readable**: added `GET /v1/config/panic` (`handle_config_panic_state`). The Web Studio previously polled a POST-only route (405 → always "not paused"). | `routers/health.py`, `services.py` |
+| 2 | `priority_class` docstring corrected — the active sim is classified *before* the household check; ranking still follows `PRIORITY_ORDER` (`HOUSEHOLD > ACTIVE`). Behavior unchanged. | `god/background_scheduler.py` |
+| 3 | Mods-folder detection is no longer a single `sims4.paths` guess: `_resolve_mods_folder()` walks up from `__file__`, then tries S4CL path utils, then game `paths` — all guarded. | `mod/sensewright_mod/state_collector.py` |
+| 4 | Idle intent pull moved off the outbound worker onto a dedicated thread (`_intent_pull_loop`), so a slow `GET /autonomy/intents` can no longer delay lifecycle/chat/event dispatch. | `mod/sensewright_mod/http_client.py` |
+| 5 | TPM pre-check is now atomic: `try_accept_and_record` reserves the estimate; `settle_reservation`/`release_reservation` reconcile it (fixes a concurrent overshoot). | `llm/limits.py`, `llm/chain.py` |
+| 6 | `/v1/status` exposes a flat `limits` map again (it was shadowed by the nested `chain` dict); Web Studio "Rate Limits" restored. | `services.py`, `webui/app.js` |
+| 7 | `mem.relationship.review` cadence advances only inside its callback, so a stale-epoch-dropped job retries instead of skipping a whole sim-day. | `services.py` |
+| 8 | `LLMScheduler.shutdown()` releases the realtime pool on interpreter exit. | `llm/scheduler.py` |
+
+### B. Playtest fixes (found while testing the Web Studio in-game)
+
+- **Director Quick Menu sent wrong control keys/values.** `director_preset` → `preset`;
+  `director_mode` values now uppercased (`AUTONOMOUS`/`CO_DIRECTOR`/`SANDBOX`). In-game
+  theme/mode changes now persist and reach the Web Studio (it re-reads `/v1/god/controls`
+  every 15 s). (`mod/sensewright_mod/panel_ui.py`)
+- **Web Studio Sims tab rendered "Sim <id>" with empty profiles.** Seats only carried
+  `sim_id/role/tier/lease`. `handle_seats_get` now merges census identity, stored profile,
+  background and relationship edges; added a "Background" field + locale keys.
+  (`services.py`, `webui/index.html`, `webui/app.js`, `webui/locales/*`)
+- **Reasoning-model output rejected as "unusable".** `_extract_json` now strips
+  `<thinking>/<reasoning>/<thought>` tags and falls back to the last balanced JSON object
+  (deepseek-v4-pro emits prose/thinking around the payload). (`llm/scheduler.py`)
+
+### Verification
+
+- `cd sidecar && python -m pytest -q` → **635 passed** (12 new regression tests).
+- `py -3.7 -m py_compile` over `mod/sensewright_mod/*.py` → clean (20 files).
+- `python mod/build_package.py` → `Sensewright.package` (17,037 B, 44 resources).
+- `python mod/build.py` → `Sensewright.ts4script` (92,361 B, Python 3.7 bytecode).
+- Deployed via `scripts/install-mod.ps1` (OneDrive Mods folder).
+
+---
+
+## Open items (still to do)
+
+- [ ] **`autonomy_mode` (Quick Menu "Autonomia") is unwired.** `panel_ui._set_autonomy` posts an
+      `autonomy_mode` key the sidecar has no control for. Decide the mapping
+      (full/reactive/off → a dial or a pause-like switch) or remove the button.
+- [ ] **`deepseek-v4-pro` (reasoning model) still returns non-JSON for some purposes.** The JSON
+      extractor is more tolerant now, but the durable fix is config: route JSON-only purposes to
+      a JSON-capable model (OpenRouter `nemotron` free models work) or set `free_only = true` to
+      block the paid deepseek provider. See `docs/bugs.md` NOTE-01.
+- [ ] **Load-time event ordering.** Lifecycle events (death/marriage) fire *before*
+      `session-start`, so their reactions/aftermath are scheduled at epoch 0 and dropped by the
+      epoch bump (`stale_epoch_dropped epoch=0 current=1`), and the realtime lane saturates at
+      load (`Realtime lane saturated; dropping event`). Start the marriage snapshot earlier, or
+      buffer events until session-start.
+- [ ] **Web Studio UX gaps.** The Sims tab has no auto-refresh (manual "Refresh Sims" only), and
+      the God tab does not render `director_mode` (only the preset dropdown).
+- [ ] **In-game Phase 6.2 validation still pending** — see [`hardening.md`](hardening.md).
+
+---
+
+## Earlier waves
+
+For P0–P4, the hardening pass, and BUG-01/02/03, see `git log` and [`bugs.md`](bugs.md).

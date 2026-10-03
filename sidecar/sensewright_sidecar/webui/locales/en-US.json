@@ -41,6 +41,7 @@
     "species": "Species",
     "age_stage": "Age Stage",
     "household": "Household",
+    "background": "Background",
     "personality_demeanor": "Personality & Demeanor",
     "core_personality": "Core Personality",
     "current_demeanor": "Current Demeanor",

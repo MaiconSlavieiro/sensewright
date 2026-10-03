@@ -59,6 +59,17 @@ class TestExtractJson:
         result = _extract_json(text)
         assert result == {"a": 1}
 
+    def test_reasoning_tag_wrapped_json(self):
+        text = '<thinking>the sim is a foodie</thinking>\n{"background": "A cozy kitchen."}'
+        result = _extract_json(text)
+        assert result == {"background": "A cozy kitchen."}
+
+    def test_prose_with_braces_before_json(self):
+        # Reasoning prose may itself contain braces; the last object is the payload.
+        text = 'I considered {several options} and settled on {"background": "A beach house."}'
+        result = _extract_json(text)
+        assert result == {"background": "A beach house."}
+
 
 class TestRecoverStructured:
     """Tests for _recover_structured (non-JSON few-shot imitation)."""

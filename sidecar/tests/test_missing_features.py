@@ -204,6 +204,32 @@ class TestLeaseExpiration:
         assert 1 not in state.catalyst_leases
 
 
+class TestSeatsEnrichment:
+    """Seats endpoint must carry sim identity/profile/background (Web Studio fix)."""
+
+    def test_seats_carry_name_profile_background(self):
+        state = _state_with_store()
+        store = state.working_store()
+        state.update_census({
+            1: {"sim_id": 1, "name": "Alice", "household_id": 10},
+            2: {"sim_id": 2, "name": "Bob", "household_id": 10},
+        })
+        store.upsert_sim_profile(1, {"name": "Alice", "core_personality": "gregarious"}, 1000)
+        store.set_sim_background(1, "A retired chef.", 1000)
+        state.relationships = {"1:2": {"friendship": 30.0, "romance": 0.0}}
+        state.set_seats({
+            1: {"sim_id": 1, "role": "household", "tier": "full", "lease_expires_tick": 2000},
+        })
+
+        result = services.handle_seats_get()
+        assert result["pool"] >= 0
+        seat = result["seats"][0]
+        assert seat["name"] == "Alice"
+        assert seat["profile"]["core_personality"] == "gregarious"
+        assert seat["background"] == "A retired chef."
+        assert seat["relationships"][0]["target_name"] == "Bob"
+
+
 class TestCompileAddon:
     def test_compile_addon_writes_package(self, tmp_path, monkeypatch):
         state = _state_with_store()
@@ -215,3 +241,64 @@ class TestCompileAddon:
         assert result["ok"] is True
         assert result["strings"] == 1
         assert os.path.exists(result["path"])
+
+
+class TestPanicRead:
+    """GET /v1/config/panic must expose the real switch state (Web Studio fix)."""
+
+    def test_panic_state_readable(self):
+        _state_with_store()
+        assert services.handle_config_panic_state()["paused"] is False
+        services.handle_config_panic({})
+        assert services.handle_config_panic_state()["paused"] is True
+        services.handle_config_resume({})
+        assert services.handle_config_panic_state()["paused"] is False
+
+
+class TestRelationshipReviewCadence:
+    """The per-sim-day cadence advances only after the job's callback lands."""
+
+    def _deferred_scheduler(self, captured):
+        class _Deferred:
+            def submit_bg(self, purpose_id, context=None, lang="", trace_id=None,
+                          dedup_key=None, callback=None):
+                captured["purpose"] = purpose_id
+                captured["callback"] = callback
+        return _Deferred()
+
+    def _seed(self, state):
+        state.update_census({
+            1: {"sim_id": 1, "name": "A", "household_id": 1},
+            2: {"sim_id": 2, "name": "B", "household_id": 1},
+        })
+        state.relationships = {"1:2": {"friendship": 40.0, "romance": 0.0}}
+
+    def test_tick_advances_only_after_callback(self):
+        state = _state_with_store()
+        self._seed(state)
+        captured = {}
+        state.scheduler = self._deferred_scheduler(captured)
+
+        scheduled = services._maybe_relationship_review(
+            state, tick=5000, lang="en-US", trace_id="t", active_sim_id=1)
+        assert scheduled == 1
+        assert captured["purpose"] == "mem.relationship.review"
+        # In flight: cadence must NOT have advanced yet.
+        assert 1 not in state.last_relationship_review_tick
+        # Callback lands -> cadence advances.
+        captured["callback"](types.SimpleNamespace(data={"qualitative_note": "close"}))
+        assert state.last_relationship_review_tick[1] == 5000
+
+    def test_stale_epoch_callback_does_not_advance(self):
+        state = _state_with_store()
+        self._seed(state)
+        captured = {}
+        state.scheduler = self._deferred_scheduler(captured)
+
+        services._maybe_relationship_review(
+            state, tick=5000, lang="en-US", trace_id="t", active_sim_id=1)
+        # A session reset/rewind bumps the epoch, dropping the in-flight result.
+        state.bump_epoch()
+        captured["callback"](types.SimpleNamespace(data={"qualitative_note": "close"}))
+        assert 1 not in state.last_relationship_review_tick
+

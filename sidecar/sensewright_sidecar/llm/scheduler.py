@@ -9,6 +9,7 @@ Template").
 """
 from __future__ import annotations
 
+import atexit
 import json
 import queue
 import re
@@ -35,8 +36,60 @@ logger = get_logger("llm.scheduler")
 _BACKGROUND_TIERS = ("bg", "deep")
 
 
+#: Reasoning-model wrappers (deepseek/openrouter reasoners) that some models emit
+#: around the requested JSON. Stripped before parsing so a generation is not
+#: benched just because it wrapped the payload in a thinking tag.
+_THINKING_TAG_RE = re.compile(
+    r"<(?:thinking|reasoning|thought|analysis)[^>]*>.*?</(?:thinking|reasoning|thought|analysis)>",
+    re.DOTALL,
+)
+
+
+def _balanced_json_block(text: str, prefer_last: bool = False) -> Dict[str, Any]:
+    """Return the first (or last) balanced ``{...}`` object parsed from ``text``."""
+    starts = [i for i, ch in enumerate(text) if ch == "{"]  # noqa: E741 - 'ch' is a char
+    if not starts:
+        return {}
+    indices = starts[::-1] if prefer_last else starts
+    for start in indices:
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:index + 1]
+                    try:
+                        data = json.loads(candidate)
+                        if isinstance(data, dict):
+                            return data
+                    except json.JSONDecodeError:
+                        pass
+                    break
+    return {}
+
+
 def _extract_json(text: str) -> Dict[str, Any]:
-    """Parse a provider's text into a JSON object, robust to prose wrappers."""
+    """Parse a provider's text into a JSON object, robust to prose wrappers.
+
+    Reasoning models (deepseek/openrouter reasoners) may wrap the requested JSON
+    in ``<thinking>``/``<reasoning>`` tags or emit prose before the object; both
+    are stripped/ignored so a generation does not get benched as "unusable".
+    """
     if not text:
         return {}
     stripped = text.strip()
@@ -44,45 +97,20 @@ def _extract_json(text: str) -> Dict[str, Any]:
     if stripped.startswith("```"):
         stripped = re.sub(r"^```[a-zA-Z]*\s*", "", stripped)
         stripped = re.sub(r"\s*```$", "", stripped).strip()
+    # Strip XML-style reasoning blocks.
+    stripped = _THINKING_TAG_RE.sub("", stripped).strip()
     try:
         data = json.loads(stripped)
         if isinstance(data, dict):
             return data
     except json.JSONDecodeError:
         pass
-    # Attempt to extract the first balanced {...} block.
-    start = stripped.find("{")
-    if start == -1:
-        return {}
-    depth = 0
-    in_string = False
-    escape = False
-    for index in range(start, len(stripped)):
-        char = stripped[index]
-        if in_string:
-            if escape:
-                escape = False
-            elif char == "\\":
-                escape = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = stripped[start:index + 1]
-                try:
-                    data = json.loads(candidate)
-                    if isinstance(data, dict):
-                        return data
-                except json.JSONDecodeError:
-                    pass
-                break
-    return {}
+    # Prefer the first balanced object; fall back to the last (reasoning prose
+    # may itself contain braces before the real payload).
+    data = _balanced_json_block(stripped, prefer_last=False)
+    if not data:
+        data = _balanced_json_block(stripped, prefer_last=True)
+    return data
 
 
 #: Legacy ``[thought]...[/thought]`` block some models imitate from few-shots.
@@ -357,6 +385,13 @@ class LLMScheduler:
             "game_budget": self._budgeter.snapshot(),
         }
 
+    def shutdown(self) -> None:
+        """Release the realtime pool on interpreter exit (the bg worker is a daemon)."""
+        try:
+            self._realtime_pool.shutdown(wait=False)
+        except Exception:  # noqa: BLE001 - best-effort teardown
+            pass
+
 
 _scheduler_singleton: Optional[LLMScheduler] = None
 _scheduler_lock = threading.Lock()
@@ -369,4 +404,5 @@ def get_scheduler() -> LLMScheduler:
         with _scheduler_lock:
             if _scheduler_singleton is None:
                 _scheduler_singleton = LLMScheduler(get_config())
+                atexit.register(_scheduler_singleton.shutdown)
     return _scheduler_singleton

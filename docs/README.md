@@ -16,6 +16,7 @@ below is the detailed reference (English).
 | [`plan.md`](plan.md) | Execution plan to close all remaining gaps (phases, dependencies, risks, in-game checklist). |
 | [`hardening.md`](hardening.md) | Runtime reliability & concurrency hardening plan (audit findings, thread-safety, LLM pressure). |
 | [`bugs.md`](bugs.md) | Newly discovered bugs from the 2026-10-03 deploy/playtest, not previously mapped (dialogue detection, stale arcs, beat liveness). |
+| [`changelog.md`](changelog.md) | What actually changed per session (edits, not plan), plus the open items still to do. |
 
 ## Repository layout
 

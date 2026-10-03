@@ -7,8 +7,9 @@ from fastapi import APIRouter, Body
 
 from ..schemas import sanitize_payload
 from ..services import (
-    handle_config_panic, handle_config_resume, handle_panel_summary,
-    handle_player_activity, handle_provider_config, handle_recap_get, health, status,
+    handle_config_panic, handle_config_panic_state, handle_config_resume,
+    handle_panel_summary, handle_player_activity, handle_provider_config,
+    handle_recap_get, health, status,
 )
 
 router = APIRouter(prefix="/v1", tags=["health"])
@@ -47,6 +48,11 @@ def config_provider(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any
 @router.post("/config/panic")
 def config_panic(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
     return handle_config_panic(sanitize_payload(payload))
+
+
+@router.get("/config/panic")
+def config_panic_state() -> Dict[str, Any]:
+    return handle_config_panic_state()
 
 
 @router.post("/config/resume")

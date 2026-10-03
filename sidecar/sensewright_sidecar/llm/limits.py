@@ -40,6 +40,14 @@ class ProviderRateLimiter:
         self._requests: Deque[float] = deque()           # minute window timestamps
         self._daily_requests: Deque[float] = deque()     # day window timestamps
         self._tokens: Deque[Tuple[float, int]] = deque()  # (timestamp, tokens)
+        #: Sum of pre-flight token estimates for dispatches that have not been
+        #: settled yet. Counts toward the TPM check so concurrent threads cannot
+        #: all pass the same "used + estimate" test before any records (3.6).
+        self._pending_tokens: int = 0
+
+    def _used_tokens(self) -> int:
+        """Reconciled tokens plus outstanding reservations (caller holds lock)."""
+        return sum(t for _, t in self._tokens) + self._pending_tokens
 
     def _prune(self, now: float) -> None:
         minute_ago = now - 60.0
@@ -61,8 +69,7 @@ class ProviderRateLimiter:
             if self.rpd and len(self._daily_requests) >= self.rpd:
                 return False
             if self.tpm and estimated_tokens > 0:
-                used_tokens = sum(t for _, t in self._tokens)
-                if used_tokens + estimated_tokens > self.tpm:
+                if self._used_tokens() + estimated_tokens > self.tpm:
                     return False
             return True
 
@@ -79,7 +86,10 @@ class ProviderRateLimiter:
 
         Replaces the separate ``can_accept`` + ``record_request`` calls, which
         formed a check-then-act race across concurrent HTTP threads and allowed
-        the limiter to overshoot its RPM/RPD/TPM budget (3.6).
+        the limiter to overshoot its RPM/RPD/TPM budget (3.6). When
+        ``estimated_tokens`` is given it is reserved against TPM until the
+        caller settles (``settle_reservation``) or releases (``release_reservation``)
+        it, so concurrent dispatches cannot all pass the same token check.
         """
         with self._lock:
             now = time.time()
@@ -89,12 +99,30 @@ class ProviderRateLimiter:
             if self.rpd and len(self._daily_requests) >= self.rpd:
                 return False
             if self.tpm and estimated_tokens > 0:
-                used_tokens = sum(t for _, t in self._tokens)
-                if used_tokens + estimated_tokens > self.tpm:
+                if self._used_tokens() + estimated_tokens > self.tpm:
                     return False
             self._requests.append(now)
             self._daily_requests.append(now)
+            if estimated_tokens > 0:
+                self._pending_tokens += int(estimated_tokens)
             return True
+
+    def settle_reservation(self, estimated_tokens: int, actual_tokens: int) -> None:
+        """Release a dispatch reservation and record the reconciled usage."""
+        with self._lock:
+            if estimated_tokens > 0:
+                self._pending_tokens = max(0, self._pending_tokens - int(estimated_tokens))
+            if actual_tokens > 0:
+                now = time.time()
+                self._prune(now)
+                self._tokens.append((now, int(actual_tokens)))
+
+    def release_reservation(self, estimated_tokens: int) -> None:
+        """Release a dispatch reservation after a failed dispatch (no tokens used)."""
+        if estimated_tokens <= 0:
+            return
+        with self._lock:
+            self._pending_tokens = max(0, self._pending_tokens - int(estimated_tokens))
 
     def record_tokens(self, tokens: int) -> None:
         """Record reconciled token usage (TPM accounting)."""
@@ -112,8 +140,7 @@ class ProviderRateLimiter:
             self._prune(now)
             if not self.tpm:
                 return None
-            used = sum(t for _, t in self._tokens)
-            return max(0, self.tpm - used)
+            return max(0, self.tpm - self._used_tokens())
 
     def snapshot(self) -> Dict[str, int]:
         """Return current counters for the Web Studio dashboard."""
@@ -121,10 +148,12 @@ class ProviderRateLimiter:
             now = time.time()
             self._prune(now)
             used_tokens = sum(t for _, t in self._tokens)
+            pending = self._pending_tokens
         return {
             "requests_last_minute": len(self._requests),
             "requests_last_day": len(self._daily_requests),
             "tokens_last_minute": used_tokens,
+            "tokens_pending": pending,
             "rpm_limit": self.rpm,
             "rpd_limit": self.rpd,
             "tpm_limit": self.tpm,

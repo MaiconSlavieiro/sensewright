@@ -113,6 +113,29 @@ class TestProviderRateLimiter:
         assert len(limiter._tokens) == 1
         assert limiter._tokens[0][1] == 25
 
+    def test_try_accept_reserves_tpm_for_concurrent_dispatches(self):
+        limiter = ProviderRateLimiter(rpm=0, rpd=0, tpm=100)
+        # The first dispatch reserves its estimate so a concurrent second one
+        # cannot also pass the same "used + estimate" check (3.6).
+        assert limiter.try_accept_and_record(60) is True
+        assert limiter.try_accept_and_record(60) is False
+        assert limiter.remaining_tpm() == 40
+
+    def test_release_reservation_frees_tpm(self):
+        limiter = ProviderRateLimiter(rpm=0, rpd=0, tpm=100)
+        assert limiter.try_accept_and_record(60) is True
+        limiter.release_reservation(60)
+        assert limiter.remaining_tpm() == 100
+        assert limiter.try_accept_and_record(60) is True
+
+    def test_settle_reservation_reconciles_actual_tokens(self):
+        limiter = ProviderRateLimiter(rpm=0, rpd=0, tpm=100)
+        assert limiter.try_accept_and_record(60) is True
+        limiter.settle_reservation(60, 30)
+        assert limiter.remaining_tpm() == 70
+        assert len(limiter._tokens) == 1
+        assert limiter._tokens[0][1] == 30
+
     def test_negative_limits_treated_as_zero(self):
         limiter = ProviderRateLimiter(rpm=-1, rpd=-1, tpm=-1)
         assert limiter.rpm == 0

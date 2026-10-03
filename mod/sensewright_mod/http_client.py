@@ -62,6 +62,7 @@ _ENDPOINT_TIMEOUTS = {
 }
 
 _worker_thread = None
+_intent_pull_thread = None
 _worker_running = False
 _sidecar_process = None
 _game_pid = None
@@ -369,6 +370,23 @@ def _maybe_intent_pull():
     _next_intent_pull_at[0] = time.monotonic() + _intent_pull_backoff[0]
 
 
+def _intent_pull_loop():
+    """Dedicated thread for the idle intent pull (4.3).
+
+    Kept off the outbound worker so a slow ``GET /autonomy/intents`` (5 s
+    timeout) can never delay lifecycle/chat/event dispatch.
+    """
+    worker_log_info('Intent-pull thread started')
+    while _worker_running and not _shutdown_event.is_set():
+        try:
+            _maybe_intent_pull()
+        except Exception as e:
+            worker_log_exception('Intent pull error: {}'.format(e))
+        # Cadence is governed by _next_intent_pull_at; sleep in short slices so
+        # shutdown stays responsive.
+        _shutdown_event.wait(0.5)
+
+
 def _worker_loop():
     """Main worker thread loop: drain realtime lane first, then the slots."""
     global _worker_running, _game_pid
@@ -391,9 +409,8 @@ def _worker_loop():
                 _process_outbound_request(request)
                 continue
 
-            # Both lanes idle: opportunistically pull pending intents, then
-            # block until a producer wakes us (no busy polling).
-            _maybe_intent_pull()
+            # Both lanes idle: block until a producer wakes us (no busy polling).
+            # Intent polling runs on its own thread (see _intent_pull_loop).
             _wakeup.wait(0.5)
             _wakeup.clear()
 
@@ -442,7 +459,7 @@ def _process_outbound_request(request):
 
 def start_worker():
     """Start the worker thread."""
-    global _worker_thread, _worker_running
+    global _worker_thread, _intent_pull_thread, _worker_running
     if _worker_running:
         return
 
@@ -450,11 +467,14 @@ def start_worker():
     _shutdown_event.clear()
     _worker_thread = threading.Thread(target=_worker_loop, name='SensewrightWorker', daemon=True)
     _worker_thread.start()
+    _intent_pull_thread = threading.Thread(
+        target=_intent_pull_loop, name='SensewrightIntentPull', daemon=True)
+    _intent_pull_thread.start()
 
 
 def stop_worker():
     """Stop the worker thread."""
-    global _worker_running, _worker_thread, _sidecar_process
+    global _worker_running, _worker_thread, _intent_pull_thread, _sidecar_process
     _worker_running = False
     _session_started[0] = False
     _shutdown_event.set()
@@ -463,6 +483,10 @@ def stop_worker():
     if _worker_thread is not None:
         _worker_thread.join(timeout=2.0)
         _worker_thread = None
+
+    if _intent_pull_thread is not None:
+        _intent_pull_thread.join(timeout=2.0)
+        _intent_pull_thread = None
 
     # Terminate sidecar process if we started it
     if _sidecar_process is not None:
