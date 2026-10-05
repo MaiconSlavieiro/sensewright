@@ -384,8 +384,10 @@ make sidecar     # run sidecar in foreground
 #### Decompile TS4 Scripts (for API reference)
 ```bash
 make decompile
-# Output: ~/Documents/TS4_Decompiled/
-# Requires: pip install unpyc3
+# Runs scripts/decompile_ts4.py: extracts .pyc from Data\Simulation\Gameplay\{base,core,simulation}.zip
+# and decompiles with decompyle3 into research/ts4/ (gitignored).
+# Requires: python -m pip install decompyle3
+# Ground-truth API notes: research/engine_api_notes.md
 ```
 
 ---

@@ -583,14 +583,14 @@ def post_lifecycle_attach():
     return post_async('/lifecycle/attach', {'game_pid': os.getpid()})
 
 
-def post_lifecycle_session_start(player_id, save_id, world_sim_tick, lang):
+def post_lifecycle_session_start(player_id, save_id, world_sim_tick, lang, callback=None):
     _session_started[0] = True
     return post_async('/lifecycle/session-start', {
         'player_id': player_id,
         'save_id': save_id,
         'world_sim_tick': world_sim_tick,
         'lang': lang
-    })
+    }, callback=callback)
 
 
 def post_lifecycle_zone_transition(player_id, save_id, new_zone_id, world_sim_tick):
@@ -628,7 +628,8 @@ def post_census(player_id, save_id, world_sim_tick, sims, households, relationsh
 
 
 def post_autonomy_tick(trace_id, player_id, save_id, world_sim_tick, clock_speed,
-                       active_sim_id, player_confidant_sim_id, sims_delta, lang, venue=None):
+                       active_sim_id, player_confidant_sim_id, sims_delta, lang, venue=None,
+                       outcomes=None):
     payload = {
         'trace_id': trace_id,
         'player_id': player_id,
@@ -642,6 +643,8 @@ def post_autonomy_tick(trace_id, player_id, save_id, world_sim_tick, clock_speed
     }
     if venue is not None:
         payload['venue'] = venue
+    if outcomes:
+        payload['outcomes'] = outcomes
     return post_async('/autonomy/tick', payload)
 
 

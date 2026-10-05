@@ -31,11 +31,27 @@ _suppress_marriage_events = [False]
 _lifecycle_ready = [False]
 _suppress_logged = [False]
 
+#: R7: instead of silently dropping lifecycle events that arrive during the load
+#: window (before the first autonomy pulse), hold up to 8 genuine events and
+#: dispatch them once the session is confirmed active.
+_event_buffer = []
+_EVENT_BUFFER_MAX = 8
+
 
 def mark_lifecycle_ready():
     """Enable lifecycle event posting (called after the first autonomy pulse)."""
     _lifecycle_ready[0] = True
     log_info('lifecycle: session ready, events enabled')
+    _flush_event_buffer()
+
+
+def _flush_event_buffer():
+    """Dispatch any events buffered during the load window (R7)."""
+    global _event_buffer
+    buffered = _event_buffer
+    _event_buffer = []
+    for (category, sim_info, target_sim_info, impact, content) in buffered:
+        _emit_lifecycle(category, sim_info, target_sim_info, impact, content)
 
 
 def is_lifecycle_ready():
@@ -72,15 +88,34 @@ def _sim_id(sim_info):
 
 
 def _post_lifecycle(category, sim_info, target_sim_info=None, impact=1.0, content=""):
-    """Post one lifecycle event to /v1/events. Never raises."""
+    """Post one lifecycle event to /v1/events. Never raises.
+
+    Before the first autonomy pulse the session is not yet active; instead of
+    dropping genuine events we buffer them (R7) and flush on ``mark_lifecycle_ready``.
+    """
     try:
-        if not _lifecycle_ready[0]:
-            # Diagnostic: log the suppression once per burst so a session log
-            # shows the load-time rehydration is being absorbed, not lost.
-            if not _suppress_logged[0]:
-                _suppress_logged[0] = True
-                log_info('lifecycle: suppressing events until first autonomy pulse (load rehydration)')
+        sim_id = _sim_id(sim_info)
+        if not sim_id:
             return False
+        if not _lifecycle_ready[0]:
+            # R7: buffer genuine events that arrive during the load window.
+            if len(_event_buffer) < _EVENT_BUFFER_MAX:
+                _event_buffer.append((category, sim_info, target_sim_info, impact, content))
+                if not _suppress_logged[0]:
+                    _suppress_logged[0] = True
+                    log_info('lifecycle: buffering events until session ready (load rehydration)')
+            else:
+                log_warn('lifecycle: event buffer full; dropping {} event'.format(category))
+            return True
+        return _emit_lifecycle(category, sim_info, target_sim_info, impact, content)
+    except Exception as e:
+        log_exception('Failed to post lifecycle event {}: {}'.format(category, e))
+        return False
+
+
+def _emit_lifecycle(category, sim_info, target_sim_info=None, impact=1.0, content=""):
+    """Actually post a lifecycle event. Never raises."""
+    try:
         sim_id = _sim_id(sim_info)
         if not sim_id:
             return False

@@ -88,6 +88,24 @@ def get_player_confidant_sim_id():
     return _player_confidant_sim_id
 
 
+def set_player_confidant_sim_id(sim_id):
+    """Adopt a persisted confidant sim id (R8).
+
+    Called when the sidecar's session-start response returns the save's exact
+    ``player_confidant_sim_id`` from its metadata table, so a new duplicate is
+    never created (the BUG-12 string-search is only a fallback).
+    """
+    global _player_confidant_sim_id
+    try:
+        sim_id = int(sim_id or 0)
+    except (TypeError, ValueError):
+        return
+    if sim_id <= 0:
+        return
+    _player_confidant_sim_id = sim_id
+    log_info('Adopted persisted player confidant id from sidecar: {}'.format(sim_id))
+
+
 _HIDDEN_HOUSEHOLD_NAME = 'Sensewright Hidden Household'
 
 

@@ -27,6 +27,7 @@ from .base import LLMError, LLMJob, LLMResult, LLMTimeout, ProviderResponse
 from .budgeter import GameBudgeter
 from .chain import ProviderChain
 from .context import ContextAssembler
+from .json_repair import extract_json as _repair_extract_json
 from .limits import estimate_tokens
 from .router import ModelRouter
 
@@ -39,6 +40,7 @@ _BACKGROUND_TIERS = ("bg", "deep")
 #: Reasoning-model wrappers (deepseek/openrouter reasoners) that some models emit
 #: around the requested JSON. Stripped before parsing so a generation is not
 #: benched just because it wrapped the payload in a thinking tag.
+#: Kept for backward compatibility; json_repair.strip_wrappers now handles this.
 _THINKING_TAG_RE = re.compile(
     r"<(?:thinking|reasoning|thought|analysis)[^>]*>.*?</(?:thinking|reasoning|thought|analysis)>",
     re.DOTALL,
@@ -46,7 +48,13 @@ _THINKING_TAG_RE = re.compile(
 
 
 def _balanced_json_block(text: str, prefer_last: bool = False) -> Dict[str, Any]:
-    """Return the first (or last) balanced ``{...}`` object parsed from ``text``."""
+    """Return the first (or last) balanced ``{...}`` object parsed from ``text``.
+
+    Now applies json_repair.repair_json_text before each parse attempt to handle
+    trailing commas, smart quotes, NaN/Infinity, etc.
+    """
+    from .json_repair import repair_json_text
+
     starts = [i for i, ch in enumerate(text) if ch == "{"]  # noqa: E741 - 'ch' is a char
     if not starts:
         return {}
@@ -73,8 +81,10 @@ def _balanced_json_block(text: str, prefer_last: bool = False) -> Dict[str, Any]
                 depth -= 1
                 if depth == 0:
                     candidate = text[start:index + 1]
+                    # Apply repair before parsing
+                    repaired = repair_json_text(candidate)
                     try:
-                        data = json.loads(candidate)
+                        data = json.loads(repaired)
                         if isinstance(data, dict):
                             return data
                     except json.JSONDecodeError:
@@ -86,31 +96,14 @@ def _balanced_json_block(text: str, prefer_last: bool = False) -> Dict[str, Any]
 def _extract_json(text: str) -> Dict[str, Any]:
     """Parse a provider's text into a JSON object, robust to prose wrappers.
 
-    Reasoning models (deepseek/openrouter reasoners) may wrap the requested JSON
-    in ``<thinking>``/``<reasoning>`` tags or emit prose before the object; both
-    are stripped/ignored so a generation does not get benched as "unusable".
+    Delegates to json_repair.extract_json which handles:
+    - Markdown code fences
+    - <thinking>/<reasoning>/<thought>/<analysis> tags
+    - Trailing commas, smart quotes, NaN/Infinity literals
+    - Unescaped control characters in strings
+    - Balanced brace extraction with repair
     """
-    if not text:
-        return {}
-    stripped = text.strip()
-    # Strip markdown code fences.
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```[a-zA-Z]*\s*", "", stripped)
-        stripped = re.sub(r"\s*```$", "", stripped).strip()
-    # Strip XML-style reasoning blocks.
-    stripped = _THINKING_TAG_RE.sub("", stripped).strip()
-    try:
-        data = json.loads(stripped)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-    # Prefer the first balanced object; fall back to the last (reasoning prose
-    # may itself contain braces before the real payload).
-    data = _balanced_json_block(stripped, prefer_last=False)
-    if not data:
-        data = _balanced_json_block(stripped, prefer_last=True)
-    return data
+    return _repair_extract_json(text)
 
 
 #: Legacy ``[thought]...[/thought]`` block some models imitate from few-shots.

@@ -851,6 +851,17 @@ def handle_session_start(payload: Dict[str, Any]) -> Dict[str, Any]:
             logger.info("BUG-02: deactivated %d stale active arc(s)", removed)
         state.active_arc = actives[0] if actives else None
 
+    # R8/P0: read persisted confidant sim_id from metadata so the Mod doesn't
+    # re-create a duplicate confidant each session.
+    confidant_sim_id = 0
+    if store is not None:
+        try:
+            meta_val = store.get_metadata("player_confidant_sim_id")
+            if meta_val:
+                confidant_sim_id = int(meta_val)
+        except Exception:  # noqa: BLE001
+            pass
+
     # P32: always generate the "Previously on…" recap at session-start and keep
     # the (synthetic) job key so the client can correlate it via GET /v1/recap.
     recap_job_id = "{}:{}:ops.recap".format(save_id, tick)
@@ -867,6 +878,7 @@ def handle_session_start(payload: Dict[str, Any]) -> Dict[str, Any]:
         "bootstrap_needed": bool(result.get("bootstrap_needed")),
         "rewound": bool(result.get("rewound")),
         "recap_job_id": recap_job_id,
+        "player_confidant_sim_id": confidant_sim_id,
     }
 
 
@@ -1114,6 +1126,67 @@ def _reaction_callback(state: AppState, sim_id: int, category: str, tick: int):
     return _callback
 
 
+# ── R1: Closed-loop intent telemetry ──────────────────────────────────────
+def _ingest_outcomes(state: AppState, save_id: int, tick: int, outcomes: List[Dict[str, Any]]) -> None:
+    """Validate, count, and persist intent outcomes from the Mod.
+
+    Each outcome must have: intent_id (str), status (applied|failed|expired|preempted_by_player),
+    reason (str), sim_tick (int), action_id (optional str/int).
+    Malformed entries are dropped silently. Capped at 200 per tick.
+    """
+    if not outcomes:
+        return
+    valid_statuses = {"applied", "failed", "expired", "preempted_by_player"}
+    cleaned: List[Dict[str, Any]] = []
+    for oc in outcomes[:200]:  # cap per tick
+        if not isinstance(oc, dict):
+            continue
+        intent_id = oc.get("intent_id")
+        status = oc.get("status")
+        reason = oc.get("reason", "")
+        sim_tick = oc.get("sim_tick")
+        action_id = oc.get("action_id")
+        if not isinstance(intent_id, (str, int)) or not intent_id:
+            continue
+        if not isinstance(status, str) or status not in valid_statuses:
+            continue
+        try:
+            sim_tick = int(sim_tick or 0)
+        except (TypeError, ValueError):
+            sim_tick = 0
+        cleaned.append({
+            "intent_id": str(intent_id),
+            "status": status,
+            "reason": str(reason) if reason else "",
+            "sim_tick": sim_tick,
+            "action_id": str(action_id) if action_id is not None else None,
+        })
+        # Increment per-status counters in AppState metrics
+        state.incr("outcomes_{}".format(status))
+    if cleaned:
+        state.incr("outcomes_total", len(cleaned))
+        store = state.working_store()
+        if store is not None:
+            try:
+                store.record_intent_outcomes(save_id, cleaned)
+            except Exception:  # noqa: BLE001
+                logger.exception("record_intent_outcomes failed for save %s", save_id)
+
+
+def handle_action_outcomes(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /v1/actions/outcomes — immediate/latency-sensitive outcome reports.
+
+    Accepts the same payload shape as the `outcomes` field on autonomy tick.
+    Returns a simple ack with the count of accepted outcomes.
+    """
+    state = get_state()
+    save_id = to_int(payload.get("save_id", 0))
+    tick = int(payload.get("world_sim_tick", 0))
+    outcomes = payload.get("outcomes") or []
+    _ingest_outcomes(state, save_id, tick, outcomes)
+    return {"ok": True, "accepted": len([o for o in outcomes if isinstance(o, dict) and o.get("intent_id") and o.get("status") in ("applied", "failed", "expired", "preempted_by_player")])}
+
+
 def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Merge the delta, schedule autonomous LLM work in the background and
     immediately return any intents that are ready.
@@ -1141,6 +1214,9 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "scheduled": 0, "intents": state.drain_intents(),
                 "social_sessions": [], "duplicate_tick": True}
 
+    # R1: Closed-loop intent telemetry — ingest outcomes from the Mod.
+    _ingest_outcomes(state, save_id, tick, payload.get("outcomes") or [])
+
     _merge_delta(state, payload.get("sims_delta") or [])
 
     # Venue context (venue_type / is_residential) grounds the location tone of
@@ -1148,6 +1224,18 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     venue = payload.get("venue")
     if isinstance(venue, dict):
         state.zone_context = dict(venue)
+
+    # R8/P0: Persist player_confidant_sim_id when the Mod reports it.
+    confidant_id = payload.get("player_confidant_sim_id")
+    if confidant_id:
+        try:
+            confidant_id = int(confidant_id)
+            if confidant_id != 0:
+                store = state.working_store()
+                if store is not None:
+                    store.set_metadata("player_confidant_sim_id", str(confidant_id))
+        except Exception:  # noqa: BLE001
+            pass
 
     # Pause handling: freeze autonomy when paused (REQ-ARCH-04).
     if clock_speed == 0:

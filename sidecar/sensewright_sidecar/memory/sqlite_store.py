@@ -40,6 +40,20 @@ _SCHEMA_STATEMENTS: List[str] = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS intent_outcomes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        intent_id TEXT,
+        status TEXT,
+        reason TEXT,
+        sim_tick INTEGER,
+        recorded_at TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_intent_outcomes_intent_id
+        ON intent_outcomes (intent_id)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS memories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sim_id INTEGER NOT NULL,
@@ -188,6 +202,43 @@ class SqliteStore:
         conn = self._connect()
         row = conn.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default
+
+    # Public metadata helpers (used by services for confidant persistence)
+    def set_metadata(self, key: str, value: str) -> None:
+        """Persist a metadata key/value pair."""
+        self._set_meta(key, value)
+
+    def get_metadata(self, key: str) -> Optional[str]:
+        """Retrieve a metadata value by key, or None if not set."""
+        val = self._get_meta(key)
+        return str(val) if val is not None else None
+
+    # ── intent outcomes (R1) ──────────────────────────────────────────────
+    def record_intent_outcomes(self, save_id: int, outcomes: List[Dict[str, Any]]) -> None:
+        """Batch-insert intent outcomes. Never raises; failures are logged and swallowed."""
+        if not outcomes:
+            return
+        from datetime import datetime
+        recorded_at = datetime.utcnow().isoformat() + "Z"
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    for oc in outcomes:
+                        intent_id = str(oc.get("intent_id", ""))
+                        status = str(oc.get("status", ""))
+                        reason = str(oc.get("reason", ""))
+                        sim_tick = int(oc.get("sim_tick", 0) or 0)
+                        if not intent_id or not status:
+                            continue
+                        conn.execute(
+                            """INSERT INTO intent_outcomes (intent_id, status, reason, sim_tick, recorded_at)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (intent_id, status, reason, sim_tick, recorded_at),
+                        )
+            except Exception:  # noqa: BLE001
+                # Swallow errors so a DB hiccup never breaks the tick handler
+                pass
 
     def get_tick(self) -> int:
         return int(self._get_meta("world_sim_tick", 0) or 0)

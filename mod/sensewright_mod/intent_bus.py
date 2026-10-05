@@ -120,6 +120,9 @@ class IntentBus(object):
         self._paused = False
         self._next_sleep_tick = {}  # sim_id -> tick when they next sleep
         self._last_expiry_log_at = 0.0
+        #: Closed-loop telemetry (R1): outcomes awaiting the next autonomy pulse.
+        #: Bounded so a burst can never grow unbounded in RAM.
+        self._outcomes = deque(maxlen=1024)
 
     def add_intent(self, intent_data):
         """Add an intent from sidecar response."""
@@ -198,6 +201,15 @@ class IntentBus(object):
                 # Check expiration
                 if self._is_expired(intent, current_tick):
                     expired_intents.append(intent)
+                    # R1: report the silent loss back to the sidecar so it can
+                    # adapt (e.g. stop re-issuing intents that never run).
+                    self._outcomes.append({
+                        'intent_id': str(intent.id),
+                        'status': 'expired',
+                        'reason': 'expired_on_{}'.format(intent.expires_on),
+                        'sim_tick': int(current_tick),
+                        'action_id': None,
+                    })
                     continue  # Drop expired intent
 
                 # Update delay
@@ -309,6 +321,35 @@ class IntentBus(object):
         with self._lock:
             self._intents.clear()
             self._next_sleep_tick.clear()
+
+    def record_outcome(self, intent_id, status, reason='', sim_tick=None, action_id=None):
+        """Record an intent's execution outcome (R1) for the next autonomy pulse.
+
+        ``status`` is one of ``applied|failed|expired|preempted_by_player``.
+        The sidecar uses these to learn whether an intent actually ran (it can no
+        longer treat fire-and-forget as success).
+        """
+        if not intent_id:
+            return
+        if status not in ('applied', 'failed', 'expired', 'preempted_by_player'):
+            status = 'failed'
+        if sim_tick is None:
+            sim_tick = self._get_current_tick()
+        with self._lock:
+            self._outcomes.append({
+                'intent_id': str(intent_id),
+                'status': status,
+                'reason': str(reason or ''),
+                'sim_tick': int(sim_tick or 0),
+                'action_id': str(action_id) if action_id is not None else None,
+            })
+
+    def drain_outcomes(self):
+        """Return and clear all pending outcomes (called from the autonomy pulse)."""
+        with self._lock:
+            outcomes = list(self._outcomes)
+            self._outcomes.clear()
+            return outcomes
 
     def get_stats(self):
         """Get bus statistics."""

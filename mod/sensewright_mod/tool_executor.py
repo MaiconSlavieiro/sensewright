@@ -571,6 +571,14 @@ def execute_intents(intents):
                     result['retry_scheduled'] = intent.retry_count
         worker_log_info('intent {} [{}] sim={} target={} -> success={} retried={} {}'.format(
             intent.id, intent.kind, intent.sim_id, intent.target_sim_id, success, retried, result))
+        # R1: closed-loop telemetry — tell the sidecar whether the intent ran.
+        if bus is not None:
+            if success:
+                bus.record_outcome(intent.id, 'applied', 'ok')
+            elif retried:
+                bus.record_outcome(intent.id, 'failed', 'retry_scheduled')
+            else:
+                bus.record_outcome(intent.id, 'failed', 'max_retries_exceeded')
         results.append({
             'intent_id': intent.id,
             'success': success,

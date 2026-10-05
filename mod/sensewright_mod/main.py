@@ -13,7 +13,7 @@ from sensewright_mod.state_collector import collect_sims_delta, collect_full_cen
 from sensewright_mod.intent_bus import get_intent_bus
 from sensewright_mod.tool_executor import execute_intents
 from sensewright_mod.tuning import register_all_tuning
-from sensewright_mod.native_hooks import get_or_create_player_confidant
+from sensewright_mod.native_hooks import get_or_create_player_confidant, set_player_confidant_sim_id
 from sensewright_mod.chat_ui import cmd_sw_chat, cmd_sw_chat_picker
 from sensewright_mod.panel_ui import cmd_sw_panel
 from sensewright_mod.pie_menu import register_pie_menu_interactions, cmd_pie_chat, cmd_pie_provoke, cmd_pie_panel
@@ -24,6 +24,9 @@ from sensewright_mod import interactions as _interactions  # noqa: F401
 # also register via import side effects.
 from sensewright_mod import object_interactions as _object_interactions  # noqa: F401
 from sensewright_mod import lifecycle_hooks as _lifecycle_hooks  # noqa: F401
+# Spike-Driven Development harness (R3): registers `sw.spike` / `sw.smoke_test`
+# console commands via decorators at import time.
+from sensewright_mod import spikes as _spikes  # noqa: F401
 from sensewright_mod import catalyst_tracker
 from sensewright_mod.visit_situation import register_visit_situation
 from sensewright_mod.player_activity import register_player_activity_hooks, update_idle_detection, clear_all_player_locks
@@ -175,6 +178,14 @@ class SensewrightService(object):
             except Exception as tracker_error:
                 log_exception('Catalyst tracker error: {}'.format(tracker_error))
 
+            # R1: drain the intent outcomes accumulated since the last pulse and
+            # attach them so the sidecar can close the actuation loop.
+            outcomes = []
+            try:
+                outcomes = get_intent_bus().drain_outcomes()
+            except Exception as outcome_error:
+                log_exception('Outcome drain error: {}'.format(outcome_error))
+
             post_autonomy_tick(
                 trace_id=trace_id,
                 player_id='player_1',
@@ -186,6 +197,7 @@ class SensewrightService(object):
                 sims_delta=sims_delta,
                 lang=get_current_language(),
                 venue=state.get('venue'),
+                outcomes=outcomes,
             )
         except Exception as e:
             log_exception('Autonomy pulse error: {}'.format(e))
@@ -224,6 +236,27 @@ def get_service():
     return _sensewright_service
 
 
+def _handle_session_start_response(response, trace_id):
+    """Adopt the sidecar's persisted confidant id, or create the confidant (R8).
+
+    Runs on the main thread (via ``process_inbound_queue``) after the sidecar
+    answers ``session-start``. If the sidecar returns this save's exact
+    ``player_confidant_sim_id`` we reuse it (no duplicate, BUG-12); otherwise
+    this is a first-time save and we create the confidant — the next autonomy
+    pulse reports its id so the sidecar persists it for future sessions.
+    """
+    try:
+        if not isinstance(response, dict):
+            return
+        persisted_id = response.get('player_confidant_sim_id')
+        if persisted_id:
+            set_player_confidant_sim_id(persisted_id)
+        else:
+            get_or_create_player_confidant()
+    except Exception as e:
+        log_exception('Session-start response handling error: {}'.format(e))
+
+
 # Lot 51 Core event handlers
 @event_service.handler(CoreEvent.GAME_TICK)
 def _on_game_tick(event_service, *args, **kwargs):
@@ -242,9 +275,6 @@ def _on_households_and_sims_loaded(event_service, *args, **kwargs):
     try:
         service = get_service()
         service.start()
-
-        # Get or create player confidant
-        get_or_create_player_confidant()
 
         from sensewright_mod.http_client import post_lifecycle_session_start, post_census
         state = get_current_game_state()
@@ -270,7 +300,8 @@ def _on_households_and_sims_loaded(event_service, *args, **kwargs):
 
         # Re-arm the sidecar watchdog (covers a sidecar restarted mid-session).
         post_lifecycle_attach()
-        post_lifecycle_session_start('player_1', save_id, tick, get_current_language())
+        post_lifecycle_session_start('player_1', save_id, tick, get_current_language(),
+                                     callback=_handle_session_start_response)
 
         # Send full census. The census window absorbs the relationship-bit
         # rehydration burst without emitting marriage events (3.4).

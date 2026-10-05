@@ -1370,3 +1370,84 @@ Dead config keys and no-op functions, wire fields the sidecar ignores (`content`
 `households`, `player_id`, `new_zone_id`, `player_confidant_sim_id`), `remember`/`forget`
 (no-op by design), some swallowed exceptions, and the MCP layer (see [`mcp.md`](mcp.md)).
 
+---
+
+## Stage 1 — Spike-Driven Development & State Sanitation (2026-10-05)
+
+> **Branch:** `v2-remake`. First wave of the [restructured roadmap](#restructured-execution-roadmap).
+> Executed under the "never code blind" rule: every native-hook probe is now backed by a
+> decompilation study and a runtime harness instead of guesswork.
+
+### Decompilation study
+
+- `scripts/decompile_ts4.py` (new) + `scripts/decompile-scripts.ps1` (rewritten): modern TS4
+  ships its server scripts as `.pyc` archives at `Data\Simulation\Gameplay\{base,core,
+  simulation}.zip` (Python 3.7, magic `42 0d 0d 0a`). The old script pointed at a layout that
+  no longer exists. Extraction + decompile via `decompyle3` into `research/ts4/` (gitignored —
+  proprietary EA code).
+- `research/engine_api_notes.md` (new): ground-truth facts read from the decompiled source —
+  console-command registration (`CommandType.Live`, not `DebugOnly`), `SituationManager.
+  create_situation/create_visit_situation`, `Relationship.sim_id_a/sim_id_b`, `SocialGroup.
+  member_sim_ids_gen()`, `Buff.mood_type`/`mood_weight`, `SimInfo` fields, and the
+  implications for each of the 4 probes.
+
+### Closed-loop intent telemetry (R1)
+
+- Mod (`intent_bus.py`): `IntentBus.record_outcome`/`drain_outcomes` + a bounded outcomes
+  deque; expiring intents now emit `expired` outcomes instead of vanishing silently.
+- Mod (`tool_executor.py`): `execute_intents` records `applied` / `failed`(retry) /
+  `failed`(max_retries) per intent.
+- Mod (`main.py` / `http_client.py`): the autonomy pulse drains and attaches `outcomes[]`.
+- Sidecar (`services.py`, `routers/autonomy.py`, `sqlite_store.py`): `_ingest_outcomes`
+  validates/counts/persists outcomes to a new `intent_outcomes` table; `POST /v1/actions/
+  outcomes` for immediate reports; counters exposed in `/v1/status`.
+
+### Confidant persistence (R8 / P0)
+
+- Sidecar: `player_confidant_sim_id` is stored in the save's `metadata` table (new
+  `SqliteStore.get_metadata`/`set_metadata`) and returned on `session-start`.
+- Mod (`native_hooks.py`, `main.py`, `http_client.py`): the `session-start` callback adopts
+  the persisted id (`set_player_confidant_sim_id`) instead of re-running the BUG-12 string
+  search; a first-time save creates the confidant and reports it on the next pulse.
+
+### Pre-session event buffer (R7)
+
+- `lifecycle_hooks.py`: genuine lifecycle events (death/birth/marriage) that arrive during
+  the load window are now **buffered** (max 8) and flushed on `mark_lifecycle_ready()`,
+  instead of being silently dropped (previously the realtime lane saturated and epoch-0
+  events were lost).
+
+### LLM JSON repair (R5)
+
+- `llm/json_repair.py` (new) + wired into `llm/scheduler._extract_json` /
+  `_balanced_json_block`: strips `<think>/<reasoning>` blocks and markdown fences, fixes
+  trailing commas, smart quotes, and bare `NaN`/`Infinity` before parsing. 53 tests.
+- `response_format: {"type":"json_object"}` deferred (touches 4+ provider files; lower value
+  than the repair layer and riskier to do blind).
+
+### Spike harness & data probes (R3)
+
+- `mod/sensewright_mod/engine_facade.py` (new): defensive, never-raising facade isolating
+  EA/S4CL access (SimInfo fields, interaction/social-group reads, situation spawn, buff
+  roundtrip, object resolution) — the single place native idiosyncrasies live.
+- `mod/sensewright_mod/spikes.py` (new): console commands `sw.spike <name>` and
+  `sw.smoke_test` (registered via `sims4.commands.Command(..., CommandType.Live)`), plus the
+  4 data probes (`interaction`, `ui_injection`, `routing`, `relationship`). Each probe prints
+  a console summary and appends a JSON line to `mod_logs/Sensewright_Spike.log`.
+- `main.py`: imports `spikes` for the command-registration side effect.
+- **In-game validation still pending** (the probes are the discovery tool — they must be run
+  in TS4 via the cheat console to confirm the EA APIs they read).
+
+### Deferred
+
+- **SSE unification (R2)** — the single-inbound-thread transport (SSE `timeout=15` + keepalive
+  + pull fallback). Deferred deliberately: it is a shutdown-path-sensitive change (`timeout=None`
+  hangs `TS4_x64.exe`, PC-02) that must be validated in-game, and the existing intent pull
+  (4.3) already delivers intents. Tracked for the next wave.
+
+### Verification
+
+- `cd sidecar && python -m pytest -q` → **763 passed** (689 → +53 json_repair + +21 stage1).
+- `py -3.7 -m compileall -q mod\sensewright_mod` → clean (spikes.py + engine_facade.py included).
+- `python mod/build_package.py` → 46 resources; `python mod/build.py` → 118,174 bytes.
+
