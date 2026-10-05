@@ -25,6 +25,18 @@ POWERS = (
     "catalyst_npcs", "aftermath",
 )
 
+#: Sovereign-agent autonomy modes (S-H01). ``full`` = impulses + social;
+#: ``reactive`` = event reactions only (no idle impulses); ``off`` = no agent
+#: autonomy at all (player/God only).
+AUTONOMY_MODES = ("full", "reactive", "off")
+
+
+def resolve_autonomy_mode(panel: PanelStore, config: Config) -> str:
+    mode = panel.get("autonomy_mode")
+    if mode in AUTONOMY_MODES:
+        return mode
+    return str(config.gameplay("autonomy_mode", "full"))
+
 
 def current_preset(panel: PanelStore, config: Config) -> str:
     preset = panel.get("preset")
@@ -97,6 +109,15 @@ def get_controls(panel: PanelStore, config: Config) -> List[Dict[str, Any]]:
         "description": "",
     })
     controls.append({
+        "key": "autonomy_mode",
+        "category": "director",
+        "type": "enum",
+        "value": resolve_autonomy_mode(panel, config),
+        "options": list(AUTONOMY_MODES),
+        "label": "autonomy_mode",
+        "description": "",
+    })
+    controls.append({
         "key": "spoiler_shield",
         "category": "director",
         "type": "bool",
@@ -140,6 +161,9 @@ def set_control(panel: PanelStore, config: Config, key: str, value: Any) -> bool
         panel.set(key, value)
         return True
     if key == "director_mode" and value in GOD_MODES:
+        panel.set(key, value)
+        return True
+    if key == "autonomy_mode" and value in AUTONOMY_MODES:
         panel.set(key, value)
         return True
     if key == "spoiler_shield":

@@ -65,6 +65,13 @@ class ProviderChain:
             )
         except (TypeError, ValueError):
             self._purpose_cooldown_seconds = PURPOSE_COOLDOWN_SECONDS
+        #: Per-model cooldown after repeated failures (configurable, S-H04).
+        try:
+            self._model_cooldown_seconds = float(
+                llm_cfg.get("model_cooldown_seconds", MODEL_COOLDOWN_SECONDS)
+            )
+        except (TypeError, ValueError):
+            self._model_cooldown_seconds = MODEL_COOLDOWN_SECONDS
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _limiter(self, name: str) -> ProviderRateLimiter:
@@ -87,6 +94,15 @@ class ProviderChain:
             self._limiters.pop(name, None)
             self._consecutive_failures.pop(name, None)
             self._circuit_cold_until.pop(name, None)
+            # Also clear per-model state keyed by (provider, model), otherwise a
+            # benched/unusable model stays benched after credentials are edited
+            # (S-H04).
+            for key in [k for k in self._model_failures if k[0] == name]:
+                self._model_failures.pop(key, None)
+            for key in [k for k in self._model_cooldown_until if k[0] == name]:
+                self._model_cooldown_until.pop(key, None)
+            for key in [k for k in self._invalid_cooldown_until if k[0] == name]:
+                self._invalid_cooldown_until.pop(key, None)
 
     def _is_cold(self, name: str) -> bool:
         with self._lock:
@@ -133,10 +149,10 @@ class ProviderChain:
             key = (name, model)
             self._model_failures[key] = self._model_failures.get(key, 0) + 1
             if self._model_failures[key] >= MODEL_COOLDOWN_FAILURES:
-                self._model_cooldown_until[key] = time.time() + MODEL_COOLDOWN_SECONDS
+                self._model_cooldown_until[key] = time.time() + self._model_cooldown_seconds
                 self._model_failures[key] = 0
                 logger.warning(
-                    "model %s/%s cooling for %.0fs", name, model, MODEL_COOLDOWN_SECONDS,
+                    "model %s/%s cooling for %.0fs", name, model, self._model_cooldown_seconds,
                 )
 
     def _record_success(self, name: str, model: Optional[str] = None) -> None:

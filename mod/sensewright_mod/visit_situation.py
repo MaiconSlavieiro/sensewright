@@ -147,6 +147,14 @@ def spawn_catalyst_visitor(sim_id, params):
 
         spawned = _spawn_sim(npc_info)
         situation = _start_visit(npc_info)
+        # Do not report success when nothing actually reached the lot (M-B02).
+        if not spawned and situation == 'none':
+            return False, {
+                'error': 'spawn_failed',
+                'npc_sim_id': _safe_getattr(npc_info, 'id', 0),
+                'spawned': spawned,
+                'situation': situation,
+            }
         _route_to_target(npc_info, target_sim_info, params)
         return True, {
             'npc_sim_id': _safe_getattr(npc_info, 'id', 0),

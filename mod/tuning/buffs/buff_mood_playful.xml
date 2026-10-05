@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<I c="Buff" i="buff" m="buffs.buff" n="buff_mood_playful" s="0">
+  <E n="buff_type">POSITIVE</E>
+  <T n="duration">90</T>
+  <E n="mood_type">PLAYFUL</E>
+  <T n="mood_weight">3</T>
+  <T n="visible">True</T>
+  <V n="buff_name" t="localized_string" p="STBL">stbl.buff.mood_playful.name</V>
+  <V n="buff_description" t="localized_string" p="STBL">stbl.buff.mood_playful.desc</V>
+  <V n="tooltip" t="localized_string" p="STBL">stbl.buff.mood_playful.desc</V>
+</I>

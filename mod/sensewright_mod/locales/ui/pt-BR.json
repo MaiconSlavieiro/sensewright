@@ -73,7 +73,13 @@
     "buff.mood_bored.desc": "Entediado e procurando o que fazer.",
     "buff.mood_uncomfortable.desc": "Algo parece errado.",
     "buff.mood_confident.desc": "Capaz e seguro de si.",
-    "buff.mood_energized.desc": "Fervilhando de energia."
+    "buff.mood_energized.desc": "Fervilhando de energia.",
+    "buff.mood_playful.name": "Brincalhão",
+    "buff.mood_playful.desc": "Com vontade de brincar e se divertir.",
+    "buff.mood_embarrassed.name": "Envergonhado",
+    "buff.mood_embarrassed.desc": "Morrendo de vergonha por dentro.",
+    "buff.mood_scared.name": "Assustado",
+    "buff.mood_scared.desc": "Uma apreensão difícil de sacudir."
   },
   "notify": {
     "recap": {
@@ -85,6 +91,7 @@
       "hint": "No jogo: digite sw.panel no console, ou clique com o botão direito em um Sim e abra o menu 'Sensewright...'."
     },
     "typing": "{sim_name} está digitando...",
+    "provoke_prompt": "Provocar uma cena interessante aqui.",
     "chat": {
       "respond": "Responder Agora"
     },

@@ -113,12 +113,17 @@ def _get_zone_id():
 
 
 def _get_save_slot_guid():
-    """Get save slot GUID."""
+    """Get save slot GUID (numeric); 0 when unavailable.
+
+    Returning ``'unknown'`` used to crash the sidecar's ``int(save_id)`` on
+    session-start/autonomy-tick (S-H06), so a non-numeric string is never sent.
+    """
     try:
         from lot51_core.lib.save import get_save_slot_guid
-        return get_save_slot_guid()
+        value = get_save_slot_guid()
+        return int(value)
     except Exception:
-        return 'unknown'
+        return 0
 
 
 def _get_installed_packs():

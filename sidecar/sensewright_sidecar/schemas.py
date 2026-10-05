@@ -96,6 +96,17 @@ def require_str(payload: Dict[str, Any], key: str, default: str = "") -> str:
 def require_int(payload: Dict[str, Any], key: str, default: int = 0) -> int:
     """Return an int field, coercing floats/strings safely."""
     value = payload.get(key, default)
+    return to_int(value, default)
+
+
+def to_int(value: Any, default: int = 0) -> int:
+    """Coerce ``value`` to int, returning ``default`` when not numeric.
+
+    Guards handlers against non-numeric IDs (e.g. a legacy ``save_id="unknown"``)
+    that would otherwise raise and degrade the whole session (S-H06).
+    """
+    if isinstance(value, bool):
+        return int(value)
     try:
         return int(value)
     except (TypeError, ValueError):

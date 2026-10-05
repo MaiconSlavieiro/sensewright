@@ -1,4 +1,4 @@
-"""Regression tests for the bugs catalogued in docs/bugs.md.
+"""Regression tests for the bugs catalogued in docs/operations.md.
 
 BUG-01 — ``sim.social`` pair detection.
 BUG-02 — stale duplicate active arcs.

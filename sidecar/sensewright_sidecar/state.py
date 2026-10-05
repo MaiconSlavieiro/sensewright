@@ -86,6 +86,10 @@ class AppState:
         self.last_relationship_review_tick: Dict[int, int] = {}
         #: Panic switch (FC4 / 4.8): when True autonomy dispatch is suspended.
         self.paused: bool = False
+        #: Deep-window signal (F16): True while the player is idle/paused, so
+        #: long-horizon "deep" work may be exploited (S-M03). Set from
+        #: /v1/config/player-activity and surfaced in /v1/status.
+        self.deep_window_open: bool = False
 
         # Seat manager state.
         self.seats: Dict[int, Dict[str, Any]] = {}

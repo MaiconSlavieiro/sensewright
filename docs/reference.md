@@ -1,13 +1,24 @@
-# The 33 Purposes (Canonical Catalog)
+# Reference
+
+Look-up material for contributors: the canonical catalog of the 33 purposes and the localization engine / translation contribution guide.
+
+**On this page**
+
+- [Purpose Catalog](#purpose-catalog)
+- [Localization and Translation](#localization-and-translation)
+
+---
+
+## Purpose Catalog
 
 Each purpose has a stable ID, a tier (driving SLO + token budget + concurrency), input/output
 token budgets, a trigger, a SQLite artifact, and an in-game consumer. All 33 have deterministic
 0-key fallbacks.
 
 > For the current wiring status of each purpose (Full / Partial / Fallback-only), see
-> [`status.md`](status.md).
+> [`project-status.md`](project-status.md).
 
-## Domain: `sim` (13)
+### Domain: `sim` (13)
 
 | ID | Tier | Trigger | Artifact | Consumer |
 |----|------|---------|----------|----------|
@@ -25,7 +36,7 @@ token budgets, a trigger, a SQLite artifact, and an in-game consumer. All 33 hav
 | `sim.aspiration` | deep | Aspiration change/milestone | `profile.ambition` | Mid-term goals in cognition |
 | `sim.background.expand` | bg | 1× for family/close friends | 3 backstory memories | Revealed via GetToKnow |
 
-## Domain: `god` (8)
+### Domain: `god` (8)
 
 | ID | Tier | Trigger | Artifact | Consumer |
 |----|------|---------|----------|----------|
@@ -38,7 +49,7 @@ token budgets, a trigger, a SQLite artifact, and an in-game consumer. All 33 hav
 | `god.narration` | realtime | Beat start / intervention | 1 atmospheric line (≤80 tok) | SPECIAL_MOMENT banner |
 | `god.background` | bg | BackgroundScheduler queue | `sims.background` | Scene context + chronicles |
 
-## Domain: `world` (4)
+### Domain: `world` (4)
 
 | ID | Tier | Trigger | Artifact | Consumer |
 |----|------|---------|----------|----------|
@@ -47,7 +58,7 @@ token budgets, a trigger, a SQLite artifact, and an in-game consumer. All 33 hav
 | `world.gossip` | bg | Public salient event / snoop | RumorNode in neighborhoods | Social dialogues + phone SMS |
 | `world.aftermath` | bg | Post-climax (salience ≥ 2.0) | durable intents + zeitgeist shift | Alters relations and weather |
 
-## Domain: `mem` (4)
+### Domain: `mem` (4)
 
 | ID | Tier | Trigger | Artifact | Consumer |
 |----|------|---------|----------|----------|
@@ -56,16 +67,93 @@ token budgets, a trigger, a SQLite artifact, and an in-game consumer. All 33 hav
 | `mem.legacy` | deep | Death, marriage, birth | legacy memory (immune to decay) | sim.lifestory + epitaph |
 | `mem.relationship.review` | deep | Deep window (active edges) | `relationships.qualitative_note` | Native sentiments + chat/social |
 
-## Domain: `evo` (2)
+### Domain: `evo` (2)
 
 | ID | Tier | Trigger | Artifact | Consumer |
 |----|------|---------|----------|----------|
 | `evo.reflect` | deep | Sleep (≥8 ev) / mirror | updates `current_demeanor` | Phase shift preserving `core_personality` |
 | `evo.trait` | deep | Trauma/belief > 0.85 / habit | likes/dislikes / trait swap | trait_tracker + Accept banner |
 
-## Domain: `ops` (2)
+### Domain: `ops` (2)
 
 | ID | Tier | Trigger | Artifact | Consumer |
 |----|------|---------|----------|----------|
 | `ops.recap` | bg | `lifecycle/session-start` | `{headline, recap_text}` | "Previously on..." banner |
 | `ops.panel.summary` | bg | State change / panel open | 2-line diagnostic summary | Quick Menu header + Web Studio |
+
+
+---
+
+## Localization and Translation
+
+Sensewright uses a **manifest-driven, zero-hardcode i18n engine** with a 4-layer cascade:
+
+```
+User Overlay (data/locales/) → Active Locale (sidecar/locales/) → Base Subtag (e.g., pt) → Manifest Default (en-US)
+```
+
+The engine itself is documented in [`architecture.md`](architecture.md) §6.
+
+### File Topology
+
+```
+PlaintextMods/Sensewright/
+├── Sensewright.ts4script          # Embedded fallback locales/
+├── Sensewright.package            # Compiled STBLs from locales/stbl/
+├── data/
+│   └── locales/                   # [LAYER 1 — USER/COMMUNITY OVERLAY]
+│       ├── manifest.override.json # Optional: register new languages
+│       ├── ui/                    # Drop-in: <locale>.json (overrides Mod UI)
+│       └── content/               # Drop-in: <locale>.json (overrides Prompts/Fallbacks)
+└── sidecar/
+    └── locales/                   # [LAYER 2 — OFFICIAL BUNDLE]
+        ├── manifest.json          # Single source of truth
+        ├── ui/
+        │   ├── en-US.json
+        │   └── pt-BR.json
+        └── content/
+            ├── en-US.json
+            └── pt-BR.json
+```
+
+### Manifest Contract (`manifest.json`)
+
+```json
+{
+  "schema_version": 2,
+  "default_locale": "en-US",
+  "locales": [
+    {
+      "code": "en-US",
+      "base_subtag": "en",
+      "display_name": "English (US)",
+      "llm_language_name": "English",
+      "ts4_stbl_byte": "0x00",
+      "ts4_client_tokens": ["eng_us", "en_us", "en-us", "en"],
+      "direction": "ltr"
+    },
+    {
+      "code": "pt-BR",
+      "base_subtag": "pt",
+      "display_name": "Português (Brasil)",
+      "llm_language_name": "Português do Brasil (pt-BR)",
+      "ts4_stbl_byte": "0x11",
+      "ts4_client_tokens": ["por_br", "pt_br", "pt-br", "pt"],
+      "direction": "ltr"
+    }
+  ]
+}
+```
+
+### Contributing a Translation
+
+1. Fork the repo.
+2. Add `<new-locale>.json` under `sidecar/locales/ui/` and `sidecar/locales/content/`.
+3. Add the locale entry to `manifest.json` (copy an existing entry, adjust `code`, `base_subtag`, `ts4_stbl_byte`, `ts4_client_tokens`, `llm_language_name`).
+4. Run `make package` to compile STBLs into `.package`.
+5. Submit PR.
+
+### Gender Inflection & List Rotation
+
+- **Gender macro**: `{g:masculine|feminine|neutral}` in any string. At runtime, the engine picks the correct form based on the Sim's gender (`M`/`F`/`N`).
+- **List rotation**: Any string value can be a `list[str]`. The engine picks one deterministically via `hash(seed + key) % len(list)`. Seed defaults to `sim_id:sim_hour`.

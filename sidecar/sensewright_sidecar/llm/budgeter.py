@@ -12,12 +12,27 @@ from typing import Dict
 
 
 class GameBudgeter:
-    """Tracks per-sim token spend and supports refunds."""
+    """Tracks per-sim token spend and supports refunds.
 
-    def __init__(self, default_cap: int = 10000) -> None:
+    ``default_cap`` of ``0`` means unlimited (pacing disabled); a positive cap
+    enforces REQ-SCHED-02 by making :meth:`can_spend` return False once a sim
+    would exceed its allowance (S-H03).
+    """
+
+    def __init__(self, default_cap: int = 0) -> None:
         self._lock = threading.Lock()
         self._spend: Dict[int, int] = {}
-        self._cap = default_cap
+        self._cap = max(0, int(default_cap))
+
+    def cap(self) -> int:
+        return self._cap
+
+    def can_spend(self, sim_id: int, tokens: int) -> bool:
+        """True if spending ``tokens`` keeps the sim within its cap."""
+        if self._cap <= 0:
+            return True
+        with self._lock:
+            return self._spend.get(int(sim_id), 0) + max(0, int(tokens)) <= self._cap
 
     def spend(self, sim_id: int, tokens: int) -> None:
         with self._lock:

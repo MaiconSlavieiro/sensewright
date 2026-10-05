@@ -154,7 +154,7 @@ class LLMScheduler:
         self._router = ModelRouter(config)
         self._chain = ProviderChain(config)
         self._assembler = ContextAssembler(config)
-        self._budgeter = GameBudgeter()
+        self._budgeter = GameBudgeter(int(config.gameplay("game_budget_tokens", 0)))
         self._queue: "queue.Queue[LLMJob]" = queue.Queue()
         self._in_flight: set = set()
         self._lock = threading.Lock()
@@ -234,6 +234,14 @@ class LLMScheduler:
 
         # Enforce per-tier concurrency (REQ-SCHED-01). Excess calls degrade to
         # the deterministic fallback instead of queueing behind a slow peer.
+        est = estimate_tokens(json.dumps(messages, ensure_ascii=False)) + max_out
+        if sim_id is not None and not self._budgeter.can_spend(int(sim_id), est):
+            return LLMResult(
+                ok=True, data=render_fallback(purpose_id, lang, context),
+                fallback=True, error="game budget exhausted",
+                latency_s=time.time() - started,
+            )
+
         sem = self._tier_semaphore(tier)
         if not sem.acquire(blocking=False):
             return LLMResult(
@@ -244,7 +252,6 @@ class LLMScheduler:
 
         # Asymmetric game budget (REQ-SCHED-02): debit the estimate at dispatch;
         # only the game budget is refunded on failure, never provider limits.
-        est = estimate_tokens(json.dumps(messages, ensure_ascii=False)) + max_out
         if sim_id is not None:
             self._budgeter.spend(int(sim_id), est)
         response, provider_name, model = None, None, None

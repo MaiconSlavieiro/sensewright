@@ -75,6 +75,9 @@ _OWNED_NAMES = {
     "mood_buff_uncomfortable": "buff_mood_uncomfortable",
     "mood_buff_confident": "buff_mood_confident",
     "mood_buff_energized": "buff_mood_energized",
+    "mood_buff_playful": "buff_mood_playful",
+    "mood_buff_embarrassed": "buff_mood_embarrassed",
+    "mood_buff_scared": "buff_mood_scared",
 }
 
 #: Semantic mood keys that have a dedicated emotion buff. "fine" (neutral) is
@@ -82,6 +85,7 @@ _OWNED_NAMES = {
 _MOOD_BUFF_KEYS = (
     "happy", "sad", "angry", "tense", "flirty", "inspired",
     "focused", "dazed", "bored", "uncomfortable", "confident", "energized",
+    "playful", "embarrassed", "scared",
 )
 
 _tuning_ids_cache = None

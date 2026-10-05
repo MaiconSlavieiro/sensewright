@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from ..constants import (
     LEASE_GOD_CATALYST_PUPPET, LEASE_PLAYER_MANUAL, LEASE_PRIORITY,
-    LEASE_SANDBOX_OVERRIDE, LEASE_SOVEREIGN_AGENT,
+    LEASE_SANDBOX_OVERRIDE, LEASE_SOVEREIGN_AGENT, TICKS_PER_SIM_MINUTE,
 )
 from ..state import AppState
 
@@ -40,9 +40,14 @@ def is_sovereign_agent(state: AppState, sim_id: int) -> bool:
 
 
 def set_catalyst_lease(state: AppState, sim_id: int, objective: str, tick: int) -> None:
+    # The lease lasts ``gameplay.lease_min_sim_minutes`` sim-minutes; convert to
+    # the world tick scale (TICKS_PER_SIM_MINUTE) so the puppeteer objective is
+    # not wiped after a fraction of a sim-minute (S-B01).
+    lease_min = int(state.config.gameplay("lease_min_sim_minutes", 60))
+    ttl_ticks = max(1, lease_min) * TICKS_PER_SIM_MINUTE
     state.catalyst_leases[int(sim_id)] = {
         "objective": objective,
-        "lease_expires_tick": int(tick) + 1440,
+        "lease_expires_tick": int(tick) + ttl_ticks,
     }
 
 

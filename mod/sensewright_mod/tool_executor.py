@@ -368,10 +368,13 @@ class GameLever(object):
             return False, {'error': 'sim_not_found'}
 
         try:
-            # Add a temporary relationship bit that increases attraction
+            # Add a relationship bit that fosters seeking the target. There is no
+            # verified native "prefer_target" sentiment; when it is absent we
+            # report failure instead of returning success with no effect (X-B01).
             bit_id = ArchetypeResolver.resolve_sentiment('prefer_target')
-            if bit_id:
-                add_relationship_bit(sim_info, target_info, bit_id)
+            if not bit_id:
+                return False, {'error': 'no_prefer_target_bit', 'target_sim_id': target_sim_id}
+            add_relationship_bit(sim_info, target_info, bit_id)
             return True, {'target_preferred': target_sim_id}
         except Exception as e:
             log_exception('Prefer target error: {}'.format(e))
@@ -390,11 +393,13 @@ class GameLever(object):
             return False, {'error': 'sim_not_found'}
 
         try:
-            # Store goal in sim_info for cognition system to pick up
+            # The sidecar owns the cognition daily plan; this local mirror is not
+            # read by any gameplay code (M-H03). Kept so a future hook can consume
+            # it, but the result says so instead of implying game effect.
             if not hasattr(sim_info, '_sensewright_goals'):
                 sim_info._sensewright_goals = {}
             sim_info._sensewright_goals[block] = goal
-            return True, {'goal_set': goal, 'block': block}
+            return True, {'goal_set': goal, 'block': block, 'note': 'local_mirror; sidecar owns plan'}
         except Exception as e:
             log_exception('Set goal error: {}'.format(e))
             return False, {'error': 'goal_failed'}
@@ -446,12 +451,26 @@ class GameLever(object):
             if command == 'weather.set':
                 weather_type = args.get('weather', 'clear')
                 weather_id = ArchetypeResolver.resolve_weather(weather_type)
-                if weather_id:
-                    # Apply weather via weather service
+                if not weather_id:
+                    return False, {'error': 'unknown_weather', 'weather': weather_type}
+                duration_hours = int(args.get('duration_sim_hours', 6) or 6)
+                try:
+                    # Seasons EP: the real lever (S-B02 / REQ-GOD-02).
+                    from sims4communitylib.utils.common_weather_utils import CommonWeatherUtils
+                    CommonWeatherUtils.start_weather_event(weather_id, duration_hours)
+                    return True, {'weather_set': weather_type}
+                except Exception as e:
+                    log_exception('Weather set error: {}'.format(e))
+                    # Degraded fallback: a weather forecast is a read/API that may
+                    # exist on older builds; never report success without effect.
                     weather_service = services.weather_service()
-                    if weather_service:
-                        weather_service.set_weather_forecast(weather_id)
-                return True, {'weather_set': weather_type}
+                    if weather_service is not None and hasattr(weather_service, 'set_weather_forecast'):
+                        try:
+                            weather_service.set_weather_forecast(weather_id)
+                            return True, {'weather_set': weather_type, 'via': 'forecast'}
+                        except Exception as e2:
+                            log_exception('Weather forecast error: {}'.format(e2))
+                    return False, {'error': 'weather_failed', 'weather': weather_type}
 
             elif command == 'world.gossip':
                 # Surface a neighborhood rumor as a diegetic "SMS" notification
@@ -473,18 +492,33 @@ class GameLever(object):
 
             elif command == 'zone.modifier':
                 modifier = args.get('modifier', '')
+                if not modifier:
+                    return False, {'error': 'no_modifier'}
                 zone_id = args.get('zone_id', services.current_zone_id())
-                # Apply zone modifier
-                from lot51_core.lib.zone import add_zone_modifier
-                # Would need tuning ID for modifier
-                return True, {'zone_modifier': modifier}
+                try:
+                    from lot51_core.lib.zone import add_zone_modifier
+                    add_zone_modifier(zone_id, modifier)
+                    return True, {'zone_modifier': modifier}
+                except Exception as e:
+                    log_exception('Zone modifier error: {}'.format(e))
+                    return False, {'error': 'zone_modifier_failed', 'modifier': modifier}
 
             elif command == 'notification.send':
-                # Send a game notification
-                title = args.get('title', '')
+                title = args.get('title', '') or 'Sensewright'
                 text = args.get('text', '')
-                # Simplified
-                return True, {'notification_sent': True}
+                if not text:
+                    return False, {'error': 'no_notification_text'}
+                try:
+                    from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification
+                    from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
+                    CommonBasicNotification(
+                        CommonLocalizationUtils.create_localized_string(title),
+                        CommonLocalizationUtils.create_localized_string(text),
+                    ).show()
+                    return True, {'notification_sent': True}
+                except Exception as e:
+                    log_exception('Notification send error: {}'.format(e))
+                    return False, {'error': 'notification_failed'}
 
             return False, {'error': 'command_not_implemented'}
         except Exception as e:
@@ -509,12 +543,34 @@ class GameLever(object):
 
 
 def execute_intents(intents):
-    """Execute a list of intents, returning results."""
+    """Execute a list of intents, returning results.
+
+    M-H02: a failed intent is re-queued (with a small delay) while it still has
+    retries left, instead of being silently dropped.
+    """
     results = []
+    try:
+        from sensewright_mod.intent_bus import get_intent_bus
+        bus = get_intent_bus()
+    except Exception:
+        bus = None
+
     for intent in intents:
         success, result = GameLever.execute_intent(intent)
-        worker_log_info('intent {} [{}] sim={} target={} -> success={} {}'.format(
-            intent.id, intent.kind, intent.sim_id, intent.target_sim_id, success, result))
+        retried = False
+        if not success and bus is not None:
+            retry_count = getattr(intent, 'retry_count', 0)
+            max_retries = getattr(intent, 'max_retries', 0)
+            if retry_count < max_retries:
+                intent.retry_count = retry_count + 1
+                intent.delay_sim_minutes = 1.0
+                intent._dispatched = False
+                if bus.add_intent(intent):
+                    retried = True
+                    result = dict(result or {})
+                    result['retry_scheduled'] = intent.retry_count
+        worker_log_info('intent {} [{}] sim={} target={} -> success={} retried={} {}'.format(
+            intent.id, intent.kind, intent.sim_id, intent.target_sim_id, success, retried, result))
         results.append({
             'intent_id': intent.id,
             'success': success,

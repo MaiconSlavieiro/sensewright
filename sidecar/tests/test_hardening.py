@@ -1,4 +1,4 @@
-"""Regression tests for the runtime hardening plan (docs/hardening.md).
+"""Regression tests for the runtime hardening plan (docs/operations.md).
 
 Covers: strict rewind tolerance (2.1), tick idempotency (2.3), session epoch
 guards (2.4), god single-flight (3.1), the atomic rate limiter (3.6), impulse

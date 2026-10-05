@@ -59,7 +59,7 @@
 
 The mod can auto-start the sidecar: create `sidecar/python.txt` containing the full path to a Python 3.10+ executable. With no provider enabled, every purpose answers with a deterministic localized fallback (fully offline).
 
-Full step-by-step instructions: [`docs/install.md`](docs/install.md).
+Full step-by-step instructions: [`docs/getting-started.md`](docs/getting-started.md).
 
 ---
 
@@ -67,14 +67,14 @@ Full step-by-step instructions: [`docs/install.md`](docs/install.md).
 
 | Document | Contents |
 |----------|----------|
-| [`docs/install.md`](docs/install.md) | Installation, configuration, autoboot, troubleshooting, uninstall |
+| [`docs/getting-started.md`](docs/getting-started.md) | Install, configure, autoboot, troubleshooting, uninstall, build & development |
 | [`docs/architecture.md`](docs/architecture.md) | Dual-process architecture, Shadow DB, LLM layer, i18n, God Director, World Layer, REST reference |
-| [`docs/purposes.md`](docs/purposes.md) | Canonical catalog of the 33 purposes (tier, trigger, artifact, consumer) |
-| [`docs/i18n.md`](docs/i18n.md) | Localization engine and translation contribution guide |
-| [`docs/development.md`](docs/development.md) | Build system, Make targets, PowerShell scripts, test cycle |
-| [`docs/requirements.md`](docs/requirements.md) | Full v2 specification (milestones, features, acceptance criteria) |
-| [`docs/status.md`](docs/status.md) | Implementation status and known gaps |
-| [`docs/plan.md`](docs/plan.md) | Plan to close all remaining gaps |
+| [`docs/reference.md`](docs/reference.md) | Catalog of the 33 purposes + localization engine / translation guide |
+| [`docs/specification.md`](docs/specification.md) | Full v2 specification (milestones, features, acceptance criteria) |
+| [`docs/mcp.md`](docs/mcp.md) | MCP layer (design + plan): protocol, gateway, facades, rules, SSE |
+| [`docs/project-status.md`](docs/project-status.md) | Implementation status, gap-closing plan, changelog |
+| [`docs/operations.md`](docs/operations.md) | Architectural review & evolution plan, hardening, playtest bugs, weak-point remediation |
+| [`docs/README.md`](docs/README.md) | Documentation hub / index |
 
 ---
 

@@ -73,7 +73,13 @@
     "buff.mood_bored.desc": "Bored and looking for something to do.",
     "buff.mood_uncomfortable.desc": "Something feels off.",
     "buff.mood_confident.desc": "Feeling capable and sure.",
-    "buff.mood_energized.desc": "Buzzing with energy."
+    "buff.mood_energized.desc": "Buzzing with energy.",
+    "buff.mood_playful.name": "Playful",
+    "buff.mood_playful.desc": "In the mood to play and have fun.",
+    "buff.mood_embarrassed.name": "Embarrassed",
+    "buff.mood_embarrassed.desc": "Cringing on the inside.",
+    "buff.mood_scared.name": "Scared",
+    "buff.mood_scared.desc": "A creeping unease they cannot shake."
   },
   "notify": {
     "recap": {
@@ -85,6 +91,7 @@
       "hint": "In-game: type sw.panel in the console, or right-click a Sim and open the 'Sensewright...' pie menu."
     },
     "typing": "{sim_name} is typing...",
+    "provoke_prompt": "Provoke an interesting scene here.",
     "chat": {
       "respond": "Reply Now"
     },

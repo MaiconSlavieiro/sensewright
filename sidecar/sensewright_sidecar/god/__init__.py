@@ -8,7 +8,7 @@ from .arcs import (
 from .cast import find_compatible_townie, run_cast
 from .controls import (
     GOD_DIALS, GOD_MODES, GOD_PRESETS, POWERS, current_preset, get_controls,
-    resolve_dial, resolve_mode, resolve_powers, set_control,
+    resolve_autonomy_mode, resolve_dial, resolve_mode, resolve_powers, set_control,
 )
 from .coordinator import (
     can_god_puppeteer, clear_catalyst_lease, is_player_locked, is_sovereign_agent,
@@ -24,7 +24,7 @@ __all__ = [
     "save_arc", "steer_arc",
     "find_compatible_townie", "run_cast",
     "GOD_DIALS", "GOD_MODES", "GOD_PRESETS", "POWERS", "current_preset", "get_controls",
-    "resolve_dial", "resolve_mode", "resolve_powers", "set_control",
+    "resolve_autonomy_mode", "resolve_dial", "resolve_mode", "resolve_powers", "set_control",
     "can_god_puppeteer", "clear_catalyst_lease", "is_player_locked", "is_sovereign_agent",
     "lease_for", "player_lock", "set_catalyst_lease",
     "beat_ended", "direct_scene", "god_tick", "steer",

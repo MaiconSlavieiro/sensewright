@@ -40,6 +40,7 @@ from sensewright_sidecar.god.arcs import (
 )
 from sensewright_sidecar.panel_store import PanelStore
 from sensewright_sidecar.state import AppState, reset_state
+from sensewright_sidecar.constants import TICKS_PER_SIM_MINUTE
 import tempfile
 from pathlib import Path
 
@@ -219,7 +220,8 @@ class TestGodCoordinator:
         set_catalyst_lease(state, 1, "Test objective", 100)
         assert 1 in state.catalyst_leases
         assert state.catalyst_leases[1]["objective"] == "Test objective"
-        assert state.catalyst_leases[1]["lease_expires_tick"] == 1540  # 100 + 1440
+        lease_min = int(state.config.gameplay("lease_min_sim_minutes", 60))
+        assert state.catalyst_leases[1]["lease_expires_tick"] == 100 + lease_min * TICKS_PER_SIM_MINUTE
 
         clear_catalyst_lease(state, 1)
         assert 1 not in state.catalyst_leases

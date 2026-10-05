@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional
 
+from ..constants import TICKS_PER_SIM_MINUTE
 from .presence import capabilities, presence_tier
 
 #: Role priority (lower = higher priority). Lower value seats first.
@@ -26,15 +27,20 @@ ROLE_PRIORITY = {
 TIER_RANK = {"full": 0, "reactive": 1, "off": 2}
 
 
-def _distance(active_sim_id: Optional[int], sim: Dict[str, Any]) -> float:
-    """Euclidean distance to the active sim from a census/delta entry."""
-    if active_sim_id is None:
+def _distance(active_pos: Optional[Dict[str, Any]], sim: Dict[str, Any]) -> float:
+    """Euclidean distance from a census/delta entry to the active sim position.
+
+    ``active_pos`` is the authoritative active-Sim position (passed by the
+    caller). When absent, a per-entry ``active_pos`` is honored for backwards
+    compatibility with census consumers that embed it.
+    """
+    ref = active_pos or sim.get("active_pos")
+    if not ref:
         return 0.0
     pos = sim.get("pos") or {}
-    active_pos = sim.get("active_pos") or {}
     try:
-        ax = float(active_pos.get("x", 0.0))
-        az = float(active_pos.get("z", 0.0))
+        ax = float(ref.get("x", 0.0))
+        az = float(ref.get("z", 0.0))
         x = float(pos.get("x", 0.0))
         z = float(pos.get("z", 0.0))
         return math.hypot(x - ax, z - az)
@@ -56,6 +62,7 @@ class SeatManager:
         max_seats: int,
         lease_min_sim_minutes: int,
         existing_seats: Optional[Dict[int, Dict[str, Any]]] = None,
+        active_pos: Optional[Dict[str, Any]] = None,
     ) -> Dict[int, Dict[str, Any]]:
         """Return the new seat map (sim_id -> seat dict)."""
         existing = existing_seats or {}
@@ -98,7 +105,7 @@ class SeatManager:
                 "tier": tier,
                 "priority": ROLE_PRIORITY[role],
                 "tier_rank": TIER_RANK[tier],
-                "distance": _distance(active_sim_id, sim),
+                "distance": _distance(active_pos, sim),
             })
 
         candidates.sort(key=lambda c: (c["priority"], c["tier_rank"], c["distance"], c["sim_id"]))
@@ -115,7 +122,9 @@ class SeatManager:
                 "sim_id": sim_id,
                 "role": cand["role"],
                 "tier": cand["tier"],
-                "lease_expires_tick": tick + lease_min_sim_minutes,
+                # Convert the documented sim-minute lease to the world tick scale
+                # (S-H02); otherwise the "60 sim-minute minimum" is 60 raw ticks.
+                "lease_expires_tick": tick + max(1, int(lease_min_sim_minutes)) * TICKS_PER_SIM_MINUTE,
             }
         return seats
 

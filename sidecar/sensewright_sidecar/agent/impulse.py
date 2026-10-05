@@ -9,10 +9,26 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from ..constants import SIM_MINUTES_PER_DAY, TICKS_PER_SIM_MINUTE
+
 #: Need threshold considered critical (mood/need delta < -70).
 CRITICAL_NEED_THRESHOLD = -70.0
 #: Minutes before work/school within which physical actions are forbidden.
 DUTY_GUARD_MINUTES = 45
+
+
+def _minute_of_day(tick: int) -> float:
+    """Best-effort in-game minute-of-day from a world tick.
+
+    Assumes ``world_sim_tick`` starts at midnight and advances
+    ``TICKS_PER_SIM_MINUTE`` per sim-minute. This is the basis for matching the
+    Mod's ``start_hour`` schedule shape (S-H05); validate in-game if the origin
+    differs.
+    """
+    try:
+        return float((int(tick) // TICKS_PER_SIM_MINUTE) % SIM_MINUTES_PER_DAY)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def has_critical_need(needs: Any) -> bool:
@@ -28,10 +44,31 @@ def has_critical_need(needs: Any) -> bool:
 
 
 def duty_imminent(schedule_blocks: Any, tick: int) -> bool:
-    """True if work/school starts within DUTY_GUARD_MINUTES of ``tick``."""
+    """True if work/school starts within DUTY_GUARD_MINUTES of ``tick``.
+
+    Accepts the Mod's real schedule shape (``start_hour``/``start_minute_of_day``,
+    converted via minute-of-day) as well as the legacy ``start_tick`` raw-minute
+    shape used by older payloads/tests (S-H05).
+    """
     for block in schedule_blocks or []:
         if not isinstance(block, dict):
             continue
+
+        start_mod = block.get("start_minute_of_day")
+        if start_mod is None and block.get("start_hour") is not None:
+            try:
+                start_mod = float(block.get("start_hour")) * 60.0
+            except (TypeError, ValueError):
+                start_mod = None
+        if start_mod is not None:
+            try:
+                delta = (float(start_mod) - _minute_of_day(tick)) % SIM_MINUTES_PER_DAY
+            except (TypeError, ValueError):
+                continue
+            if 0 < delta <= DUTY_GUARD_MINUTES:
+                return True
+            continue
+
         start = block.get("start_tick")
         if start is None:
             continue

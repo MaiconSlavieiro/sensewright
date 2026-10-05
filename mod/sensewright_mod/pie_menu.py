@@ -32,6 +32,25 @@ def _safe_call(func, *args, **kwargs):
         return None
 
 
+def _sim_id(obj):
+    """Resolve a stable sim id from a Sim (GameObject) or SimInfo.
+
+    S4CL interaction callbacks pass ``Sim`` instances, which have no ``id``
+    attribute; ``interaction_sim.id`` used to raise and abort the provoke path
+    silently. Resolve through S4CL when possible, then fall back to ``id``.
+    """
+    if obj is None:
+        return 0
+    try:
+        from sims4communitylib.utils.sims.common_sim_utils import CommonSimUtils
+        info = CommonSimUtils.get_sim_info(obj)
+        if info is not None:
+            return int(_safe_getattr(info, 'id', 0) or 0)
+    except Exception:
+        pass
+    return int(_safe_getattr(obj, 'id', 0) or 0)
+
+
 def _on_chat_interaction(sim_info, target_sim_info):
     """Handle 'Conversar / Mandar SMS' pie menu action."""
     if target_sim_info is not None:
@@ -41,27 +60,26 @@ def _on_chat_interaction(sim_info, target_sim_info):
 
 def _on_provoke_scene_interaction(sim_info, target_sim_info):
     """Handle 'Provocar Cena Aqui' pie menu action."""
-    # This would open a dialog to select catalyst NPC and instruction
-    # For now, send a god.direct-scene request
     from sensewright_mod.http_client import post_async, generate_trace_id
     from sensewright_mod.state_collector import get_current_game_state
 
     state = get_current_game_state()
     trace_id = generate_trace_id()
 
-    from sensewright_mod.i18n import get_current_language
+    from sensewright_mod.i18n import get_current_language, t
 
-    worker_log_info('pie menu: provoke scene clicked target={}'.format(
-        target_sim_info.id if target_sim_info is not None else None))
+    actor_id = _sim_id(sim_info)
+    target_id = _sim_id(target_sim_info)
+    worker_log_info('pie menu: provoke scene clicked target={}'.format(target_id or None))
 
     post_async('/god/direct-scene', {
         'trace_id': trace_id,
         'player_id': 'player_1',
         'save_id': state['save_id'],
         'world_sim_tick': state['world_sim_tick'],
-        'catalyst_sim_ids': [target_sim_info.id] if target_sim_info else [],
-        'target_sim_ids': [sim_info.id],
-        'prompt_text': 'Provocar uma cena interessante',
+        'catalyst_sim_ids': [target_id] if target_id else [],
+        'target_sim_ids': [actor_id] if actor_id else [],
+        'prompt_text': t('notify.provoke_prompt'),
         'mode': 'soft_catalyst',
         'lang': get_current_language()
     })

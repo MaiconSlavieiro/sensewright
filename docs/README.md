@@ -1,22 +1,42 @@
 # Sensewright v2 — Documentation
 
-Central documentation hub. All project documentation lives in this folder. The
-[`README.md`](../README.md) at the repository root is the entry point; everything
-below is the detailed reference (English).
+Central documentation hub. The repository [`README.md`](../README.md) is the entry point;
+everything below is the detailed reference.
+
+## Start here
 
 | Document | What it covers |
 |----------|----------------|
-| [`requirements.md`](requirements.md) | Full v2 specification: milestones M0–M8, features F01–F22, purposes, adjustments A1–A11, complementary features FC1–FC5, acceptance criteria. |
-| [`architecture.md`](architecture.md) | Detailed architecture: dual-process boundary, dual clocks, Shadow DB, IntentBus, LLM layer, i18n engine, God Director, World Layer, REST reference. |
-| [`install.md`](install.md) | Installation guide: prerequisites, build, mod install, sidecar config, autoboot, verification, troubleshooting, uninstall. |
-| [`purposes.md`](purposes.md) | Canonical catalog of the 33 purposes (tier, trigger, artifact, in-game consumer). |
-| [`i18n.md`](i18n.md) | Localization engine: 4-layer cascade, manifest contract, file topology, and how to contribute a translation. |
-| [`development.md`](development.md) | Build system (Make targets, PowerShell scripts), build details, and test cycle. |
-| [`status.md`](status.md) | Implementation status: gap between spec and code, per milestone / feature / purpose. |
-| [`plan.md`](plan.md) | Execution plan to close all remaining gaps (phases, dependencies, risks, in-game checklist). |
-| [`hardening.md`](hardening.md) | Runtime reliability & concurrency hardening plan (audit findings, thread-safety, LLM pressure). |
-| [`bugs.md`](bugs.md) | Newly discovered bugs from the 2026-10-03 deploy/playtest, not previously mapped (dialogue detection, stale arcs, beat liveness). |
-| [`changelog.md`](changelog.md) | What actually changed per session (edits, not plan), plus the open items still to do. |
+| [`getting-started.md`](getting-started.md) | Install, configure, run and build: prerequisites, mod install, sidecar setup, autoboot, troubleshooting, uninstall, Make/PowerShell targets, test cycle, decompile. |
+| [`architecture.md`](architecture.md) | How the system works: dual-process boundary, dual clocks, Shadow DB, IntentBus, LLM layer, i18n engine, God Director, World Layer, REST reference, invariants. |
+
+## Reference
+
+| Document | What it covers |
+|----------|----------------|
+| [`reference.md`](reference.md) | The canonical catalog of the 33 purposes (tier, trigger, artifact, consumer) and the localization engine / translation contribution guide. |
+| [`specification.md`](specification.md) | The complete v2 technical specification: milestones M0–M8, features F01–F22, adjustments A1–A11, complementary features FC1–FC5, acceptance criteria. |
+
+## Design & planning
+
+| Document | What it covers |
+|----------|----------------|
+| [`mcp.md`](mcp.md) | MCP layer (design + plan): root cause, protocol/transport (official `mcp` SDK, Streamable HTTP), Action Gateway, the three facades (`agency`/`god`/`rules`), tool schemas, SSE push, rules DSL, phases, risks. |
+| [`spike-strategy.md`](spike-strategy.md) | Spike-Driven Development strategy (Data Probes) to map the EA API reality before integrating native features. |
+| [`project-status.md`](project-status.md) | Where the project stands and what remains: spec↔code gap per milestone/feature/purpose, the gap-closing plan, and the reverse-chronological changelog. |
+
+## Quality & operations
+
+| Document | What it covers |
+|----------|----------------|
+| [`operations.md`](operations.md) | Quality & operations: the **architectural review & evolution plan**, the concurrency/thread-safety hardening plan, the bugs found in deploy/playtest, and the weak-point remediation wave. |
+
+## Conventions
+
+- **Language:** English is the canonical documentation language.
+- **Architecture decisions** and cross-process contracts live in
+  [`architecture.md`](architecture.md); implementation gaps and history in
+  [`project-status.md`](project-status.md); forward-looking design in [`mcp.md`](mcp.md).
 
 ## Repository layout
 
@@ -28,9 +48,3 @@ below is the detailed reference (English).
 | `scripts/` | PowerShell helpers (build, install, doctor, decompile). |
 | `tools/` | Auxiliary tooling (DBPF, bias-buff generation, bias map). |
 | `research/` | Third-party reference clones (S4CL, Lot 51 Core) — not redistributed. |
-
-## Conventions
-
-- **Language:** English is the canonical documentation language.
-- **Architecture decisions** and cross-process contracts are documented in
-  [`architecture.md`](architecture.md); implementation gaps in [`status.md`](status.md).

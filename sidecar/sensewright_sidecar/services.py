@@ -33,12 +33,12 @@ from .fallbacks import render_fallback
 from .god import (
     beat_ended as god_beat_ended, current_beat, current_zeitgeist,
     deactivate_stale_arcs, direct_scene as god_direct_scene, get_controls,
-    god_tick as god_tick_handler, resolve_dial, run_zeitgeist,
+    god_tick as god_tick_handler, resolve_autonomy_mode, resolve_dial, run_zeitgeist,
     set_control, steer as god_steer,
 )
 from .god.background_scheduler import select_targets
 from .observability.logging import get_logger
-from .schemas import normalize_lang, sanitize_payload
+from .schemas import normalize_lang, sanitize_payload, to_int
 from .state import AppState, get_state
 from .world.aftermath import (
     build_aftermath_context, merge_zeitgeist, parse_aftermath,
@@ -546,7 +546,12 @@ def _social_close_callback(state: AppState, a_id: int, b_id: int, tick: int):
     def _callback(result) -> None:
         try:
             data = result.data or {}
-            summary = data.get("summary") or data.get("social_memory") or ""
+            summary = (
+                data.get("summary")
+                or data.get("event_summary")
+                or data.get("social_memory")
+                or ""
+            )
             store = _store(state)
             if summary and store is not None:
                 for src, other in ((a_id, b_id), (b_id, a_id)):
@@ -815,7 +820,7 @@ def handle_attach(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def handle_session_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
-    save_id = int(payload.get("save_id", 0))
+    save_id = to_int(payload.get("save_id", 0))
     tick = int(payload.get("world_sim_tick", 0))
     lang = normalize_lang(payload.get("lang"))
     state.current_lang = lang
@@ -867,7 +872,7 @@ def handle_session_start(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def handle_zone_transition(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
-    save_id = int(payload.get("save_id", 0))
+    save_id = to_int(payload.get("save_id", 0))
     tick = int(payload.get("world_sim_tick", 0))
     lang = normalize_lang(payload.get("lang")) or state.current_lang
     # 4.5(a): consolidate live chat threads before the zone clears them.
@@ -882,7 +887,7 @@ def handle_zone_transition(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def handle_save(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
-    save_id = int(payload.get("save_id", 0))
+    save_id = to_int(payload.get("save_id", 0))
     previous_save_id = payload.get("previous_save_id")
     tick = int(payload.get("world_sim_tick", 0))
     lang = normalize_lang(payload.get("lang")) or state.current_lang
@@ -1123,7 +1128,7 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     lang = normalize_lang(payload.get("lang"))
     state.current_lang = lang
     tick = int(payload.get("world_sim_tick", 0))
-    save_id = int(payload.get("save_id", 0))
+    save_id = to_int(payload.get("save_id", 0))
     active_sim_id = payload.get("active_sim_id")
     clock_speed = int(payload.get("clock_speed", 1))
     trace_id = payload.get("trace_id")
@@ -1177,13 +1182,19 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Recompute seats (purely local, no LLM).
     catalyst_ids = list(state.catalyst_leases.keys())
-    max_seats = int(state.config.gameplay("agent_seats", 12))
+    max_seats = _effective_max_seats(state)
     lease_min = int(state.config.gameplay("lease_min_sim_minutes", 60))
     manager = SeatManager()
+    active_household_id = None
+    active_pos = None
+    if active_sim_id:
+        active_entry = state.get_census(int(active_sim_id))
+        active_household_id = active_entry.get("household_id")
+        active_pos = active_entry.get("pos")
     state.set_seats(manager.assign(
-        dict(state.census_items()), None, active_sim_id, catalyst_ids,
+        dict(state.census_items()), active_household_id, active_sim_id, catalyst_ids,
         _conversing_sim_ids(state), tick, max_seats, lease_min,
-        existing_seats=state.get_seats(),
+        existing_seats=state.get_seats(), active_pos=active_pos,
     ))
 
     # Schedule idle impulses for the active sim + a bounded set of full seats.
@@ -1205,6 +1216,13 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         if seat["sim_id"] not in [s["sim_id"] for s in order]:
             order.append(seat)
     order = order[:budget]
+    # S-H01: sovereign-agent autonomy mode. ``off`` disables agent autonomy
+    # entirely (player/God only); ``reactive`` keeps event reactions but skips
+    # idle impulses. Default ``full`` preserves prior behavior.
+    autonomy_mode = resolve_autonomy_mode(state.panel, state.config)
+    schedule_impulses = autonomy_mode == "full"
+    if not schedule_impulses:
+        order = []
 
     # BUG-11: ensure the active sim and household seats have a real persona. The
     # census pass may miss them (e.g. ``is_player`` not yet resolved when the
@@ -1248,7 +1266,8 @@ def handle_autonomy_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
         scheduled += 1
 
     # Social layer: detect a conversational pair and schedule sim.social.
-    pair = _find_conversational_pair(state, active_sim_id)
+    # ``autonomy_mode == "off"`` suppresses agent-initiated social too.
+    pair = _find_conversational_pair(state, active_sim_id) if autonomy_mode != "off" else None
     if pair:
         sim_a, sim_b = pair
         gate = preflight(sim_a, sim_b, active_sim_id)
@@ -1586,7 +1605,7 @@ def handle_event(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     triggered_jobs = []
     store = _store(state)
-    save_id = state.active_save_id or int(payload.get("save_id", 0))
+    save_id = state.active_save_id or to_int(payload.get("save_id", 0))
 
     # Lifecycle events (2.1) produce a decay-immune legacy memory (P28) and a
     # life-story chapter, regardless of the salience threshold.
@@ -1820,14 +1839,14 @@ def _maybe_silence_consolidate(state: AppState, tick: int, lang: str) -> int:
 def handle_god_tick(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
-    return god_tick_handler(state, int(payload.get("save_id", 0)), int(payload.get("world_sim_tick", 0)), lang)
+    return god_tick_handler(state, to_int(payload.get("save_id", 0)), int(payload.get("world_sim_tick", 0)), lang)
 
 
 def handle_direct_scene(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
     return god_direct_scene(
-        state, int(payload.get("save_id", 0)), int(payload.get("world_sim_tick", 0)),
+        state, to_int(payload.get("save_id", 0)), int(payload.get("world_sim_tick", 0)),
         payload.get("catalyst_sim_ids") or [], payload.get("target_sim_ids") or [],
         payload.get("prompt_text", ""), payload.get("mode", "soft_catalyst"), lang,
     )
@@ -1837,7 +1856,7 @@ def handle_arc_steer(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
     return god_steer(
-        state, int(payload.get("save_id", 0)), payload.get("action", ""),
+        state, to_int(payload.get("save_id", 0)), payload.get("action", ""),
         payload.get("beat_id"), payload.get("custom_instruction"), lang,
     )
 
@@ -1848,7 +1867,7 @@ def handle_beat_ended(payload: Dict[str, Any]) -> Dict[str, Any]:
     lang = normalize_lang(payload.get("lang"))
     return god_beat_ended(
         state,
-        int(payload.get("save_id", 0)),
+        to_int(payload.get("save_id", 0)),
         int(payload.get("world_sim_tick", 0)),
         payload.get("decision", "ignore"),
         payload.get("agent_sim_id"),
@@ -1860,7 +1879,7 @@ def handle_beat_ended(payload: Dict[str, Any]) -> Dict[str, Any]:
 def handle_zeitgeist(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))
-    return run_zeitgeist(state, int(payload.get("save_id", 0)), payload.get("zeitgeist_text", ""), lang)
+    return run_zeitgeist(state, to_int(payload.get("save_id", 0)), payload.get("zeitgeist_text", ""), lang)
 
 
 # ── diary (3.4) ──────────────────────────────────────────────────────────
@@ -1888,7 +1907,7 @@ def handle_neighborhood(payload: Dict[str, Any]) -> Dict[str, Any]:
     The Mod's Mailbox "Neighborhood Stories" interaction consumes this (3.9).
     """
     state = get_state()
-    save_id = int(payload.get("save_id", 0))
+    save_id = to_int(payload.get("save_id", 0))
     sim_id = int(payload.get("sim_id", 0))
     store = _store(state)
     zeitgeist = current_zeitgeist(state, save_id)
@@ -2027,9 +2046,20 @@ def handle_controls_post(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ── seats / player activity / health / status ────────────────────────────
+def _effective_max_seats(state: AppState) -> int:
+    """Seat cap: a persisted panel override wins over the config default (S-M01)."""
+    override = state.panel.get("agent_seats")
+    if override is not None:
+        try:
+            return max(1, min(int(override), 64))
+        except (TypeError, ValueError):
+            pass
+    return int(state.config.gameplay("agent_seats", 12))
+
+
 def handle_seats_get() -> Dict[str, Any]:
     state = get_state()
-    max_seats = int(state.config.gameplay("agent_seats", 12))
+    max_seats = _effective_max_seats(state)
     seats = state.get_seats()
     store = _store(state)
 
@@ -2089,9 +2119,15 @@ def handle_seats_get() -> Dict[str, Any]:
 
 def handle_seats_post(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
-    seats = int(payload.get("seats", 12))
-    # Seats are derived from census + priority; the POST is a hint only.
-    return {"ok": True, "seats": min(seats, 64)}
+    try:
+        seats = int(payload.get("seats", 12))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "invalid_seats"}
+    seats = max(1, min(seats, 64))
+    # Persist the override so it actually takes effect (S-M01); previously the
+    # POST echoed the request but the pool always came from config.
+    state.panel.set("agent_seats", seats)
+    return {"ok": True, "seats": seats}
 
 
 def handle_player_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2100,6 +2136,7 @@ def handle_player_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
     clock_speed = int(payload.get("clock_speed", 1))
     # Deep window is open when the game is idle (paused / player away).
     deep_window_open = idle or clock_speed == 0
+    state.deep_window_open = deep_window_open
     return {"deep_window_open": deep_window_open}
 
 
@@ -2139,6 +2176,7 @@ def status() -> Dict[str, Any]:
         "last_processed_tick": state.last_processed_tick,
         "arc_planning": state.arc_planning,
         "paused": state.paused,
+        "deep_window_open": state.deep_window_open,
         "recap": state.recap,
         # P33: deterministic 2-line diagnostic summary for the Quick Menu.
         "panel_summary": _panel_summary(state),

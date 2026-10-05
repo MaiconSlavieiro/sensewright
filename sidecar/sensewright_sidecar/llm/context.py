@@ -60,11 +60,17 @@ class ContextAssembler:
         channel = context.get("channel")
         section = ("user_" + channel) if channel in CHANNELS else "user"
         payload = self._build_payload(purpose_id, context, tier)
+        # Serialize exactly once: ``_build_payload`` returns a dict, and the
+        # budget trim is applied to the JSON string (S-B03 — previously the
+        # payload was a pre-serialized string that got double-encoded).
+        context_json = self._trim_to_budget(
+            json.dumps(payload, ensure_ascii=False), self.tier_budget(tier)
+        )
         user_ctx = dict(ctx)
-        user_ctx["context_json"] = json.dumps(payload, ensure_ascii=False)
+        user_ctx["context_json"] = context_json
         user = engine.render_prompt(purpose_id, section, lang, user_ctx).strip()
         if not user:
-            user = user_ctx["context_json"]
+            user = context_json
 
         return [
             {"role": "system", "content": system},
@@ -268,7 +274,6 @@ class ContextAssembler:
 
     def _build_payload(self, purpose_id: str, context: Dict[str, Any], tier: str) -> Dict[str, Any]:
         """Slice context into a JSON payload bounded by the tier budget."""
-        budget = self.tier_budget(tier)
         payload: Dict[str, Any] = {"purpose": purpose_id}
 
         profile = context.get("profile") or {}
@@ -294,7 +299,7 @@ class ContextAssembler:
             if key in context:
                 payload[key] = context[key]
 
-        return self._trim_to_budget(json.dumps(payload, ensure_ascii=False), budget)
+        return payload
 
     def _trim_to_budget(self, text: str, budget: int) -> str:
         """Truncate text so its estimated token count fits ``budget``."""

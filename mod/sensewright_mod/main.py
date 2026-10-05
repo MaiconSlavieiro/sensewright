@@ -153,6 +153,22 @@ class SensewrightService(object):
             # Collect sims delta
             sims_delta = collect_sims_delta()
 
+            # M-H02: fire the ``next_sleep`` intent expiration. Cognitive intents
+            # (bias/goal/remember) expire when their sim sleeps; detect the
+            # awake -> sleeping edge here since this is where the delta is built.
+            try:
+                bus = get_intent_bus()
+                for sim in sims_delta:
+                    sid = int(sim.get('sim_id', 0) or 0)
+                    if not sid:
+                        continue
+                    sleeping = bool(sim.get('is_sleeping'))
+                    if sleeping and _sleep_state.get(sid) is not True:
+                        bus.mark_sleep(sid)
+                    _sleep_state[sid] = sleeping
+            except Exception as sleep_error:
+                log_exception('Sleep-edge detection error: {}'.format(sleep_error))
+
             # Report the end of any catalyst conversation (2.9 -> god.react).
             try:
                 catalyst_tracker.observe(sims_delta)
@@ -178,6 +194,8 @@ class SensewrightService(object):
 # Global service instance
 _sensewright_service = None
 _onboarding_shown = False
+#: Per-sim previous sleep state, used to fire the ``next_sleep`` expiry edge (M-H02).
+_sleep_state = {}
 
 
 def _show_onboarding_notification():

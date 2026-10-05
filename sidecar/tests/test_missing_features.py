@@ -1,4 +1,4 @@
-"""Tests for the P1/P4 feature wiring (docs/status.md gaps closed 2026-10-03)."""
+"""Tests for the P1/P4 feature wiring (docs/project-status.md gaps closed 2026-10-03)."""
 from __future__ import annotations
 
 import os

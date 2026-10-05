@@ -2,6 +2,17 @@
 
 This document describes the internal architecture of Sensewright v2: the dual-process design, threading model, dual-clock system, Shadow DB, IntentBus, LLM layer, i18n engine, God Director, and world layer. It is intended for contributors and advanced modders.
 
+> **Planned changes (see the [Architectural Review & Evolution Plan](operations.md), 2026-10-03):**
+> the open-loop `IntentBus` will become **closed-loop** (Mod ACK/NACK outcomes on
+> `/v1/autonomy/tick`), all EA/S4CL access will move behind **`engine_facade.py`** with an
+> in-game **`sw.smoke_test`** introspection harness, the `ContextAssembler` will gain
+> **token-priority packing**, and the LLM output parser will gain a **local JSON repair** layer.
+> These are planned, not yet implemented; this document describes the current code.
+>
+> **Reconciled 2026-10-04** against the code and [`doc-review.md`](doc-review.md): canonical
+> tick unit (§2), real Mod threading model (§1.3), `remember`/`forget` removed from the
+> IntentBus (§4), reordered 5-level lease matrix (§4.4), and refreshed gap summary (§13).
+
 ---
 
 ## 1. Dual-Process Architecture
@@ -10,7 +21,7 @@ This document describes the internal architecture of Sensewright v2: the dual-pr
 
 | Process | Runtime | Responsibility |
 |---------|---------|----------------|
-| **The Sims 4 (Game)** | Python 3.7 (stdlib + S4CL + Lot 51 Core) | Main thread: `GAME_TICK`, state collection, intent execution, native hooks, UI. Worker thread: HTTP I/O to sidecar. |
+| **The Sims 4 (Game)** | Python 3.7 (stdlib + S4CL + Lot 51 Core) | Main thread: `GAME_TICK`, state collection, intent execution, native hooks, UI. Two daemon threads: outbound HTTP worker + idle intent pull (see §1.3). |
 | **Sidecar** | Python 3.10+ (FastAPI, uvicorn, SQLite, LLM providers) | REST API (`/v1/*`), Web Studio (`/ui`), LLM orchestration (scheduler, router, provider chain), SaveVault (SQLite + FTS5), i18n compilation. |
 
 ### 1.2 Communication Contract
@@ -24,24 +35,35 @@ This document describes the internal architecture of Sensewright v2: the dual-pr
 
 ### 1.3 Threading Model (Mod Side)
 
+Post-hardening (`mod/sensewright_mod/http_client.py`), the Mod runs **two daemon threads**
+next to the main thread, fed by **two outbound lanes**:
+
 ```
-Main Thread (GAME_TICK)                    Worker Thread (daemon)
-┌─────────────────────────────┐            ┌─────────────────────────────┐
-│ state_collector.collect()   │            │ _worker_loop()              │
-│ intent_bus.update()         │            │   while running:            │
-│ execute_intents(ready)      │            │     get_nowait(outbound_q)  │
-│ update_idle_detection()     │            │     _make_request()         │
-│ autonomy pulse check        │            │     put(inbound_intents_q)  │
-│                             │            │     sleep(0.01)             │
-│ process_inbound_queue() ────┼───────────▶│                             │
-│   (drain inbound_intents_q) │            │                             │
-└─────────────────────────────┘            └─────────────────────────────┘
+Main Thread (GAME_TICK)          Outbound lanes                 SensewrightWorker (daemon)
+┌───────────────────────────┐    ┌──────────────────────────┐   ┌──────────────────────────────┐
+│ state_collector.collect() │    │ _realtime_q (FIFO, ≤256; │   │ _worker_loop():              │
+│ intent_bus.update()       │───▶│  only /events droppable, │──▶│   _next_item(): realtime     │
+│ execute_intents(ready)    │    │  ≤48)                    │   │     lane first, then slots   │
+│ update_idle_detection()   │    │ _slots (coalescing:      │   │   _make_request()            │
+│ autonomy pulse check      │    │  /autonomy/tick merges   │   │   put(inbound_intents_q)     │
+│                           │    │  sims_delta by sim_id,   │   │   idle → _wakeup.wait(0.5)   │
+│ _submit() + _wakeup.set() │    │  /config/player-activity)│   └──────────────────────────────┘
+│                           │    └──────────────────────────┘   SensewrightIntentPull (daemon)
+│ process_inbound_queue() ◀─┼───────── inbound_intents_q ◀────┐ ┌──────────────────────────────┐
+│   (drain responses)       │                                 └─│ _intent_pull_loop():         │
+└───────────────────────────┘                                   │   GET /autonomy/intents      │
+                                                                │   (after session-start;      │
+                                                                │    backoff 2 s → 10 s)       │
+                                                                └──────────────────────────────┘
 ```
 
-- **Main Thread**: Never performs network I/O. Only `queue.Queue` operations (`put_nowait`, `get_nowait`).
-- **Worker Thread**: Single daemon thread. Runs `_ensure_sidecar_running()` (autoboot), then loops draining `outbound_q`, making HTTP requests, pushing responses to `inbound_intents_q`.
-- **Lock-Free**: `queue.Queue` is thread-safe. No explicit locks in hot path.
+- **Main Thread**: Never performs network I/O. Enqueues via `_submit()` (realtime lane or coalescing slot) and signals the `threading.Event` `_wakeup`; drains `inbound_intents_q` with `get_nowait()`.
+- **`SensewrightWorker`**: Runs `_ensure_sidecar_running()` (autoboot) + `/lifecycle/attach`, then drains the realtime lane first and the coalescing slots second. When both are idle it blocks on `_wakeup.wait(0.5)` (no 10 ms busy poll). Per-endpoint timeouts (`_ENDPOINT_TIMEOUTS`).
+- **`SensewrightIntentPull`**: Dedicated thread for the idle `GET /v1/autonomy/intents` pull, so a slow pull (5 s timeout) never delays lifecycle/chat/event dispatch. Gated on `session-start`; exponential backoff 2 s → 10 s, reset when intents arrive.
+- **Locks**: the lanes are guarded by short `threading.Lock` sections (`_realtime_lock`, `_slot_lock`); no lock is held across network I/O. `queue.Queue` carries responses back to the main thread.
+- **Shutdown**: `stop_worker()` sets `_shutdown_event` + `_wakeup` and joins both threads (2 s timeout each).
 - **Frame Budget**: `process_inbound_queue()` processes max 50 items per `GAME_TICK` to avoid frame hitch.
+- **Planned (doc-review ACT-06):** merge the intent pull and the future SSE stream into one inbound delivery thread (`_inbound_delivery_loop`, `timeout=15.0`, never `timeout=None`) — the Mod stays at 2 network threads.
 
 ### 1.4 Sidecar Threading
 
@@ -57,9 +79,16 @@ Main Thread (GAME_TICK)                    Worker Thread (daemon)
 | Clock | Source | Used For |
 |-------|--------|----------|
 | **Wall-Clock** | `time.time()` (real seconds) | HTTP timeouts, SLO enforcement (`llm.tiers.*.slo_seconds`), Provider rate limits (RPM/RPD/TPM), circuit breaker cooldowns, sidecar watchdog. |
-| **Sim-Clock** | `world_sim_tick` (game ticks, 1 tick = 1 sim-minute) | Intent `delay_sim_minutes`, `ttl_sim_minutes`, social cooldowns, memory decay (`PSYCHE_PRUNE_THRESHOLD` per sim-day), dream schedule, cognition daily plan, lease expiration (`lease_min_sim_minutes`), zone transition cleanup. |
+| **Sim-Clock** | `world_sim_tick` (game ticks, **1 sim-minute = 1000 ticks**) | Intent `delay_sim_minutes`, `ttl_sim_minutes`, social cooldowns, memory decay (`PSYCHE_PRUNE_THRESHOLD` per sim-day), dream schedule, cognition daily plan, lease expiration (`lease_min_sim_minutes`), zone transition cleanup. |
 
-**Conversion**: 1 sim-minute = 1 `world_sim_tick`. Game speed (`clock_speed`) scales wall-time → sim-time. When `clock_speed == 0` (pause), the mod's autonomy dispatcher freezes intent delay countdowns and suspends autonomy pulses.
+**Conversion (canonical)**: `TICKS_PER_SIM_MINUTE = 1000` (`sidecar/sensewright_sidecar/constants.py`), hence `TICKS_PER_SIM_DAY = 1440 × 1000 = 1,440,000`. A 60 sim-minute lease is **60,000 ticks**, a 3 sim-minute rewind tolerance is **3000 ticks** (`REWIND_TOLERANCE_TICKS`). Game speed (`clock_speed`) scales wall-time → sim-time. When `clock_speed == 0` (pause), the mod's autonomy dispatcher freezes intent delay countdowns and suspends autonomy pulses.
+
+> [!IMPORTANT]
+> **No raw time arithmetic.** Any conversion between sim-minutes/sim-days and
+> `world_sim_tick` must go through `TICKS_PER_SIM_MINUTE` / `TICKS_PER_SIM_DAY`. Treating
+> 1 tick as 1 sim-minute shrinks leases, TTLs and psyche decay by three orders of magnitude
+> (the root cause of S-B01/S-H02). External clients (e.g. MCP `ActionEnvelope`) must send
+> durations in sim-minutes, never pre-converted ticks.
 
 **Implementation**:
 - Mod collects `world_sim_tick` and `clock_speed` from `GameClockService` via Lot 51 Core on every `GAME_TICK`.
@@ -100,6 +129,7 @@ CREATE TABLE metadata (
     world_sim_tick INTEGER,
     last_committed_at INTEGER,  -- wall-clock epoch ms
     schema_version INTEGER
+    -- planned (doc-review ACT-01): player_confidant_sim_id, returned on session-start
 );
 
 -- memories (core + FTS5 virtual table)
@@ -175,6 +205,14 @@ ORDER BY rank LIMIT ?;
 
 No external vector DB or embedding model required.
 
+> [!WARNING]
+> **Known gap (doc-review §3.4 / ACT-04).** `SqliteStore.search_memories` currently binds the
+> raw query text to `MATCH ?`. FTS5 query syntax (punctuation such as `?`, `:`, `-`, `*`, or the
+> bare words `AND`/`OR`/`NOT`) raises `sqlite3.OperationalError`, which is swallowed and returns
+> **zero memories**; whitespace is an implicit `AND`, so long natural-language queries rarely
+> match. Planned fix: `sanitize_fts5_query(text)` — strip special characters, drop tokens
+> ≤ 2 chars, quote each token and join with `OR`, letting BM25 rank the overlap.
+
 ---
 
 ## 4. IntentBus
@@ -186,7 +224,7 @@ No external vector DB or embedding model required.
   "id": "hex-uuid",
   "trace_id": "tr_9a8f12",
   "sim_id": 12345,
-  "kind": "speak | approach | set_mood | bias_interaction | prefer_target | set_goal | remember | forget | command | spawn_npc",
+  "kind": "speak | approach | set_mood | bias_interaction | prefer_target | set_goal | command | spawn_npc",
   "target_sim_id": 67890,
   "params": {"text": "...", "tone": "friendly", "archetype": "..."},
   "thought": "...",
@@ -199,12 +237,18 @@ No external vector DB or embedding model required.
 }
 ```
 
+> **Memory is not an intent.** Memories (SQLite + FTS5) live in the Sidecar, so `remember` /
+> `forget` are **Sidecar-internal operations** (writes/archives on the `memories` table, exposed
+> to MCP as `sim.remember` / `sim.forget`). They never travel through the IntentBus. The Mod
+> still accepts the legacy wire kinds as a no-op (`GameLever._execute_remember` →
+> `delegated_to_sidecar`) until they are removed from `INTENT_KINDS` (doc-review ACT-08).
+
 ### 4.2 Expiration Rules
 
 | Intent Kind | `expires_on` | Default TTL |
 |-------------|--------------|-------------|
-| `speak`, `approach`, `command` | `ttl` / `zone_transition` | 15.0 sim-minutes |
-| `set_mood`, `bias_interaction`, `prefer_target`, `set_goal`, `remember`, `forget` | `next_sleep` | — (cleared on sleep) |
+| `speak`, `approach`, `command`, `spawn_npc` | `ttl` / `zone_transition` | 15.0 sim-minutes (15,000 ticks) |
+| `set_mood`, `bias_interaction`, `prefer_target`, `set_goal` | `next_sleep` | — (cleared on sleep) |
 
 ### 4.3 Dispatch Pipeline (Main Thread)
 
@@ -219,12 +263,23 @@ No external vector DB or embedding model required.
 
 ### 4.4 Source Priorities (Coordination)
 
+Canonical matrix (shared with [`specification.md`](specification.md) F13 and [`mcp.md`](mcp.md)):
+
 | Priority | Lease | Source | Behavior |
 |----------|-------|--------|----------|
 | 1 (highest) | `PLAYER_MANUAL` | Player click | Aborts AI actions on that Sim; locks autonomy for `player_lock_seconds` (15s). |
-| 2 | `GOD_CATALYST_PUPPET` | `god.puppeteer` | Full control of catalyst NPC only. |
-| 3 | `SOVEREIGN_AGENT` | `sim.impulse`, `sim.reaction`, `sim.social` | Autonomous agents. God applies only **Soft Influence**. |
-| 4 | `SANDBOX_OVERRIDE` | Player manual "Direct Scene" | Full control of any Sim (opt-in only). |
+| 2 | `SANDBOX_OVERRIDE` | Player "Direct Scene Here (Sandbox Mode)" | Explicit player order — full control of any Sim (opt-in only); preempts every AI lease. |
+| 3 | `GOD_CATALYST_PUPPET` | `god.puppeteer` | Full control of **catalyst NPCs only** (never household agents). |
+| 4 | `SOVEREIGN_AGENT` | `sim.impulse`, `sim.reaction`, `sim.social`, Agency MCP | Autonomous agents. God applies only **Soft Influence**. |
+| 5 (lowest) | `RULE_AUTOMATION` | `rules` engine (MCP, R6) | Soft Influence only, or acts only when the Sim is `idle` (honors REQ-IMP-03). |
+
+`GOD_CATALYST_PUPPET` ranking above `SOVEREIGN_AGENT` does not let God hijack agents: the two
+leases target **disjoint Sim sets** (catalyst NPCs vs. household/`full` seats).
+
+**Code status:** `constants.LEASE_PRIORITY` encodes this order. `god/coordinator.lease_for`
+currently assigns only `PLAYER_MANUAL` (wall-clock lock), `GOD_CATALYST_PUPPET` (catalyst
+leases, expiring in ticks via `TICKS_PER_SIM_MINUTE`) and `SOVEREIGN_AGENT`;
+`SANDBOX_OVERRIDE` and `RULE_AUTOMATION` are not yet assigned.
 
 ---
 
@@ -368,11 +423,16 @@ def _apply_gender(text, gender):
 
 ### 6.4 List Rotation (Deterministic Variety)
 
-Any string value can be a `list[str]`. Selection:
+Any string value can be a `list[str]`. Selection (`i18n_engine.py`):
 ```python
-seed = f"{sim_id}:{world_sim_tick // 60}"  # per Sim per sim-hour
+seed = f"{sim_id}:{world_sim_tick // 60}"
 index = md5(f"{seed}:{key}").hexdigest() % len(list)
 ```
+
+> [!NOTE]
+> The bucket was designed as "per Sim per sim-hour", but with `TICKS_PER_SIM_MINUTE = 1000`
+> `world_sim_tick // 60` changes every 60 ticks (~0.06 sim-minutes). A per-sim-hour bucket
+> would be `world_sim_tick // (60 * TICKS_PER_SIM_MINUTE)`. Tracked as a code fix.
 
 ### 6.5 Hot-Reload
 
@@ -519,7 +579,8 @@ Neighborhood-level thematic tags (`zeitgeist.tags[]`) influence:
 | Save sync atomic | `sqlite3.backup()` (< 5ms); ring buffer preserves last 3 checkpoints |
 | No orphan LLM data | Every purpose has `fallback_key` → deterministic localized output |
 | Language adherence | Structural prevention (enum translation + 1-shot + anchor) |
-| Agent sovereignty | `SOVEREIGN_AGENT` lease > `GOD_CATALYST_PUPPET`; God never overrides agent queue |
+| Agent sovereignty | `GOD_CATALYST_PUPPET` applies to catalyst NPCs only; God never overrides a `SOVEREIGN_AGENT` queue (Soft Influence only); `RULE_AUTOMATION` ranks below agents |
+| Canonical time unit | Every sim-time span converted with `TICKS_PER_SIM_MINUTE = 1000` |
 | Visitor protection | `REQ-SEAT-02`: no eviction during active conversation / catalyst lease / `lease_min_sim_minutes` |
 | Rate limit honesty | Provider RPM/RPD/TPM **not refunded** on timeout; Game Budget **refunded** |
 | Zero hardcoded locales | All locale codes, STBL bytes, client tokens from `manifest.json` |
@@ -533,9 +594,9 @@ GAME_TICK (Main Thread)
     │
     ├─▶ state_collector → sims_delta
     │
-    ├─▶ outbound_q.put(POST /v1/autonomy/tick {sims_delta, ...})
+    ├─▶ _submit(POST /v1/autonomy/tick {sims_delta, ...}) → coalescing slot
     │         │
-    │         ▼ (Worker Thread)
+    │         ▼ (SensewrightWorker thread)
     │    HTTP POST → Sidecar
     │         │
     │         ▼ (Sidecar)
@@ -577,22 +638,28 @@ Native TS4 execution (interactions, buffs, moodlets, sentiments, mailbox, etc.)
 ## 13. Unverified / Implementation Gaps
 
 For the precise, up-to-date gap analysis (per milestone, feature, and purpose, with
-`file:line` evidence), see **[`docs/status.md`](status.md)**. In summary:
+`file:line` evidence), see **[`docs/project-status.md`](project-status.md)**. In summary:
 
-- **Wired and operational (P0/P3 waves):** `sim.dream`, `sim.cognition`, `evo.reflect`,
-  `god.plan`, `god.scene`, `god.narration`, `world.gossip`, `sim.diary`,
-  `mem.compact`. Per-model cooldown, tier concurrency, asymmetric refund, and
-  `trace_id` propagation to `bg`/`deep` are now enforced.
-- **Partially wired (trigger exists, application incomplete):** `god.puppeteer` (lease
-  only, no spawn/approach), `sim.social.close` (no handler), `ops.recap` (result
-  discarded), `evo.trait` (helpers ready, no emission).
-- **Fallback-only:** 12 of the 33 purposes have no production trigger yet (e.g.,
-  `god.cast`, `god.react`, `god.background`, `world.aftermath`, `mem.legacy`,
-  `mem.relationship.review`, `ops.panel.summary`).
-- **Native object coupling (M5/M6):** `VisitSituation`, Diary/Snoop, Autobiography Book,
-  `sim_GetToKnow`, epitaph, sleep balloons, and the custom Mirror interaction are pending.
-- **Sidecar `/v1/i18n/compile-addon`** is a stub; STBL compilation currently lives only in
-  `mod/build_package.py`.
+State as of 2026-10-04 (689 sidecar tests; `.package` 46 resources):
+
+- **Full (29 of 33 purposes):** every purpose except the four below has a production trigger
+  and consumes its result — including `god.cast`, `god.react`, `god.background`
+  (+ `BackgroundScheduler`), `world.aftermath`, `world.npc.backstory`, `mem.legacy`,
+  `mem.relationship.review`, `sim.social.close`, `sim.aspiration`, `ops.recap`,
+  `ops.panel.summary`. Per-model cooldown, tier concurrency, asymmetric refund, `trace_id`
+  on `bg`/`deep`, `autonomy_mode` (`full|reactive|off`) and `GameBudgeter` are enforced.
+- **Partial:** `god.puppeteer` (lease + opening line + asymmetric routing in `sim.social`; no
+  `approach` intent), `sim.lifestory` (only on lifecycle events; no 7-day trigger),
+  `mem.compact` (no panel exposure), `evo.trait` (helpers ready, no emission).
+- **Synchronous LLM in `handle_event`:** `mem.legacy` + `sim.lifestory` still run inline on
+  `death|marriage|birth` (doc-review §3.3 / ACT-04 — to be made async).
+- **Open-loop actuation:** the Mod does not report intent outcomes yet (`outcomes[]`, ACT-03).
+- **Native object coupling (M5/M6):** `VisitSituation`, Diary/Snoop, Mailbox, sleep balloons
+  and the Mirror "Reflect" interaction were **coded blind**. To prevent breaking the engine, they must now be validated via [Spike-Driven Development](spike-strategy.md) (`sw.spike`) *before* Playtest #5.
+  `sim_GetToKnow` is pending; the physical Autobiography Book and Tombstone Epitaph are
+  **deferred post-v2.0** (replaced by Diary/Computer/Web Studio reading).
+- **Hidden Confidant** is still located by last-name heuristic; persisting
+  `player_confidant_sim_id` in `metadata` is pending (BUG-12, ACT-01).
 - In-game acceptance criteria (zone transition, Save As, Alt+F4 rollback, invisible
   autoboot) remain unvalidated outside unit tests.
 - S4CL / Lot 51 Core integration points are exercised against pinned reference clones;

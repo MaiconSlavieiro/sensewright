@@ -70,13 +70,19 @@ LEASE_PLAYER_MANUAL = "PLAYER_MANUAL"
 LEASE_GOD_CATALYST_PUPPET = "GOD_CATALYST_PUPPET"
 LEASE_SOVEREIGN_AGENT = "SOVEREIGN_AGENT"
 LEASE_SANDBOX_OVERRIDE = "SANDBOX_OVERRIDE"
+LEASE_RULE_AUTOMATION = "RULE_AUTOMATION"
 
-# Priority order: 1 = highest. PLAYER_MANUAL always wins.
+# Priority order: 1 = highest. PLAYER_MANUAL always wins. SANDBOX_OVERRIDE is an
+# explicit player order ("Direct Scene Here"), so it outranks every AI lease;
+# GOD_CATALYST_PUPPET only ever applies to catalyst NPCs (never household
+# agents); RULE_AUTOMATION is the lowest and may only Soft-Influence or act on
+# idle Sims (REQ-IMP-03). See docs/specification.md F13.
 LEASE_PRIORITY: Dict[str, int] = {
     LEASE_PLAYER_MANUAL: 1,
-    LEASE_GOD_CATALYST_PUPPET: 2,
-    LEASE_SOVEREIGN_AGENT: 3,
-    LEASE_SANDBOX_OVERRIDE: 4,
+    LEASE_SANDBOX_OVERRIDE: 2,
+    LEASE_GOD_CATALYST_PUPPET: 3,
+    LEASE_SOVEREIGN_AGENT: 4,
+    LEASE_RULE_AUTOMATION: 5,
 }
 
 # ── Dream engine weights ───────────────────────────────────────────────────

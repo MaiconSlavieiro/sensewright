@@ -1,19 +1,30 @@
-# Sensewright v2 — Installation Guide
+# Getting Started
+
+Everything needed to install, configure, run and build Sensewright: prerequisites, mod install, sidecar setup, autoboot, troubleshooting, uninstall, and the development/build cycle.
+
+**On this page**
+
+- [Installation and Configuration](#installation-and-configuration)
+- [Build and Development](#build-and-development)
+
+---
+
+## Installation and Configuration
 
 Step-by-step installation for players (Windows / macOS). Covers dependencies, mod build, sidecar configuration, autoboot, and the 0-key fallback.
 
 ---
 
-## 1. Prerequisites
+### 1. Prerequisites
 
-### The Sims 4
+#### The Sims 4
 - Game version 1.90 or later (current patch).
 - **Base game only** — no DLC/Expansion Packs required.
 - **Script Mods Allowed** must be enabled:
   - In-game: **Options → Game Options → Other → ✅ Script Mods Allowed**
   - Restart the game after enabling.
 
-### Required Mods (Install First)
+#### Required Mods (Install First)
 Download and place in `Documents/Electronic Arts/The Sims 4/Mods/`:
 
 | Mod | Source | Notes |
@@ -23,7 +34,7 @@ Download and place in `Documents/Electronic Arts/The Sims 4/Mods/`:
 
 > **Important**: These are **runtime dependencies**. Sensewright will not load without them. Do not bundle them with Sensewright — install separately.
 
-### Python (for Sidecar)
+#### Python (for Sidecar)
 - **Windows**: Python 3.10+ (3.12 recommended). Download from [python.org](https://www.python.org/downloads/). **Check "Add Python to PATH" during install.**
 - **macOS**: `brew install python@3.12` or download from python.org.
 - Verify: open terminal / PowerShell and run:
@@ -34,9 +45,9 @@ Download and place in `Documents/Electronic Arts/The Sims 4/Mods/`:
 
 ---
 
-## 2. Get Sensewright
+### 2. Get Sensewright
 
-### Option A: Pre-built Release (Recommended)
+#### Option A: Pre-built Release (Recommended)
 1. Go to [Sensewright Releases](https://github.com/<owner>/sensewright/releases) (or your distribution platform).
 2. Download `Sensewright.v2.X.Y.zip`.
 3. Extract → you get:
@@ -44,7 +55,7 @@ Download and place in `Documents/Electronic Arts/The Sims 4/Mods/`:
    - `Sensewright.package`
    - `sidecar/` folder (contains `main.py`, `config.example.toml`, etc.)
 
-### Option B: Build from Source
+#### Option B: Build from Source
 ```bash
 # Clone repo
 git clone https://github.com/<owner>/sensewright.git
@@ -57,19 +68,19 @@ make all          # builds .ts4script + .package
 
 ---
 
-## 3. Install the Mod
+### 3. Install the Mod
 
-### Windows
+#### Windows
 1. Open File Explorer → `Documents\Electronic Arts\The Sims 4\Mods\`
 2. Copy `Sensewright.ts4script` and `Sensewright.package` into this folder.
 3. **Do not** put them in subfolders deeper than one level (Mods/ or Mods/Sensewright/ only).
 
-### macOS
+#### macOS
 1. Open Finder → `~/Documents/Electronic Arts/The Sims 4/Mods/`
    - If `Mods` doesn't exist, create it.
 2. Copy `Sensewright.ts4script` and `Sensewright.package` into this folder.
 
-### Using the Installer Script (Windows)
+#### Using the Installer Script (Windows)
 ```powershell
 # From repo root
 .\scripts\install-mod.ps1
@@ -78,9 +89,9 @@ This copies both artifacts to your Mods folder automatically.
 
 ---
 
-## 4. Configure & Run the Sidecar
+### 4. Configure & Run the Sidecar
 
-### 4.1 Create Config
+#### 4.1 Create Config
 ```bash
 cd sidecar
 cp config.example.toml config.toml
@@ -106,7 +117,7 @@ models = ["llama3.1"]
 # The mod will use deterministic localized fallbacks for all 33 purposes.
 ```
 
-### 4.2 Run Sidecar Manually
+#### 4.2 Run Sidecar Manually
 ```bash
 cd sidecar
 python main.py
@@ -121,7 +132,7 @@ INFO:     Sensewright Sidecar v2.0.0 started
 
 Keep this terminal window open while playing.
 
-### 4.3 Autoboot (Zero-Click Sidecar Start)
+#### 4.3 Autoboot (Zero-Click Sidecar Start)
 
 The mod's worker thread can auto-launch the sidecar when the game starts.
 
@@ -139,7 +150,7 @@ The mod's worker thread can auto-launch the sidecar when the game starts.
 
 **macOS Note**: Autoboot uses `subprocess.Popen` with default flags. Test manually first with `python main.py`.
 
-### 4.4 Full Configuration Reference (Two-Layer `config.toml`)
+#### 4.4 Full Configuration Reference (Two-Layer `config.toml`)
 
 The reference template lives at [`sidecar/config.example.toml`](../sidecar/config.example.toml).
 
@@ -210,7 +221,7 @@ chaos_degree = 0.5
 
 ---
 
-## 5. Verify Installation
+### 5. Verify Installation
 
 1. Launch The Sims 4.
 2. Load a save (or start new game).
@@ -227,7 +238,7 @@ chaos_degree = 0.5
 
 ---
 
-## 6. The 0-Key Fallback (Offline Play)
+### 6. The 0-Key Fallback (Offline Play)
 
 If **no provider is enabled** or **all API keys are empty**, Sensewright operates fully offline:
 
@@ -240,19 +251,19 @@ If **no provider is enabled** or **all API keys are empty**, Sensewright operate
 
 ---
 
-## 7. Updating
+### 7. Updating
 
-### Mod Update
+#### Mod Update
 1. Download new `Sensewright.ts4script` + `Sensewright.package`.
 2. Replace files in Mods folder.
 3. Restart game.
 
-### Sidecar Update
+#### Sidecar Update
 1. Pull latest repo / download new release.
 2. If `config.toml` format changed, merge your keys into new `config.example.toml`.
 3. Restart sidecar (`Ctrl+C` → `python main.py`).
 
-### Save Compatibility
+#### Save Compatibility
 - Sensewright uses **Shadow DB** with transactional save sync.
 - Loading an older save (rewind) automatically restores from ring buffer (last 3 checkpoints).
 - "Save As" creates a new independent save slot.
@@ -260,9 +271,9 @@ If **no provider is enabled** or **all API keys are empty**, Sensewright operate
 
 ---
 
-## 8. Troubleshooting
+### 8. Troubleshooting
 
-### Mod Doesn't Appear / Pie Menu Missing
+#### Mod Doesn't Appear / Pie Menu Missing
 | Check | Fix |
 |-------|-----|
 | Script Mods enabled? | Game Options → Other → ✅ Script Mods Allowed → **Restart Game** |
@@ -271,7 +282,7 @@ If **no provider is enabled** or **all API keys are empty**, Sensewright operate
 | Files in correct location? | `Mods/Sensewright.ts4script` and `Mods/Sensewright.package` (not deeper than 1 subfolder) |
 | Python 3.7 bytecode? | If building from source: `make test` verifies syntax; `make mod` compiles with `py -3.7` |
 
-### Sidecar Won't Start
+#### Sidecar Won't Start
 | Error | Fix |
 |-------|-----|
 | `python: command not found` | Add Python to PATH; restart terminal |
@@ -279,30 +290,30 @@ If **no provider is enabled** or **all API keys are empty**, Sensewright operate
 | `Address already in use` | Port 8765 busy → change `port` in `config.toml` `[server]` section |
 | `config.toml not found` | `cp config.example.toml config.toml` |
 
-### Autoboot Fails
+#### Autoboot Fails
 | Symptom | Fix |
 |---------|-----|
 | `python.txt` not found | Create `sidecar/python.txt` with full Python path |
 | Wrong Python version | Must be 3.10+; check `python --version` |
 | Sidecar starts but health check fails | Check sidecar console for errors; verify `config.toml` syntax |
 
-### Chat Shows `[missing:key]`
+#### Chat Shows `[missing:key]`
 - Locale file missing translation key.
 - Run `make doctor` → checks locale key parity.
 - Add missing key to `data/locales/ui/<lang>.json` (overlay) or `sidecar/locales/ui/<lang>.json` (bundle).
 
-### Autonomy Pulses Not Firing
+#### Autonomy Pulses Not Firing
 - Lot 51 Core not loaded → verify `.ts4script` in Mods.
 - Run `.\scripts\doctor.ps1` → checks all dependencies.
 
-### Web Studio Not Loading
+#### Web Studio Not Loading
 - Sidecar must be running (`python main.py`).
 - Open `http://127.0.0.1:8765/ui` (not `localhost` if IPv6 issues).
 - Check browser console for JS errors.
 
 ---
 
-## 9. Running Diagnostics
+### 9. Running Diagnostics
 
 ```bash
 # From repo root
@@ -324,7 +335,7 @@ Exit code: `0` = all OK, `1` = issues found.
 
 ---
 
-## 10. Uninstall
+### 10. Uninstall
 
 1. Delete `Sensewright.ts4script` and `Sensewright.package` from Mods folder.
 2. (Optional) Delete `Documents/Electronic Arts/The Sims 4/mod_data/Sensewright/` (mod logs + SQLite saves).
@@ -333,16 +344,16 @@ Exit code: `0` = all OK, `1` = issues found.
 
 ---
 
-## 11. Support & Logs
+### 11. Support & Logs
 
-### Log Locations
+#### Log Locations
 | Component | Location |
 |-----------|----------|
 | Mod (S4CL logger) | `Documents/Electronic Arts/The Sims 4/mod_data/Sensewright.log` |
 | Sidecar | Terminal stdout/stderr (configured by `log_level` in `config.toml`) |
 | Trace Correlation | Every request has `X-Trace-Id: tr_XXXXXXXX` — search in both logs |
 
-### Reporting Issues
+#### Reporting Issues
 Include:
 - Game version (bottom of main menu)
 - Sensewright version (`sensewright.version` cheat)
@@ -352,7 +363,7 @@ Include:
 
 ---
 
-## 12. Advanced: Development Setup
+### 12. Advanced: Development Setup
 
 If you want to modify the mod:
 
@@ -370,7 +381,7 @@ make sidecar     # run sidecar in foreground
 # Edit code → make test → make all → make install → reload game (or restart)
 ```
 
-### Decompile TS4 Scripts (for API reference)
+#### Decompile TS4 Scripts (for API reference)
 ```bash
 make decompile
 # Output: ~/Documents/TS4_Decompiled/
@@ -379,7 +390,7 @@ make decompile
 
 ---
 
-## 13. macOS Specific Notes
+### 13. macOS Specific Notes
 
 - **Mods folder**: `~/Documents/Electronic Arts/The Sims 4/Mods/` (create if missing).
 - **Python**: Use Homebrew (`brew install python@3.12`) or official installer.
@@ -389,7 +400,7 @@ make decompile
 
 ---
 
-## 14. Quick Reference Card
+### 14. Quick Reference Card
 
 | Task | Command |
 |------|---------|
@@ -403,3 +414,82 @@ make decompile
 | Play offline (0-key) | Leave all `enabled = false` in `config.toml` |
 | Mod version cheat | `sensewright.version` (in-game console) |
 | Sidecar health | `curl http://127.0.0.1:8765/v1/health` |
+
+
+---
+
+## Build and Development
+
+### Prerequisites
+
+- **Python 3.7.9** available as `py -3.7` — required to compile the mod's `.ts4script` (Python 3.7 bytecode).
+- **Python 3.10+** (3.12 recommended) available as `python` — required for build scripts and the sidecar.
+- **S4CL** and **Lot 51 Core** source in `research/` (for API reference only).
+- **`sidecar/python.txt`** — create this file after cloning, containing the full path to a
+  Python 3.10+ executable (e.g., `C:\Python312\python.exe`). The mod reads this at runtime
+  to auto-start the sidecar process. This file is `.gitignore`d and not versioned.
+
+### Make Targets
+
+```bash
+make all        # mod + package (default)
+make mod        # .ts4script only (requires py -3.7)
+make package    # .package only (requires Python 3.10+)
+make test       # syntax check (3.7 for mod, 3.10 for build scripts)
+make install    # copy artifacts to Mods folder
+make doctor     # run diagnostics (scripts/doctor.ps1)
+make clean      # remove dist/ and __pycache__
+make sidecar    # run sidecar dev server
+make dev        # interactive helper (build/test/clean/sidecar/install/doctor/decompile)
+make decompile  # decompile TS4 scripts for reference (needs unpyc3)
+```
+
+### PowerShell Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/dev.ps1 build` | Build both artifacts |
+| `scripts/dev.ps1 test` | Syntax verification |
+| `scripts/dev.ps1 clean` | Clean artifacts |
+| `scripts/dev.ps1 sidecar` | Run sidecar |
+| `scripts/dev.ps1 install` | Install to Mods |
+| `scripts/dev.ps1 doctor` | Diagnostics |
+| `scripts/dev.ps1 decompile` | Decompile TS4 scripts |
+| `scripts/install-mod.ps1` | Direct install |
+| `scripts/doctor.ps1` | Full environment check |
+
+### Build Details
+
+- **`.ts4script`**: compiled with Python 3.7 (`py -3.7 -m py_compile`). Verifies the magic number `42 0d 0d 0a`. Includes the `locales/` JSON files.
+- **`.package`**: DBPF with XML tuning + manifest-driven STBL compilation. Reads `manifest.json`, iterates locales, converts `ts4_stbl_byte` to a Resource Key, compiles FNV-1 hashed keys. Emits `stbl_keys.json` mapping.
+
+### Development Cycle
+
+```bash
+# Edit code → make test → make all → make install → reload game (or restart)
+make test        # syntax check
+make all         # build both artifacts
+make install     # install to Mods
+make sidecar     # run sidecar in foreground
+```
+
+#### Running Tests
+
+```bash
+cd sidecar
+python -m pytest -q
+```
+
+#### Decompile TS4 Scripts (for API reference)
+
+```bash
+make decompile
+# Output: ~/Documents/TS4_Decompiled/
+# Requires: pip install unpyc3
+```
+
+### Working the Backlog
+
+Remaining implementation gaps and the execution plan to close them live in
+[`project-status.md`](project-status.md). The full specification is
+[`specification.md`](specification.md).
