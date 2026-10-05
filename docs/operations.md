@@ -1451,3 +1451,63 @@ Dead config keys and no-op functions, wire fields the sidecar ignores (`content`
 - `py -3.7 -m compileall -q mod\sensewright_mod` → clean (spikes.py + engine_facade.py included).
 - `python mod/build_package.py` → 46 resources; `python mod/build.py` → 118,174 bytes.
 
+---
+
+## Remaining work after Stage 1 (2026-10-05)
+
+The gap between where the project is now and the rest of the [restructured roadmap]
+(#restructured-execution-roadmap). Ordered by the stability critical path; each entry
+names what depends on it. The new data probes proposed for the next in-game session are
+detailed in [`spike-strategy.md`](spike-strategy.md) §6.
+
+### A. In-game validation (blocks release — needs the game)
+
+1. **Object interactions end-to-end** — the tunings load and mirror/mailbox match, but the
+   click→endpoint flow was never exercised: Mirror "Reflect" → `/v1/evolve`; Mailbox →
+   `/v1/world/neighborhood`; Diary "Ler/Snoop" → `/v1/memory/diary` (diary `found=0` — see
+   `diary_object` spike). Unblocks P2 native hooks.
+2. **God Director full loop** — `god.plan` → `god.cast` (spawn ✅) → `god.puppeteer`
+   (approach ✅ fixed) → conversation → `beat-ended` → `god.react` → arc advance. Confirm a
+   single arc completes without burning through beats (BUG-14).
+3. **M8 acceptance** — lot transition, *Save As*, *Alt+F4* rollback, invisible autoboot.
+   None executed yet (unit tests only).
+
+### B. Sidecar-only (no game needed — do in parallel)
+
+4. **Token Priority Packing (R4)** — `ContextAssembler` overflows the 700-token realtime
+   tier; the BUG-10 scene hints crowd out persona/memories. P0/P1/P2 packing + a
+   parameterized 33-purpose token test.
+5. **`response_format: {"type":"json_object"}`** — the deferred half of R5 (touches the
+   provider layer; reduces the fallback cascade on free models).
+6. **R8 GC routine** — purge the ~20 orphan "Confidente Sensewright" duplicates in save
+   `1488584711` (metadata now stores the canonical id; the old duplicates remain).
+
+### C. Deferred / risky (documented, revisit carefully)
+
+7. **SSE unified transport (R2)** — single inbound thread (SSE `timeout=15` + keepalive +
+   pull fallback). Shutdown-sensitive (`timeout=None` hangs `TS4_x64.exe`, PC-02); the
+   intent pull already delivers intents.
+8. **MCP layer (Stage 4)** — only after Stages 1–3; facades over levers that are 100%
+   in-game validated.
+
+### D. Backlog / scope decisions
+
+9. **P2 hook decisions** — keep `sim_GetToKnow`; **defer** the physical Autobiography book
+   and the Tombstone epitaph; sleep balloons stay best-effort (complex `BalloonRequest`).
+10. **Web Studio (P4)** — real `spoiler_shield`, Sim export/import (FC2), cost dashboard
+    (FC3), `director_mode` selector.
+11. **FC5 compatibility layer** (MCCC/Whims) — backlog.
+
+### Open "coded blind" surfaces (→ new spikes)
+
+The 4 master probes validated interaction/routing/buff/relationship-friendship, but these
+remain unproven and are the target of [`spike-strategy.md`](spike-strategy.md) §6:
+
+- **Relationship bits + sentiments** — the relationship probe returned `bits: []` for a
+  high-friendship pair; sentiments are unread. Feeds `sim.social` tier, `mem.relationship.
+  review`, sentiment feedback.
+- **Mood effect** — `set_mood` applies the buff but was never confirmed to change the mood.
+- **Lifecycle events** — death/marriage/birth S4CL events are wired but never fired.
+- **Trait levers** — `set_trait`/`remove_trait`/`add_relationship_bit` coded blind.
+- **Custom diary object** — `sw_diary_object` `found=0` on the test lot.
+

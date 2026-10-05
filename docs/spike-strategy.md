@@ -96,3 +96,57 @@ These are the central spikes designed to map the engine's reality. They cover bo
 - **Value:** Confirms if our memory compaction and `sim_GetToKnow` logic is based on real EA data structures or outdated assumptions.
 
 By executing these 4 Observability Probes, the Agent will receive a perfect map of the TS4 engine's data structures, allowing us to build the real features with surgical precision.
+
+## 5.1. Validation status of the 4 master probes (2026-10-05)
+
+The 4 probes were implemented (`mod/sensewright_mod/spikes.py`, console commands
+`sw.spike <name>` / `sw.smoke_test`) and executed in-game (build 1.128.90.1030).
+Full defect log: [`operations.md`](operations.md) + [`research/engine_api_notes.md`](../research/engine_api_notes.md) §10–§12.
+
+| Probe | Status | Notes |
+|---|---|---|
+| `interaction` | ✅ validated | Reads `queue.running` + `si_state` (not `si_state.current_interaction`, which is empty during socials). |
+| `ui_injection` — buff | ✅ validated | Buff roundtrip passes with an int tuning id; `mood_type` must be numeric `<T>`, not `<E>` (reversed BUG-07). |
+| `ui_injection` — balloon | 🟡 best-effort | `BalloonRequest.__init__` needs the full `(icon_object, overlay, balloon_type, priority, duration, delay, …)` signature. |
+| `ui_injection` — tooltip | 🟡 client-side | No server-side `TooltipComponent`; tooltip/display name come from `obj.tooltip_text`/`obj.display_name`. |
+| `routing` | ✅ validated | `services.get_zone_situation_manager()` (not `get_situation_manager`) + `create_visit_situation(sim)` spawns townies with a `situation_id`. |
+| `relationship` | 🟡 partial | `friendship`/`romance` read fine, but **`bits` returned `[]`** even for a high-friendship pair; sentiments are not read at all. |
+
+## 6. Phase-2 spikes (proposed — pending implementation)
+
+Remaining "coded blind" surfaces worth proving before building on top of them.
+
+### 1. `relationship_bits` (Relationship bits + sentiments) — highest value
+- **Goal:** read a relationship's *bits* (romantic/friend/family) and its *sentiments*
+  correctly, and confirm which accessor works (`get_all_bits()`, `RelationshipTrack`,
+  the sentiment tracker, `CommonRelationshipUtils`).
+- **Why:** the current `relationship` probe returned `bits: []` for a pair with
+  `friendship=88.81`. `sim.social` relationship tier (rival/family), `mem.relationship.review`,
+  and sentiment feedback all depend on this.
+- **Output:** console + JSON log of every relationship bit and sentiment between the
+  active Sim and a target.
+
+### 2. `mood_effect` (does `set_mood` actually move the needle)
+- **Goal:** apply `buff_mood_happy`, then read the Sim's current mood and confirm it
+  changed to happy.
+- **Why:** we proved the buff *applies* without error, but not that the mood *changes*.
+  This is the same "applies without effect" class as the `mood_type` bug just fixed.
+- **Output:** before/after mood value + a pass/fail.
+
+### 3. `lifecycle` (death / marriage / birth events)
+- **Goal:** trigger (or observe) `S4CLSimDiedEvent`, `S4CLSimPregnancyEndedEvent`,
+  `S4CLSimRelationshipBitAddedEvent` and confirm they fire with usable data
+  (`death_type`, `sim_info_a/b`, `relationship_bit`).
+- **Why:** `lifecycle_hooks.py` is wired but never exercised in-game; `mem.legacy`
+  (P28) and `sim.lifestory` chapters depend on it.
+- **Output:** JSON log of each event's payload fields.
+
+### 4. `trait_levers` (traits + relationship-bit application) — secondary
+- **Goal:** apply/remove a trait and a relationship bit via `native_hooks`
+  (`set_trait`/`remove_trait`/`add_relationship_bit`) and confirm they stick.
+- **Why:** `evo.trait` (P31) and relationship feedback are coded blind.
+
+### 5. `diary_object` (custom diary placement) — secondary
+- **Goal:** confirm the custom `sw_diary_object` tuning is buildable/spawnable on the
+  lot (the smoke test reports `object:diary found=0`).
+- **Why:** the Diary "Ler/Snoop" P2 hook currently has no target object.
