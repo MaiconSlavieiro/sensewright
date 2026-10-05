@@ -266,9 +266,12 @@ def _probe_ui_injection(_connection=None):
                         balloon_result['error'] = str(e)
                         continue
             if not balloon_result['ok']:
-                # Try native balloon request
+                # Try native balloon request. The module is `balloon` (singular)
+                # per the decompiled `balloon/balloon_request.py`; the constructor
+                # is BalloonRequest(sim, icon, icon_object, overlay, balloon_type,
+                # priority, duration, delay, delay_randomization, category_icon, ...).
                 try:
-                    from balloons.balloon_request import BalloonRequest
+                    from balloon.balloon_request import BalloonRequest
                     request = BalloonRequest(active_sim_info, 'Zzz...')
                     request.send()
                     balloon_result['ok'] = True
@@ -290,19 +293,21 @@ def _probe_ui_injection(_connection=None):
             if objects:
                 obj = objects[0]
                 tooltip_result['object_class'] = object_class_name(obj)
-                # Try to get tooltip component
+                # Server-side has no `TooltipComponent` (it is a client concept);
+                # the engine exposes the object's localized tooltip/display name
+                # via a few accessors instead. Try each and report which works.
                 try:
-                    from objects.components.tooltip_component import TooltipComponent
-                    getter = _safe_getattr(obj, 'get_component', None)
-                    if callable(getter):
-                        component = getter(TooltipComponent)
-                        if component is not None:
-                            for attr in ('_dynamic_tooltip', 'tooltip', 'dynamic_tooltip'):
-                                val = _safe_getattr(component, attr, None)
-                                if val:
-                                    tooltip_result['tooltip'] = str(val)
-                                    tooltip_result['ok'] = True
-                                    break
+                    found = False
+                    for attr in ('tooltip_text', 'tooltip', 'display_name'):
+                        val = _safe_getattr(obj, attr, None)
+                        if val:
+                            tooltip_result['tooltip'] = str(val)
+                            tooltip_result['ok'] = True
+                            tooltip_result['method'] = attr
+                            found = True
+                            break
+                    if not found:
+                        tooltip_result['error'] = 'no tooltip accessor returned a value'
                 except Exception as e:
                     tooltip_result['error'] = str(e)
                 break

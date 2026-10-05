@@ -3,7 +3,7 @@
 <I c="Buff" i="buff" m="buffs.buff" n="buff_bias_read" s="0">
   <E n="buff_type">POSITIVE</E>
   <T n="duration">240</T>
-  <E n="mood_type">HAPPY</E>
+  <T n="mood_type">14640</T>
   <T n="mood_weight">0</T>
   <T n="visible">False</T>
   <U n="game_effect_modifiers">

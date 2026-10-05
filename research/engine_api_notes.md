@@ -89,8 +89,17 @@ File: `research/ts4/simulation/buffs/buff.py`
 
 - `class Buff(…)` at line 91. Tuning fields `mood_type` (a `TunableReference` to a
   Mood, line 157) and `mood_weight` (a `TunableRange`, line 166).
-- `mood_type` is an enum-reference tunable → the tuning XML must use `<E
-  n="mood_type">ANGRY</E>`, **not** `<T>…</T>` (confirms BUG-07).
+- ⚠️ **`mood_type` is a `TunableReference` (manager=`Types.MOOD`, `allow_none=True`),
+  NOT a `TunableEnumEntry`.** The tuning XML must therefore use the **numeric
+  instance ID** (`<T n="mood_type">14640</T>` for happy), not the enum name
+  (`<E n="mood_type">HAPPY</E>`). This **corrects BUG-07**, whose `<E>` "fix" was
+  based on a mis-diagnosis and reintroduced `BuffInfo/MoodKey()` null client errors
+  (confirmed in-game 2026-10-05: applying `buff_mood_happy` with `<E>HAPPY</E>`
+  logged `TypeError: Error #1009 … BuffInfo/MoodKey()`). Vanilla mood instance ids
+  (from S4CL `CommonMoodId`): HAPPY=14640, SAD=14643, ANGRY=14632, STRESSED=14645,
+  FLIRTY=14638, INSPIRED=14641, FOCUSED=14639, DAZED=14644, BORED=14633,
+  UNCOMFORTABLE=14646, CONFIDENT=14634, ENERGIZED=14636, PLAYFUL=14642,
+  EMBARRASSED=14635, SCARED=251719.
 - Buffs are applied via `sim.add_buff(buff_type, buff_reason)` (see `Buff.__init__`
   line 65). `buff_reason` is a localized reason string.
 
@@ -146,3 +155,31 @@ and exposed 4 defects (all now fixed in `engine_facade.py`/`spikes.py`):
   confirm the buff roundtrip now passes.
 - **Note:** diary/journal objects resolve to 0 on the test lot (no such object
   placed) — expected, not a defect.
+
+## 11. In-game spike validation #2 (2026-10-05, second run)
+
+After the §10 fixes, the probes re-ran and confirmed the routing + buff fixes, and
+exposed three more findings:
+
+- **✅ Routing fixed:** `sw.spike routing` spawned 3 townies (Fátima Belem, Bob
+  Pancakes, Eliza Pancakes) with valid `situation_id` (`get_zone_situation_manager`
+  + `create_visit_situation` works).
+- **✅ Buff fixed:** `sw.spike ui_injection` applied `buff_mood_happy` via an int id
+  (`buff_reason.ok=true`); `_MOOD_BUFFS` module access fixed.
+- **✅ Conversations:** `delta: N sims, 6 conversing` + `catalyst tracker:
+  beat-ended posted decision=accept` — `sim.social` pair detection and the God
+  Director `beat-ended` flow fire on real conversations.
+- **🐛 Defect 5 (mood_type format):** applying `buff_mood_happy` still logged
+  `BuffInfo/MoodKey()` null → root cause is that `mood_type` was written as
+  `<E n="mood_type">HAPPY</E>` (enum name), but `mood_type` is a `TunableReference`
+  → must be `<T n="mood_type">14640</T>` (numeric instance id). **This reverses
+  BUG-07's `<E>` "fix"** (which was based on a wrong `TunableEnumEntry` diagnosis).
+  All 34 buffs (15 mood + 14 bias + 4 dream + 1 missing_player) were reverted to
+  the numeric form (see §6).
+- **🐛 Defect 6 (balloon module):** the module is `balloon` (singular), not
+  `balloons`. `BalloonRequest.__init__` takes `(sim, icon, icon_object, overlay,
+  balloon_type, priority, duration, delay, delay_randomization, category_icon, …)`
+  — no simple text constructor. Sleep-balloon injection remains best-effort.
+- **🐛 Defect 7 (tooltip):** there is **no server-side `TooltipComponent`** (it is a
+  client concept). Server-side object tooltip/display text comes from
+  `obj.tooltip_text`/`obj.display_name` accessors, not `get_component(TooltipComponent)`.
