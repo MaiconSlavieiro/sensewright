@@ -183,3 +183,19 @@ exposed three more findings:
 - **🐛 Defect 7 (tooltip):** there is **no server-side `TooltipComponent`** (it is a
   client concept). Server-side object tooltip/display text comes from
   `obj.tooltip_text`/`obj.display_name` accessors, not `get_component(TooltipComponent)`.
+
+## 12. In-game spike validation #3 (2026-10-05, third run)
+
+- **✅ `sw.smoke_test` = 20/22** (was 18/22): `trait_hidden_no_walkby` now passes
+  (`id=13870026573313588640`), `tuning_summary` = 11/11 loaded, and
+  `buff_roundtrip` **passes with no `BuffInfo/MoodKey()` error** — the §6 numeric
+  `mood_type` fix is confirmed. Only `object:diary`/`object:journal` (found=0, no
+  such object on the lot) remain — expected.
+- **✅ `sw.spike ui_injection` `buff_reason` = ok** with no client UI error.
+- **🐛 Defect 8 (approach / S4CL incompatibility):** `sim.puppeteer`-style
+  `approach` intents fail. S4CL `send_near_position` → `send_near_location` →
+  `find_good_location` now returns 3+ values in TS4 1.128.90.1030 while S4CL 3.22
+  unpacks exactly 2 → `ValueError: too many values to unpack`. Fixed in
+  `tool_executor._execute_approach` by falling back to `send_to_position` (exact
+  terrain Go-Here, no FGL search). The game logs this as a `lastException.txt`
+  desync each failed approach, but it is not a crash.

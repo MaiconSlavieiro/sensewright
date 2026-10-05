@@ -279,9 +279,21 @@ class GameLever(object):
             from sims4communitylib.utils.sims.common_sim_location_utils import CommonSimLocationUtils
             position = CommonSimLocationUtils.get_position(target_info)
             level = CommonSimLocationUtils.get_surface_level(target_info)
-            result = CommonSimLocationUtils.send_near_position(sim_info, position, level)
+            result = None
+            # S4CL's send_near_position searches for a reachable spot nearby, but
+            # it is broken against TS4 1.128.x: its internal find_good_location
+            # now returns 3+ values while S4CL 3.22 unpacks exactly 2
+            # (ValueError: too many values to unpack). Fall back to the exact
+            # terrain send_to_position, which never runs that search.
+            try:
+                result = CommonSimLocationUtils.send_near_position(sim_info, position, level)
+            except Exception:
+                result = None
             if result is not None and getattr(result, 'is_success', True):
-                return True, {'routed': True}
+                return True, {'routed': True, 'method': 'send_near_position'}
+            result = CommonSimLocationUtils.send_to_position(sim_info, position, level)
+            if result is not None and getattr(result, 'is_success', True):
+                return True, {'routed': True, 'method': 'send_to_position'}
             return False, {'error': 'approach_failed', 'details': str(result)}
         except Exception as e:
             log_exception('Approach execution error: {}'.format(e))
