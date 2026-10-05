@@ -29,7 +29,11 @@ from sensewright_mod.engine_facade import (
     buff_roundtrip, object_class_name, tuning_resource_loaded,
     find_objects_by_class_name, get_townie_not_on_lot,
 )
-from sensewright_mod.native_hooks import apply_buff, remove_buff, _MOOD_BUFFS
+# NOTE: `_MOOD_BUFFS` is a reassigned module global in native_hooks (register_mood_buffs
+# does `_MOOD_BUFFS = dict(...)`), so it must be accessed via the module, not imported
+# by value — importing it snapshots the initial empty dict and the smoke/ui probes
+# would always miss the emotion buffs.
+from sensewright_mod import native_hooks
 from sensewright_mod.tuning import resolve_owned_id
 
 from typing import Optional, List, Dict, Any
@@ -98,7 +102,7 @@ def _write_spike_log(probe_name, payload):
             'probe': probe_name,
             'data': payload,
         }
-        line = json.dumps(entry, ensure_ascii=False)
+        line = json.dumps(entry, ensure_ascii=False, default=str)
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
     except Exception as e:
@@ -207,17 +211,19 @@ def _probe_ui_injection(_connection=None):
     # Use a known mood buff from _MOOD_BUFFS if available, else try a generic one
     buff_id = 0
     try:
-        if _MOOD_BUFFS:
-            buff_id = next(iter(_MOOD_BUFFS.values()))
+        if native_hooks._MOOD_BUFFS:
+            buff_id = next(iter(native_hooks._MOOD_BUFFS.values()))
     except Exception:
         pass
     if buff_id == 0:
-        # Fallback: try to find any buff tuning
+        # Fallback: try to find any buff tuning. `manager.types` maps Key -> Buff,
+        # so use the instance id (an int), never the raw Key (it is not a buff type
+        # and crashes S4CL's add_buff with "no attribute can_add").
         try:
             manager = services.get_instance_manager(sims4.resources.Types.BUFF)
             if manager is not None:
-                for tid in manager.types.keys():
-                    buff_id = tid
+                for key in manager.types.keys():
+                    buff_id = int(key.instance)
                     break
         except Exception:
             pass
@@ -503,7 +509,7 @@ def _smoke_test(_connection=None):
         ('interaction_diary_snoop', sims4.resources.Types.INTERACTION, 'interaction_diary_snoop'),
         ('interaction_mailbox', sims4.resources.Types.INTERACTION, 'interaction_mailbox'),
         ('situation_visit', sims4.resources.Types.SITUATION, 'situation_visit'),
-        ('trait_hidden_nowalkby', sims4.resources.Types.TRAIT, 'trait_hidden_nowalkby'),
+        ('trait_hidden_no_walkby', sims4.resources.Types.TRAIT, 'trait_hidden_no_walkby'),
         ('buff_dream_epiphany', sims4.resources.Types.BUFF, 'buff_dream_epiphany'),
         ('buff_dream_surreal', sims4.resources.Types.BUFF, 'buff_dream_surreal'),
         ('buff_dream_omen', sims4.resources.Types.BUFF, 'buff_dream_omen'),
@@ -543,17 +549,17 @@ def _smoke_test(_connection=None):
     # 4. Emotion buff roundtrip
     buff_id = 0
     try:
-        if _MOOD_BUFFS:
-            buff_id = next(iter(_MOOD_BUFFS.values()))
+        if native_hooks._MOOD_BUFFS:
+            buff_id = next(iter(native_hooks._MOOD_BUFFS.values()))
     except Exception:
         pass
     if buff_id == 0 and active_sim_info is not None:
-        # Try any buff
+        # Try any buff (convert the raw Key to its int instance id).
         try:
             manager = services.get_instance_manager(sims4.resources.Types.BUFF)
             if manager is not None:
-                for tid in manager.types.keys():
-                    buff_id = tid
+                for key in manager.types.keys():
+                    buff_id = int(key.instance)
                     break
         except Exception:
             pass

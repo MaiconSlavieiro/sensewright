@@ -31,8 +31,11 @@ File: `research/ts4/core/sims4/commands.py`
 
 File: `research/ts4/simulation/situations/situation_manager.py`
 
-- `services.get_situation_manager()` is the singleton (used across the decompiled
-  source).
+- `services.get_zone_situation_manager()` is the singleton (used across the
+  decompiled source — `situation_manager.py:135`). **Note:** there is **no**
+  `services.get_situation_manager()`; the spike `sw.spike routing` confirmed the
+  wrong accessor raises `AttributeError: module 'services' has no attribute
+  'get_situation_manager'` in game build 1.128.90.1030.
 - `create_situation(situation_type, guest_list=None, user_facing=True,
   duration_override=None, custom_init_writer=None, zone_id=0, scoring_enabled=True,
   spawn_sims_during_zone_spin_up=False, creation_source=None, …)` (line 337).
@@ -113,7 +116,33 @@ File: `research/ts4/simulation/sims/sim_info.py`
   interaction's `target`, group via `si.social_group`.
 - **ui-injection probe** → buff text via `sim.add_buff(type, reason)`; balloons via
   `balloon/balloon_request.py`; tooltips via `objects/definition.py`/`ui/`.
-- **routing probe** → `services.get_situation_manager().create_situation(...)` /
+- **routing probe** → `services.get_zone_situation_manager().create_situation(...)` /
   `create_visit_situation(sim)`.
 - **relationship probe** → `sim_info.relationship_tracker` edges, `sim_id_a/sim_id_b`,
   `get_all_bits()`.
+
+## 10. In-game spike validation (2026-10-05, build 1.128.90.1030)
+
+First `sw.smoke_test` / `sw.spike` run against the real engine confirmed 4 facts
+and exposed 4 defects (all now fixed in `engine_facade.py`/`spikes.py`):
+
+- **✅ Confirmed:** `SimInfo.age` → `Age` enum (`age=CHILD`); `SimInfo.gender`; 
+  `SimInfo.relationship_tracker` exists; mirror/mailbox resolve by class name
+  (mirror ×7, mailbox ×1); S4CL `CommonRelationshipUtils.get_friendship_level`/
+  `get_romance_level` return real floats (friendship=88.81).
+- **🐛 Defect 1 (routing):** `services.get_situation_manager()` does not exist →
+  `get_zone_situation_manager()` (see §2).
+- **🐛 Defect 2 (buff):** `InstanceManager.types.keys()` yields raw `_resourceman.Key`
+  objects, NOT int tuning ids. Passing a `Key` to S4CL `add_buff` raises
+  `'_resourceman.Key' object has no attribute 'can_add'`. Convert with
+  `int(key.instance)`.
+- **🐛 Defect 3 (spike log):** probe payloads can carry `Key` objects → `json.dumps`
+  needs `default=str`.
+- **🐛 Defect 4 (tuning key):** the owned-name key is `trait_hidden_no_walkby`
+  (with underscore); the smoke test typo'd it as `trait_hidden_nowalkby` → id=0.
+- **⚠️ Open:** `_MOOD_BUFFS` is a reassigned global — spikes.py imported it by value
+  (empty dict) and always fell through to the broken `Key` fallback; fixed by
+  accessing `native_hooks._MOOD_BUFFS` via the module. Re-run `sw.smoke_test` to
+  confirm the buff roundtrip now passes.
+- **Note:** diary/journal objects resolve to 0 on the test lot (no such object
+  placed) — expected, not a defect.

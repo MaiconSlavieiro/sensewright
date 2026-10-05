@@ -353,7 +353,7 @@ def spawn_and_visit(sim_info):
         result['error'] = 'sim_info is None'
         return result
     try:
-        situation_manager = services.get_situation_manager()
+        situation_manager = services.get_zone_situation_manager()
         if situation_manager is None:
             result['error'] = 'situation_manager unavailable'
             return result
