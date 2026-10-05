@@ -199,3 +199,11 @@ exposed three more findings:
   `tool_executor._execute_approach` by falling back to `send_to_position` (exact
   terrain Go-Here, no FGL search). The game logs this as a `lastException.txt`
   desync each failed approach, but it is not a crash.
+- **🐛 Defect 9 (interaction probe read the wrong attribute):** `current_interaction`
+  read `si_state.current_interaction` (a property that is empty during social
+  interactions) and only fell back to `queue.running` when `si_state` was `None`.
+  The correct signal is **`sim.queue.running` first, then iterate `sim.si_state`**
+  (both are iterable — see `sim.py:815`: `itertools.chain((queue.running,), si_state)`).
+  Rewrote `engine_facade.current_interaction(s)` + added `current_interactions(s)`
+  and `_probe_interaction` now reports **all** running interactions + a raw
+  `queue.running`/`si_state` diagnostic when none are found.

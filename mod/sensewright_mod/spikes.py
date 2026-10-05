@@ -24,7 +24,7 @@ from sims4communitylib.utils.common_log_utils import CommonLogUtils
 from sensewright_mod.debug_log import log_exception, log_info, log_debug
 from sensewright_mod.engine_facade import (
     get_active_sim_info, sim_id_of, sim_info_of, sim_age_stage, sim_gender,
-    sim_household_id, sim_room_id, current_interaction, interaction_localized_text,
+    sim_household_id, sim_room_id, current_interactions, interaction_localized_text,
     interaction_target, social_peers, relationship_edges, spawn_and_visit,
     buff_roundtrip, object_class_name, tuning_resource_loaded,
     find_objects_by_class_name, get_townie_not_on_lot,
@@ -114,9 +114,13 @@ def _write_spike_log(probe_name, payload):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _probe_interaction(_connection=None):
-    """Read the active Sim's current interaction; collect localized action text,
-    tuning/class name, target (Sim vs object), and relationship bits between
-    actor and target. Dump to console + log."""
+    """Read the active Sim's running interaction(s); collect localized action
+    text, tuning/class name, target (Sim vs object), relationship bits, and
+    social peers. Dump to console + log.
+
+    A Sim mid-conversation has ``queue.running`` plus one or more social
+    interactions in ``si_state`` — all are reported, not just the first.
+    """
     output = sims4.commands.output
     active_sim_info = get_active_sim_info()
     if active_sim_info is None:
@@ -125,65 +129,96 @@ def _probe_interaction(_connection=None):
         return False
 
     actor_id = sim_id_of(active_sim_info)
-    si = current_interaction(active_sim_info)
+    interactions = current_interactions(active_sim_info)
 
     payload = {
         'actor_sim_id': actor_id,
-        'has_interaction': si is not None,
+        'has_interaction': bool(interactions),
+        'interaction_count': len(interactions),
+        'interactions': [],
     }
 
-    if si is None:
-        output('Active sim {} has no current interaction'.format(actor_id), _connection)
+    if not interactions:
+        output('Active sim {} has no running interaction'.format(actor_id), _connection)
+        # Report the raw diagnostic so a false negative can be debugged.
+        payload['diagnostic'] = _interaction_state_diagnostic(active_sim_info)
         _write_spike_log('interaction', payload)
         return True
 
-    # Interaction details
-    localized = interaction_localized_text(si)
-    class_name = _safe_getattr(si, '__name__', str(si))
-    target = interaction_target(si)
-    target_id = sim_id_of(target)
-    target_class = object_class_name(target)
-    target_is_sim = isinstance(target, SimInfo) or (target is not None and _safe_getattr(target, 'is_sim', False))
+    output('=== Interaction Probe ({} running) ==='.format(len(interactions)), _connection)
+    output('Actor: {} (id={})'.format(
+        _safe_getattr(active_sim_info, 'full_name', 'Unknown'), actor_id), _connection)
 
-    payload.update({
-        'interaction_class': class_name,
-        'interaction_localized': localized,
-        'target_sim_id': target_id,
-        'target_class': target_class,
-        'target_is_sim': target_is_sim,
-    })
+    for idx, si in enumerate(interactions):
+        localized = interaction_localized_text(si)
+        class_name = _safe_getattr(si, '__name__', str(si))
+        target = interaction_target(si)
+        target_id = sim_id_of(target)
+        target_class = object_class_name(target)
+        target_is_sim = isinstance(target, SimInfo) or (
+            target is not None and _safe_getattr(target, 'is_sim', False))
 
-    # Relationship bits between actor and target (if target is a sim)
-    if target_is_sim and target_id:
-        target_info = sim_info_of(target)
-        if target_info is not None:
-            try:
-                friendship = CommonRelationshipUtils.get_friendship_level(active_sim_info, target_info)
-                romance = CommonRelationshipUtils.get_romance_level(active_sim_info, target_info)
-                payload['relationship'] = {
-                    'friendship': float(friendship),
-                    'romance': float(romance),
-                }
-            except Exception as e:
-                log_exception('probe_interaction relationship: {}'.format(e))
-                payload['relationship'] = {'error': str(e)}
+        entry = {
+            'index': idx,
+            'interaction_class': class_name,
+            'interaction_localized': localized,
+            'target_sim_id': target_id,
+            'target_class': target_class,
+            'target_is_sim': target_is_sim,
+        }
+        payload['interactions'].append(entry)
 
-    # Social peers
+        output('  [{}] {} [{}]'.format(idx, localized or class_name, class_name), _connection)
+        output('       target: {} (id={}, class={}, is_sim={})'.format(
+            _safe_getattr(target, 'full_name', target_class), target_id,
+            target_class, target_is_sim), _connection)
+
+        # Relationship bits between actor and target (if target is a sim)
+        if target_is_sim and target_id:
+            target_info = sim_info_of(target)
+            if target_info is not None:
+                try:
+                    friendship = CommonRelationshipUtils.get_friendship_level(active_sim_info, target_info)
+                    romance = CommonRelationshipUtils.get_romance_level(active_sim_info, target_info)
+                    entry['relationship'] = {
+                        'friendship': float(friendship),
+                        'romance': float(romance),
+                    }
+                    output('       relationship: friendship={}, romance={}'.format(
+                        friendship, romance), _connection)
+                except Exception as e:
+                    log_exception('probe_interaction relationship: {}'.format(e))
+                    entry['relationship'] = {'error': str(e)}
+
+    # Social peers (from si.social_group)
     peers = social_peers(active_sim_info)
     payload['social_peers'] = peers
-
-    # Console output
-    output('=== Interaction Probe ==='.format(), _connection)
-    output('Actor: {} (id={})'.format(_safe_getattr(active_sim_info, 'full_name', 'Unknown'), actor_id), _connection)
-    output('Interaction: {} [{}]'.format(localized, class_name), _connection)
-    output('Target: {} (id={}, class={}, is_sim={})'.format(
-        _safe_getattr(target, 'full_name', target_class), target_id, target_class, target_is_sim), _connection)
-    if 'relationship' in payload:
-        rel = payload['relationship']
-        output('Relationship: friendship={}, romance={}'.format(rel.get('friendship'), rel.get('romance')), _connection)
     output('Social peers: {}'.format(peers), _connection)
 
     _write_spike_log('interaction', payload)
+    return True
+
+
+def _interaction_state_diagnostic(sim_info):
+    """Return a raw diagnostic of the sim's queue/si_state so a false negative
+    (has_interaction=false) can be debugged from the spike log."""
+    diag = {'queue_running': None, 'si_state_current': None, 'si_state_count': 0}
+    try:
+        sim_obj = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
+        if sim_obj is not None:
+            queue = _safe_getattr(sim_obj, 'queue', None)
+            running = _safe_getattr(queue, 'running', None)
+            diag['queue_running'] = _safe_getattr(running, '__name__', str(running)) if running is not None else None
+            si_state = _safe_getattr(sim_obj, 'si_state', None)
+            cur = _safe_getattr(si_state, 'current_interaction', None)
+            diag['si_state_current'] = _safe_getattr(cur, '__name__', str(cur)) if cur is not None else None
+            try:
+                diag['si_state_count'] = sum(1 for _ in si_state) if si_state is not None else 0
+            except Exception:
+                diag['si_state_count'] = -1
+    except Exception as e:
+        diag['error'] = str(e)
+    return diag
     return True
 
 

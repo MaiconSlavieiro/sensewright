@@ -164,22 +164,80 @@ def sim_room_id(sim):
 # Interaction accessors
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _iter_social_interactions(si_state):
+    """Yield each social interaction in an SIState, defensively.
+
+    ``si_state`` is iterable (``for si in si_state``) and also exposes
+    ``sis_actor_gen()``; ``current_interaction`` is a property that is only
+    populated in some builds. We try all three and dedupe by identity.
+    """
+    seen = set()
+    gen = _safe_getattr(si_state, 'sis_actor_gen', None)
+    if callable(gen):
+        for si in _safe_call(gen) or ():
+            if si is not None and id(si) not in seen:
+                seen.add(id(si))
+                yield si
+    for si in _safe_iter_collection(si_state):
+        if si is not None and id(si) not in seen:
+            seen.add(id(si))
+            yield si
+    cur = _safe_getattr(si_state, 'current_interaction', None)
+    if cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        yield cur
+
+
+def _safe_iter_collection(collection):
+    """Safely iterate a collection, yielding its items; empty on failure."""
+    if collection is None:
+        return
+    try:
+        for item in collection:
+            yield item
+    except Exception:
+        return
+
+
 def current_interaction(sim):
-    """Return the current interaction instance for a Sim, or None."""
+    """Return the Sim's primary current interaction, or None.
+
+    Order of preference: the running queued interaction (``sim.queue.running``)
+    first, then the first social interaction in ``sim.si_state``. The previous
+    implementation read ``si_state.current_interaction`` (a property that is
+    empty during social interactions on TS4 1.128.x) and only fell back to the
+    queue when ``si_state`` was None — so it always returned None mid-interaction.
+    """
+    interactions = current_interactions(sim)
+    return interactions[0] if interactions else None
+
+
+def current_interactions(sim):
+    """Return a list of the Sim's currently-running interactions (never raises).
+
+    A Sim mid-conversation has ``queue.running`` plus one or more social
+    interactions in ``si_state``; both are returned (deduped by identity).
+    """
+    result = []
     try:
         sim_obj = _safe_call(CommonSimUtils.get_sim_instance, sim)
         if sim_obj is None:
-            return None
+            return result
+        seen = set()
+        queue = _safe_getattr(sim_obj, 'queue', None)
+        running = _safe_getattr(queue, 'running', None)
+        if running is not None:
+            result.append(running)
+            seen.add(id(running))
         si_state = _safe_getattr(sim_obj, 'si_state', None)
         if si_state is not None:
-            return _safe_getattr(si_state, 'current_interaction', None)
-        # Fallback: queue.running
-        queue = _safe_getattr(sim_obj, 'queue', None)
-        if queue is not None:
-            return _safe_getattr(queue, 'running', None)
+            for si in _iter_social_interactions(si_state):
+                if id(si) not in seen:
+                    result.append(si)
+                    seen.add(id(si))
     except Exception as e:
-        log_exception('engine_facade.current_interaction: {}'.format(e))
-    return None
+        log_exception('engine_facade.current_interactions: {}'.format(e))
+    return result
 
 
 def interaction_localized_text(si):
