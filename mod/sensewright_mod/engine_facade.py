@@ -245,12 +245,23 @@ def interaction_localized_text(si):
     if si is None:
         return ''
     try:
-        from sims4.localization import LocalizationHelperTuning
         display_name = _safe_getattr(si, 'display_name', None)
         if display_name is not None:
-            text = LocalizationHelperTuning.get_raw_text(display_name)
-            if text:
-                return str(text)
+            # str() resolves through the localization system, whereas
+            # get_raw_text() returns the unresolved 'hash: … tokens { type:
+            # INVALID }' repr for hash-based localized strings. Prefer the
+            # resolved text and reject the hash repr.
+            resolved = ''
+            try:
+                resolved = str(display_name)
+            except Exception:
+                resolved = ''
+            if resolved and 'hash:' not in resolved:
+                return resolved
+            from sims4.localization import LocalizationHelperTuning
+            raw = LocalizationHelperTuning.get_raw_text(display_name)
+            if raw and 'hash:' not in str(raw) and 'tokens' not in str(raw):
+                return str(raw)
     except Exception as e:
         log_exception('engine_facade.interaction_localized_text (localization): {}'.format(e))
     try:

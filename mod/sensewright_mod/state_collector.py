@@ -232,6 +232,45 @@ def _resolve_social_group_peer(sim, sim_id):
     return 0
 
 
+def _get_current_interactions(sim):
+    """Return the Sim's running interactions (queue.running + si_state), deduped.
+
+    TS4 keeps the running interaction in ``sim.queue.running`` and any in-progress
+    social interactions in ``sim.si_state`` (both iterable — see decompiled
+    ``sim.py:815``: ``itertools.chain((queue.running,), si_state)``).
+    ``si_state.current_interaction`` is a property that is empty during social
+    interactions on 1.128.x, so it is deliberately not used here.
+    """
+    result = []
+    if sim is None:
+        return result
+    seen = set()
+    queue = _safe_getattr(sim, 'queue', None)
+    running = _safe_getattr(queue, 'running', None)
+    if running is not None:
+        result.append(running)
+        seen.add(id(running))
+    si_state = _safe_getattr(sim, 'si_state', None)
+    if si_state is not None:
+        try:
+            for si in si_state:
+                if si is not None and id(si) not in seen:
+                    result.append(si)
+                    seen.add(id(si))
+        except Exception:
+            pass
+        gen = _safe_getattr(si_state, 'sis_actor_gen', None)
+        if callable(gen):
+            try:
+                for si in gen():
+                    if si is not None and id(si) not in seen:
+                        result.append(si)
+                        seen.add(id(si))
+            except Exception:
+                pass
+    return result
+
+
 def _get_room_id(sim_info):
     """Return the id of the room ``sim_info`` is in, or 0 if unknown (BUG-02).
 
@@ -262,18 +301,27 @@ def _get_room_id(sim_info):
 def _get_interaction_text(interaction):
     """Return the localized display text of an interaction (menu title).
 
-    Falls back to the Python class name when the localized string cannot be
-    resolved, so the caller always gets a usable action label.
+    ``str(display_name)`` resolves through the localization system, while
+    ``get_raw_text`` returns the unresolved ``hash: … tokens { type: INVALID }``
+    repr for hash-based localized strings. Prefer the resolved text, then the
+    class name, then the repr.
     """
     if interaction is None:
         return ''
     try:
-        from sims4.localization import LocalizationHelperTuning
         display_name = _safe_getattr(interaction, 'display_name', None)
         if display_name is not None:
-            text = LocalizationHelperTuning.get_raw_text(display_name)
-            if text:
-                return str(text)
+            resolved = ''
+            try:
+                resolved = str(display_name)
+            except Exception:
+                resolved = ''
+            if resolved and 'hash:' not in resolved:
+                return resolved
+            from sims4.localization import LocalizationHelperTuning
+            raw = LocalizationHelperTuning.get_raw_text(display_name)
+            if raw and 'hash:' not in str(raw) and 'tokens' not in str(raw):
+                return str(raw)
     except Exception:
         pass
     try:
@@ -432,22 +480,27 @@ def _collect_sim_delta(sim_info):
                 social_target_sim_id = _resolve_social_group_peer(sim, sim_id)
                 if social_target_sim_id:
                     is_conversing = True
-                si = _safe_getattr(sim, 'si_state', None)
-                if si is not None:
-                    current_interaction = _safe_getattr(si, 'current_interaction', None)
-                    if current_interaction is not None:
-                        activity = _safe_getattr(current_interaction, '__name__', str(current_interaction))
-                        # The localized menu title (e.g. "Tell a Joke") grounds the
-                        # dialogue in the specific action the sim chose to perform.
-                        interaction_text = _get_interaction_text(current_interaction)
-                        # 2. Fallback: resolve the interaction's Sim target directly.
+                # 2. The running interaction(s): queue.running + si_state items.
+                #    si_state.current_interaction is empty during socials on 1.128.x.
+                interactions = _get_current_interactions(sim)
+                if interactions:
+                    current_interaction = interactions[0]
+                    activity = _safe_getattr(current_interaction, '__name__', str(current_interaction))
+                    # The localized menu title (e.g. "Tell a Joke") grounds the
+                    # dialogue in the specific action the sim chose to perform.
+                    interaction_text = _get_interaction_text(current_interaction)
+                    for inter in interactions:
+                        # 3. Fallback: resolve each interaction's Sim target directly.
                         if not is_conversing:
-                            social_target_sim_id = _resolve_interaction_target_sim_id(current_interaction)
-                            if social_target_sim_id and social_target_sim_id != sim_id:
+                            target_id = _resolve_interaction_target_sim_id(inter)
+                            if target_id and target_id != sim_id:
+                                social_target_sim_id = target_id
                                 is_conversing = True
-                        # 3. Last resort: class-name marker matching.
-                        if not is_conversing and any(marker in str(activity).lower() for marker in _CONVERSATION_MARKERS):
-                            is_conversing = True
+                        # 4. Last resort: class-name marker matching.
+                        if not is_conversing:
+                            name = str(_safe_getattr(inter, '__name__', str(inter))).lower()
+                            if any(marker in name for marker in _CONVERSATION_MARKERS):
+                                is_conversing = True
         except Exception:
             pass
 
