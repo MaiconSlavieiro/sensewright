@@ -212,17 +212,16 @@ facts confirmed:
   `has_relationship_bit_with_sim` all work (`has_after_add=true`, `remove_ok=true`).
   ⚠️ `sim_info.trait_tracker.traits` is NOT the canonical trait source — use
   `CommonTraitUtils.get_trait_ids(sim_info)` (reads `sim_info.get_traits()` + `guid64`).
-- **`mood_effect` 🟡** — `CommonBuffUtils.add_buff` applies the buff (`buffs_after` shows
-  `mood_type=14640`, `mood_weight=3`), but `get_mood()`/`get_mood_intensity()` do **not**
-  change synchronously — even with pre-existing weights that already favour happy
-  (happy 1+2+3 vs focused 1). The mood statistic updates lazily (next sim tick); this is
-  expected engine behaviour, not a buff defect. `set_mood` production path is therefore
-  functional (mood flips a tick after apply), but needs a visual in-game confirm.
-- **`diary_object` 🔴** — the custom `sw_diary_object` GameObject tuning does **not** load
-  (`Types.OBJECT` manager returns None). A bare `GameObject` with only `_super_affordances`
-  and no model/footprint/`ObjectDefinition` is not a spawnable object. The diary "Ler/Snoop"
-  interactions still attach to base-game diaries via class-name matching, so this may be
-  moot (see §7).
+- **`mood_effect` ✅** — `CommonBuffUtils.add_buff` applies the buff (`buffs_after` shows
+  `mood_type=14640`, `mood_weight=3`), and live simulation (`Sensewright_Worker.log`)
+  confirmed `moved_to_happy: True` with successful intent `[set_mood]` application in-game.
+- **`diary_object` ℹ️** — confirmed that custom XML-only `sw_diary_object` without client
+  catalog definition does not spawn directly via `create_object()`. Base-game diaries and
+  computers are the validated channels for diary reading/snooping.
+- **`engine_facade` Promotion (2026-10-06)** ✅ — Promoted `relationship_sentiments`,
+  `_get_relationship_bit_names`, `show_balloon`/`hide_balloon`, `read_object_tooltip`, and
+  `set_object_tooltip` into `engine_facade.py`. `state_collector.py` now captures
+  `social_sentiments` and transmits them to Sidecar's `agent/social.py` and `context.py`.
 
 
 

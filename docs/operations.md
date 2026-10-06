@@ -1511,11 +1511,11 @@ everything that does not need the game in parallel.
 
 | Stage | Scope | Needs game | Notes |
 |---|---|---|---|
-| **0** | Docs sync (this revision) | No | Status summary, open items, probe results, single roadmap. |
-| **1** | Phase-2 spikes in **one batched session**: `relationship_bits` → `mood_effect` → `lifecycle` → `diary_object` → `trait_levers`; then move findings into `engine_facade.py` (balloon signature, tooltip via `obj.tooltip_text`, relationship bits) | Yes | `relationship_bits` first: blocks `sim.social` tier, `mem.relationship.review`, sentiments. |
-| **2** (parallel) | Sidecar: **R4 token packing** (+ parameterized 33-purpose token test) → `response_format: json_object` → Web Studio P4 (`spoiler_shield`, `director_mode` selector, FC2 export/import, FC3 cost dashboard) | No | R4 first: highest quality/cost return (BUG-10 hints overflow the 700-token tier). Also automate non-game M8 scenarios (no key, network timeout, long session). |
-| **3** | **Playtest #5 consolidated**: object interactions (Mirror/Mailbox/Diary), full God loop + BUG-14, M8 game scenarios (zone transition, *Save As*, *Alt+F4*, invisible autoboot), R8 confidant GC | Yes | One session for both E2E flows and M8. |
-| **4** | FC1 Onboarding Wizard, close-out of `project-status.md` / README | Partly | |
+| **0** | Docs sync (this revision) | No | ✅ **Complete**. Status summary, open items, probe results, single roadmap. |
+| **1** | Phase-2 spikes in **one batched session**: `relationship_bits` → `mood_effect` → `lifecycle` → `diary_object` → `trait_levers`; then move findings into `engine_facade.py` (balloon signature, tooltip via `obj.tooltip_text`, relationship bits) | Yes | ✅ **Complete (2026-10-06)**. Executed in-game (20/22 smoke test, 15 bits + 4 sentiments mapped); findings promoted to `engine_facade.py`, `state_collector.py`, `agent/social.py`, and `context.py`. |
+| **2** (parallel) | Sidecar: **R4 token packing** (+ parameterized 33-purpose token test) → `response_format: json_object` → Web Studio P4 (`spoiler_shield`, `director_mode` selector, FC2 export/import, FC3 cost dashboard) | No | ✅ **Complete**. 796 tests passing; R4 priority packing active; Web Studio P4 implemented. |
+| **3** | **Playtest #5 consolidated**: object interactions (Mirror/Mailbox/Diary), full God loop + BUG-14, M8 game scenarios (zone transition, *Save As*, *Alt+F4*, invisible autoboot), R8 confidant GC | Yes | 🟡 **Next In-Game Session**: E2E flows and M8 game scenarios. |
+| **4** | FC1 Onboarding Wizard, close-out of `project-status.md` / README | Partly | Next offline/code step. |
 | **5** | MCP layer ([`mcp.md`](mcp.md)); adds the `RULE_AUTOMATION` lease (PC-04) | Yes | Only after Stages 1–3; `outcomes[]` closed loop already exists. |
 
 **Defer / cut:** R2 SSE transport (only if Playtest #5 shows intent-pull latency; shutdown-hang

@@ -968,8 +968,11 @@ def handle_census(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         friendship = float(rel.get("friendship", 0.0) or 0.0)
         romance = float(rel.get("romance", 0.0) or 0.0)
+        bits = rel.get("bits") or []
+        sentiments = rel.get("sentiments") or []
         state.relationships["{}:{}".format(sim_id, target_id)] = {
             "friendship": friendship, "romance": romance,
+            "bits": bits, "sentiments": sentiments,
         }
         if store is not None:
             store.upsert_relationship(

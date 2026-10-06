@@ -530,13 +530,16 @@ def _collect_sim_delta(sim_info):
         # the sidecar direct the conversation tone from the real in-game feedback.
         social_friendship = None
         social_romance = None
+        social_sentiments = []
         if social_target_sim_id:
             try:
                 from sims4communitylib.utils.sims.common_relationship_utils import CommonRelationshipUtils
+                from sensewright_mod.engine_facade import relationship_sentiments
                 target_info = _get_sim_info(social_target_sim_id)
                 if target_info is not None:
                     social_friendship = CommonRelationshipUtils.get_friendship_level(sim_info, target_info)
                     social_romance = CommonRelationshipUtils.get_romance_level(sim_info, target_info)
+                    social_sentiments = relationship_sentiments(sim_info, target_info)
             except Exception:
                 pass
 
@@ -600,6 +603,7 @@ def _collect_sim_delta(sim_info):
             'is_at_home': is_at_home,
             'social_friendship': social_friendship,
             'social_romance': social_romance,
+            'social_sentiments': social_sentiments,
             'is_conversing': is_conversing,
             'social_target_sim_id': social_target_sim_id,
             'queue': queue_len,
@@ -862,11 +866,22 @@ def _collect_relationships(sim_info_manager):
                     romance = CommonRelationshipUtils.get_romance_level(sim_info, target_info)
                 except Exception:
                     friendship, romance = 0.0, 0.0
+                bits = []
+                sentiments = []
+                try:
+                    from sensewright_mod.engine_facade import relationship_bits, relationship_sentiments
+                    rb_res = relationship_bits(sim_info, target_info)
+                    bits = [b.get('mapped_name') or b.get('name') for b in rb_res.get('bits', []) if b.get('name')]
+                    sentiments = relationship_sentiments(sim_info, target_info)
+                except Exception:
+                    pass
                 relationships.append({
                     'sim_id': sim_id,
                     'target_sim_id': target_id,
                     'friendship': float(friendship),
                     'romance': float(romance),
+                    'bits': bits,
+                    'sentiments': sentiments,
                 })
     except Exception as e:
         log_exception('Error collecting relationships: {}'.format(e))

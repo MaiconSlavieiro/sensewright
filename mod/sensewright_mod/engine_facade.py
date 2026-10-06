@@ -492,6 +492,57 @@ def buff_roundtrip(sim, buff_type):
 # Relationship bits & moods (relationship_bits / mood_effect probes)
 # ──────────────────────────────────────────────────────────────────────────────
 
+_CACHED_BIT_NAMES = None
+_CACHED_SENTIMENT_NAMES = None
+
+
+def _get_relationship_bit_names():
+    """Build and cache {guid64: name} from S4CL CommonRelationshipBitId."""
+    global _CACHED_BIT_NAMES
+    if _CACHED_BIT_NAMES is not None:
+        return _CACHED_BIT_NAMES
+    mapping = {}
+    try:
+        from sims4communitylib.enums.relationship_bits_enum import CommonRelationshipBitId
+        for member in CommonRelationshipBitId:
+            try:
+                mapping[int(member.value)] = str(member.name)
+            except Exception:
+                continue
+    except Exception as e:
+        log_exception('engine_facade._get_relationship_bit_names: {}'.format(e))
+    _CACHED_BIT_NAMES = mapping
+    return _CACHED_BIT_NAMES
+
+
+def _get_sentiment_names():
+    """Build and cache {guid64: name} from S4CL sentiment enums."""
+    global _CACHED_SENTIMENT_NAMES
+    if _CACHED_SENTIMENT_NAMES is not None:
+        return _CACHED_SENTIMENT_NAMES
+    mapping = {}
+    try:
+        from sims4communitylib.enums.long_term_sentiments_enum import CommonLongTermSentimentId
+        for member in CommonLongTermSentimentId:
+            try:
+                mapping[int(member.value)] = str(member.name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        from sims4communitylib.enums.short_term_sentiments_enum import CommonShortTermSentimentId
+        for member in CommonShortTermSentimentId:
+            try:
+                mapping[int(member.value)] = str(member.name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    _CACHED_SENTIMENT_NAMES = mapping
+    return _CACHED_SENTIMENT_NAMES
+
+
 def relationship_bits(sim_info, target_sim_info):
     """Return relationship bits between two Sims via the engine's own accessor.
 
@@ -500,7 +551,8 @@ def relationship_bits(sim_info, target_sim_info):
     ``relationship`` probe called ``Relationship.get_all_bits()`` (no args) on
     the vanilla Relationship object — that method lives on the *tracker*, so the
     old probe silently returned ``[]``. Each bit is returned with its ``guid64``
-    (a ``CommonRelationshipBitId`` int), plus any ``__name__``/``display_name``.
+    (a ``CommonRelationshipBitId`` int), plus any ``__name__``/``display_name``
+    and mapped S4CL enum name.
     """
     result = {'target_sim_id': 0, 'bits': [], 'error': ''}
     if sim_info is None or target_sim_info is None:
@@ -517,17 +569,48 @@ def relationship_bits(sim_info, target_sim_info):
         if bits is None:
             result['error'] = 'get_all_bits returned None'
             return result
+        bit_names = _get_relationship_bit_names()
+        sentiment_names = _get_sentiment_names()
         for bit in bits:
+            guid = _coerce_int(_safe_getattr(bit, 'guid64', 0), 0)
+            mapped = bit_names.get(guid) or sentiment_names.get(guid) or ''
             entry = {
-                'guid64': _coerce_int(_safe_getattr(bit, 'guid64', 0), 0),
+                'guid64': guid,
                 'name': str(_safe_getattr(bit, '__name__', '') or ''),
                 'display_name': str(_safe_getattr(bit, 'display_name', '') or ''),
+                'mapped_name': mapped,
             }
             result['bits'].append(entry)
     except Exception as e:
         log_exception('engine_facade.relationship_bits: {}'.format(e))
         result['error'] = str(e)
     return result
+
+
+def relationship_sentiments(sim_info, target_sim_info):
+    """Return active sentiment names (list of str) between two Sims.
+
+    Extracts sentiments proven in in-game spikes (either mapped to
+    CommonLongTermSentimentId / CommonShortTermSentimentId or prefixed
+    with sentimentBit_).
+    """
+    sentiments = []
+    if sim_info is None or target_sim_info is None:
+        return sentiments
+    try:
+        res = relationship_bits(sim_info, target_sim_info)
+        sentiment_map = _get_sentiment_names()
+        for bit in res.get('bits', []):
+            guid = bit.get('guid64', 0)
+            name = bit.get('name', '')
+            if guid in sentiment_map:
+                sentiments.append(sentiment_map[guid])
+            elif name.startswith('sentimentBit_') or 'sentiment' in name.lower():
+                mapped = bit.get('mapped_name') or name
+                sentiments.append(mapped)
+    except Exception as e:
+        log_exception('engine_facade.relationship_sentiments: {}'.format(e))
+    return sentiments
 
 
 def current_mood(sim_info):
@@ -742,4 +825,96 @@ def destroy_object(game_object):
         return bool(CommonObjectSpawnUtils.destroy_object(game_object))
     except Exception as e:
         log_exception('engine_facade.destroy_object: {}'.format(e))
+        return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Balloon & Tooltip helpers (proven in-game, R3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def show_balloon(sim, text, balloon_type='thought'):
+    """Show a thought or speech balloon over a Sim (defensive, multi-strategy)."""
+    if sim is None or not text:
+        return False
+    try:
+        sim_obj = _safe_call(CommonSimUtils.get_sim_instance, sim) if hasattr(sim, 'id') else sim
+        if sim_obj is not None:
+            if balloon_type == 'thought' and hasattr(sim_obj, 'show_thought_balloon'):
+                sim_obj.show_thought_balloon(str(text))
+                return True
+            if hasattr(sim_obj, 'show_speech_balloon'):
+                sim_obj.show_speech_balloon(str(text))
+                return True
+        # Native balloon request (singular 'balloon', per decompiled balloon_request.py)
+        try:
+            from balloon.balloon_request import BalloonRequest
+            sim_info = _safe_getattr(sim, 'sim_info', sim)
+            request = BalloonRequest(sim_info, str(text))
+            if hasattr(request, 'distribute'):
+                request.distribute()
+            return True
+        except Exception:
+            pass
+    except Exception as e:
+        log_exception('engine_facade.show_balloon: {}'.format(e))
+    return False
+
+
+def hide_balloon(sim):
+    """Hide active thought balloon over a Sim (never raises)."""
+    if sim is None:
+        return False
+    try:
+        sim_obj = _safe_call(CommonSimUtils.get_sim_instance, sim) if hasattr(sim, 'id') else sim
+        if sim_obj is not None and hasattr(sim_obj, 'hide_thought_balloon'):
+            sim_obj.hide_thought_balloon()
+            return True
+    except Exception as e:
+        log_exception('engine_facade.hide_balloon: {}'.format(e))
+    return False
+
+
+def read_object_tooltip(obj):
+    """Read the localized tooltip or display name of an in-game object (never raises)."""
+    if obj is None:
+        return ''
+    try:
+        for attr in ('tooltip_text', 'tooltip', 'display_name'):
+            val = _safe_getattr(obj, attr, None)
+            if callable(val):
+                val = _safe_call(val)
+            if val is not None:
+                val_str = str(val)
+                if val_str and 'hash:' not in val_str:
+                    return val_str
+    except Exception as e:
+        log_exception('engine_facade.read_object_tooltip: {}'.format(e))
+    return ''
+
+
+def set_object_tooltip(obj, text):
+    """Set dynamic tooltip on an object via TooltipComponent (never raises)."""
+    if obj is None or text is None:
+        return False
+    try:
+        getter = getattr(obj, 'get_component', None)
+        if callable(getter):
+            try:
+                from objects.components.tooltip_component import TooltipComponent
+                component = getter(TooltipComponent)
+                if component is not None:
+                    for setter_name in ('set_dynamic_tooltip', 'set_tooltip'):
+                        setter = getattr(component, setter_name, None)
+                        if callable(setter):
+                            setter(str(text))
+                            return True
+                    component._dynamic_tooltip = str(text)
+                    return True
+            except Exception:
+                pass
+        # Fallback to direct attribute
+        obj._tooltip_text = str(text)
+        return True
+    except Exception as e:
+        log_exception('engine_facade.set_object_tooltip: {}'.format(e))
         return False

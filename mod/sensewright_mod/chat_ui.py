@@ -55,9 +55,8 @@ def _extract_thought(text):
 def _show_typing_balloon(sim_info):
     """Show '...' thought balloon while AI is thinking."""
     try:
-        sim = CommonSimUtils.get_sim_instance(sim_info)
-        if sim is not None:
-            sim.show_thought_balloon('...')
+        from sensewright_mod.engine_facade import show_balloon
+        show_balloon(sim_info, '...', balloon_type='thought')
     except Exception:
         pass
 
@@ -65,9 +64,8 @@ def _show_typing_balloon(sim_info):
 def _hide_typing_balloon(sim_info):
     """Hide typing balloon."""
     try:
-        sim = CommonSimUtils.get_sim_instance(sim_info)
-        if sim is not None:
-            sim.hide_thought_balloon()
+        from sensewright_mod.engine_facade import hide_balloon
+        hide_balloon(sim_info)
     except Exception:
         pass
 

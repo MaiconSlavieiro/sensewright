@@ -230,17 +230,9 @@ class GameLever(object):
         if not text:
             return False, {'error': 'no_text'}
 
-        sim = CommonSimUtils.get_sim_instance(sim_info)
-        if sim is not None:
-            try:
-                if balloon_type == 'thought' and hasattr(sim, 'show_thought_balloon'):
-                    sim.show_thought_balloon(text)
-                    return True, {'balloon_shown': True, 'type': 'thought'}
-                if hasattr(sim, 'show_speech_balloon'):
-                    sim.show_speech_balloon(text)
-                    return True, {'balloon_shown': True, 'type': 'speech'}
-            except Exception as e:
-                log_exception('Speak balloon error: {}'.format(e))
+        from sensewright_mod.engine_facade import show_balloon
+        if show_balloon(sim_info, text, balloon_type=balloon_type):
+            return True, {'balloon_shown': True, 'type': balloon_type}
 
         try:
             from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification

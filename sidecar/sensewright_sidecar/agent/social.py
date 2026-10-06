@@ -108,6 +108,20 @@ def relationship_context(
     friendship_delta = round(friendship - baseline_friendship, 2)
     romance_delta = round(romance - baseline_romance, 2)
 
+    sentiments = []
+    for sim, other_id in ((sim_a, b_id), (sim_b, a_id)):
+        if int(sim.get("social_target_sim_id") or 0) == other_id:
+            s_list = sim.get("social_sentiments")
+            if s_list and isinstance(s_list, list):
+                sentiments = [str(s) for s in s_list if s]
+                break
+    if not sentiments:
+        rel = state.relationships.get("{}:{}".format(a_id, b_id)) or state.relationships.get("{}:{}".format(b_id, a_id))
+        if rel and isinstance(rel, dict):
+            s_list = rel.get("sentiments")
+            if s_list and isinstance(s_list, list):
+                sentiments = [str(s) for s in s_list if s]
+
     return {
         "friendship": friendship,
         "romance": romance,
@@ -115,6 +129,7 @@ def relationship_context(
         "romance_delta": romance_delta,
         "tier": relationship_tier(friendship, is_family),
         "is_family": is_family,
+        "sentiments": sentiments,
     }
 
 

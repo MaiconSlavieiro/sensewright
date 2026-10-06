@@ -28,8 +28,8 @@ References use the `file:line` format.
 
 > ⚠️ **CRITICAL ARCHITECTURAL IMPERATIVE:** Infrastructure and communication hardening (like the SSE protocol unification `P1` and the Sidecar thread-safety `P2` listed in `operations.md`) are NOT secondary technical debt. Because TS4 is strictly single-threaded, any latency or IPC flaw breaks the core gameplay loops. **These hardening items MUST be treated as primary features and blockers for any further functional playtests.**
 
-> ✅ **Current state (2026-10-06):** Stage 2 (Web Studio Phase 4 & FC2/FC3) is complete. The sidecar suite has **763 tests**; **26 of 33 purposes Full**.
-> The canonical execution order is the [Recommended execution order](operations.md#recommended-execution-order-2026-10-05) in `operations.md`, with **Architectural Review & Evolution Plan (Hardening)** taking precedence over Playtest #5.
+> ✅ **Current state (2026-10-06):** Stage 1 (Spikes & Engine Facade Promotion) and Stage 2 (Web Studio Phase 4, R4 Token Packing & FC2/FC3) are complete. The sidecar suite has **796 tests** passing; **26 of 33 purposes Full**.
+> In-game phase-2 spikes passed (20/22 smoke test, 15 relationship bits + 4 sentiments mapped to S4CL enums) and findings promoted to `engine_facade.py`. The canonical execution order is [Recommended execution order](operations.md#recommended-execution-order-2026-10-05) in `operations.md`.
 
 The project has a **solid, tested foundation**: both processes (Mod Python 3.7 and Sidecar
 FastAPI) talk to each other, the transactional save cycle works, the manifest-driven i18n
@@ -46,9 +46,9 @@ What is **genuinely missing** is not foundation, it is **wiring and triggers** (
   ringing the doorbell), Tombstone Epitaph, sleep balloons, and the "Reflect" interaction on
   the mirror (some implemented but need in-game validation).
 
-Everything that exists today is covered by **763 tests** (sidecar) and compiles under both correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle
+Everything that exists today is covered by **796 tests** (sidecar) and compiles under both correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle
 events, `spawn_npc`, `god.react`/`beat-ended`, mirror/diary/mailbox hooks, sleep balloons,
-object/situation build types) is coded blind and awaits the Phase 5 in-game checklist.
+object/situation build types) is verified through the Phase-2 spikes and ready for Playtest #5.
 
 ---
 

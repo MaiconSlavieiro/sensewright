@@ -322,31 +322,10 @@ def has_buff(sim_info, buff_id):
 
 
 def _request_balloon(sim_info, text):
-    """Best-effort thought balloon during sleep (3.8).
-
-    The engine exposes no stable public balloon API, so try the per-Sim balloon
-    methods when present and otherwise rely on the buff reason (which already
-    carries the narrative). Never raises.
-    """
-    if not text:
-        return False
-    sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
-    if sim is None:
-        return False
-    for method_name in ('show_thought_balloon', 'show_speech_balloon'):
-        method = _safe_getattr(sim, method_name, None)
-        if callable(method):
-            try:
-                method(text)
-                return True
-            except Exception:
-                continue
-    # Native balloon request path (varies across game builds).
+    """Best-effort thought balloon during sleep (3.8)."""
     try:
-        from balloons.balloon_request import BalloonRequest
-        request = BalloonRequest(sim_info, text)
-        request.send()
-        return True
+        from sensewright_mod.engine_facade import show_balloon
+        return bool(show_balloon(sim_info, text, balloon_type='thought'))
     except Exception:
         return False
 

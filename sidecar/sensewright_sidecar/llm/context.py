@@ -231,6 +231,16 @@ class ContextAssembler:
                 sign = "+" if float(rdelta) > 0 else "-"
                 text += str(delta_hint).replace("{value}", "{}{}".format(sign, abs(int(round(float(rdelta))))))
             parts.append(text)
+        sentiments = relationship.get("sentiments") or []
+        if sentiments and isinstance(sentiments, list):
+            clean_s = []
+            for s in sentiments[:3]:
+                name = str(s).replace("SENTIMENT_", "").replace("SHORT_TERM_", "").replace("LONG_TERM_", "")
+                name = name.split("_")[0].capitalize() if "_" in name else name.capitalize()
+                if name and name not in clean_s:
+                    clean_s.append(name)
+            if clean_s:
+                parts.append("sentiment: {}".format(", ".join(clean_s)))
         return ", ".join(parts)
 
     def _action_text(self, action: Any, lang: str, engine: Any) -> str:

@@ -1,4 +1,4 @@
-﻿# Sensewright v2 â€” Object Interactions (Mirror / Diary / Snoop / Mailbox)
+# Sensewright v2 â€” Object Interactions (Mirror / Diary / Snoop / Mailbox)
 # Python 3.7 compatible
 #
 # Tasks 3.2 (mirror "Reflect"), 3.4 (diary Tooltip + "Snoop") and 3.9 (mailbox
@@ -265,36 +265,16 @@ class SensewrightMailboxInteraction(_SensewrightObjectInteraction):
         return CommonExecutionResult.TRUE
 
 
-# â”€â”€ Tooltip component injection for the diary object (3.4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ──────────────────────────────────────────────────────────────────────────────
+# Tooltip component injection for the diary object (3.4)
+# ──────────────────────────────────────────────────────────────────────────────
 def apply_diary_tooltip(script_object, text):
-    """Best-effort dynamic tooltip on the diary object via its TooltipComponent.
-
-    The component API differs across builds, so every access is guarded; the
-    interaction itself always shows the text, so the tooltip is an enhancement.
-    """
+    """Best-effort dynamic tooltip on the diary object via engine_facade."""
     if not text:
         return False
-    component = None
     try:
-        from objects.components.tooltip_component import TooltipComponent
-        getter = _safe_getattr(script_object, 'get_component', None)
-        if callable(getter):
-            component = getter(TooltipComponent)
-    except Exception:
-        component = None
-    if component is None:
-        return False
-    for setter_name in ('set_dynamic_tooltip', 'set_tooltip'):
-        setter = _safe_getattr(component, setter_name, None)
-        if callable(setter):
-            try:
-                setter(text)
-                return True
-            except Exception:
-                continue
-    try:
-        component._dynamic_tooltip = text
-        return True
+        from sensewright_mod.engine_facade import set_object_tooltip
+        return bool(set_object_tooltip(script_object, text))
     except Exception:
         return False
 
