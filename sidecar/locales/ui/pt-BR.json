@@ -61,6 +61,9 @@
     "buff.mood_uncomfortable.name": "Incomodado",
     "buff.mood_confident.name": "Confiante",
     "buff.mood_energized.name": "Elétrico",
+    "buff.mood_embarrassed.name": "Envergonhado",
+    "buff.mood_playful.name": "Brincalhão",
+    "buff.mood_scared.name": "Assustado",
     "buff.mood_fine.desc": "Calmo e constante.",
     "buff.mood_happy.desc": "De bom humor de verdade.",
     "buff.mood_sad.desc": "Uma tristeza silenciosa pesa sobre ele.",
@@ -73,7 +76,10 @@
     "buff.mood_bored.desc": "Entediado e procurando o que fazer.",
     "buff.mood_uncomfortable.desc": "Algo parece errado.",
     "buff.mood_confident.desc": "Capaz e seguro de si.",
-    "buff.mood_energized.desc": "Fervilhando de energia."
+    "buff.mood_energized.desc": "Fervilhando de energia.",
+    "buff.mood_embarrassed.desc": "Morrendo de vergonha por dentro.",
+    "buff.mood_playful.desc": "Se sentindo bobo e pronto para brincar.",
+    "buff.mood_scared.desc": "Pulando com cada sombra."
   },
   "notify": {
     "recap": {
