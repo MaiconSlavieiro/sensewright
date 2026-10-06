@@ -507,6 +507,88 @@ class SqliteStore:
             )
             conn.commit()
 
+    # ── sim export / import (FC2) ────────────────────────────────────────
+    def export_sim_bundle(self, sim_id: int) -> Dict[str, Any]:
+        """Return a portable bundle {profile, background, relationships, memories}."""
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM sims WHERE sim_id = ?", (int(sim_id),)).fetchone()
+            profile: Dict[str, Any] = {}
+            background = ""
+            if row is not None:
+                profile = json.loads(row["profile"] or "{}")
+                background = row["background"] or ""
+            relationships: List[Dict[str, Any]] = []
+            for rel in conn.execute(
+                "SELECT * FROM relationships WHERE sim_id = ?", (int(sim_id),)
+            ).fetchall():
+                rd = dict(rel)
+                rd["known_traits"] = json.loads(rd.get("known_traits") or "[]")
+                rd["known_secrets"] = json.loads(rd.get("known_secrets") or "[]")
+                relationships.append(rd)
+            memories = [
+                self._row_memory(r)
+                for r in conn.execute(
+                    "SELECT * FROM memories WHERE sim_id = ? ORDER BY created_sim_tick",
+                    (int(sim_id),),
+                ).fetchall()
+            ]
+        return {
+            "profile": profile,
+            "background": background,
+            "relationships": relationships,
+            "memories": memories,
+        }
+
+    def import_sim_bundle(self, sim_id: int, bundle: Dict[str, Any], tick: int = 0) -> int:
+        """Replace a Sim's profile/background/memories from an export bundle.
+
+        Runs in a single transaction (all-or-nothing). Relationships are NOT
+        imported: target sim ids differ across saves and need a mapping step.
+        Returns the number of memories imported.
+        """
+        profile = bundle.get("profile") or {}
+        if not isinstance(profile, dict):
+            raise ValueError("profile must be an object")
+        memories = bundle.get("memories") or []
+        if not isinstance(memories, list):
+            raise ValueError("memories must be a list")
+        background = str(bundle.get("background") or "")
+        count = 0
+        with self._lock:
+            conn = self._connect()
+            with conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO sims (sim_id, profile, background, updated_sim_tick)
+                       VALUES (?, ?, ?, ?)""",
+                    (int(sim_id), json.dumps(profile, ensure_ascii=False), background, int(tick)),
+                )
+                conn.execute("DELETE FROM memories WHERE sim_id = ?", (int(sim_id),))
+                for mem in memories:
+                    if not isinstance(mem, dict):
+                        continue
+                    content = mem.get("content")
+                    if not isinstance(content, dict):
+                        content = {}
+                    created = int(mem.get("created_sim_tick", tick) or 0)
+                    conn.execute(
+                        """INSERT INTO memories
+                           (sim_id, type, content, search_text, importance, strength,
+                            created_sim_tick, last_accessed_sim_tick, consolidated, archived)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            int(sim_id), str(mem.get("type") or "event"),
+                            json.dumps(content, ensure_ascii=False),
+                            str(mem.get("search_text") or ""),
+                            float(mem.get("importance", 1.0) or 1.0),
+                            float(mem.get("strength", 1.0) or 1.0),
+                            created, int(mem.get("last_accessed_sim_tick", created) or created),
+                            int(bool(mem.get("consolidated"))), int(bool(mem.get("archived"))),
+                        ),
+                    )
+                    count += 1
+        return count
+
     # ── arcs ─────────────────────────────────────────────────────────────
     def save_arc(self, arc: Dict[str, Any]) -> None:
         with self._lock:

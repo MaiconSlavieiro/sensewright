@@ -28,6 +28,8 @@ from sensewright_mod.engine_facade import (
     interaction_target, social_peers, relationship_edges, spawn_and_visit,
     buff_roundtrip, object_class_name, tuning_resource_loaded,
     find_objects_by_class_name, get_townie_not_on_lot,
+    relationship_bits, current_mood, sim_trait_ids, spawn_object_near_sim,
+    destroy_object, sim_mood_buffs,
 )
 # NOTE: `_MOOD_BUFFS` is a reassigned module global in native_hooks (register_mood_buffs
 # does `_MOOD_BUFFS = dict(...)`), so it must be accessed via the module, not imported
@@ -517,6 +519,570 @@ def _probe_relationship(_connection=None):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Shared helpers for the phase-2 probes
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _find_target_sim_info(active_sim_info):
+    """Resolve a target SimInfo for relationship probes (never the actor itself).
+
+    Order: first social peer, then first relationship edge, then any other
+    member of the active household, then any other instanced Sim on the lot.
+    Every candidate is filtered against the actor id — the previous version
+    returned the actor when ``social_peers`` included the actor's own id
+    (a social group contains the actor too), which made ``relationship_bits``
+    read a self-relationship (empty) instead of a real pair.
+    """
+    if active_sim_info is None:
+        return None
+    actor_id = sim_id_of(active_sim_info)
+    for pid in social_peers(active_sim_info):
+        if pid and pid != actor_id:
+            info = services.sim_info_manager().get(pid)
+            if info is not None:
+                return info
+    for edge in relationship_edges(active_sim_info):
+        tid = _coerce_int(edge.get('target_sim_id', 0), 0)
+        if tid and tid != actor_id:
+            info = services.sim_info_manager().get(tid)
+            if info is not None:
+                return info
+    try:
+        household = services.active_household()
+        if household is not None:
+            for sim_info in household.sim_infos:
+                if sim_info is None:
+                    continue
+                sid = sim_id_of(sim_info)
+                if sid and sid != actor_id:
+                    return sim_info
+    except Exception:
+        pass
+    try:
+        for sim_info in CommonSimUtils.get_instanced_sim_info_for_all_sims_generator():
+            if sim_info is None:
+                continue
+            sid = sim_id_of(sim_info)
+            if sid and sid != actor_id:
+                return sim_info
+    except Exception:
+        pass
+    return None
+
+
+def _relationship_bit_names():
+    """Build {guid64: name} from S4CL CommonRelationshipBitId (defensive)."""
+    mapping = {}
+    try:
+        from sims4communitylib.enums.relationship_bits_enum import CommonRelationshipBitId
+        for member in CommonRelationshipBitId:
+            try:
+                mapping[int(member.value)] = str(member.name)
+            except Exception:
+                continue
+    except Exception as e:
+        log_exception('spikes._relationship_bit_names: {}'.format(e))
+    return mapping
+
+
+def _sentiment_names():
+    """Build {guid64: name} from the long/short-term sentiment enums (defensive)."""
+    mapping = {}
+    try:
+        from sims4communitylib.enums.long_term_sentiments_enum import CommonLongTermSentimentId
+        for member in CommonLongTermSentimentId:
+            try:
+                mapping[int(member.value)] = str(member.name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        from sims4communitylib.enums.short_term_sentiments_enum import CommonShortTermSentimentId
+        for member in CommonShortTermSentimentId:
+            try:
+                mapping[int(member.value)] = str(member.name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return mapping
+
+
+def _as_bool(value):
+    """Coerce an S4CL CommonTestResult/CommonExecutionResult (or bool) to bool."""
+    if value is None:
+        return False
+    try:
+        return bool(value)
+    except Exception:
+        return False
+
+
+def _public_properties(cls):
+    """Return the public property names of a class (defensive introspection)."""
+    names = []
+    try:
+        for attr in dir(cls):
+            if attr.startswith('_'):
+                continue
+            try:
+                if isinstance(getattr(cls, attr, None), property):
+                    names.append(attr)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return names
+
+
+def _probe_sentiments(actor_info, target_info):
+    """Best-effort read of the sentiments between two Sims.
+
+    The decompiled source exposes ``Relationship.sentiment_track_tracker(sim_id)``
+    but the full tracker API was not extracted; probe several accessors and
+    report whatever is found so the next integration can target reality.
+    """
+    result = {'found': False, 'error': '', 'items': [], 'name_map': {}}
+    try:
+        actor_id = sim_id_of(actor_info)
+        target_id = sim_id_of(target_info)
+        tracker = _safe_getattr(actor_info, 'relationship_tracker', None)
+        if tracker is None:
+            result['error'] = 'no relationship tracker'
+            return result
+        relationship = None
+        for rel in tracker:
+            other = _coerce_int(_safe_call(getattr(rel, 'get_other_sim_id', None), actor_id), 0)
+            if not other:
+                a = _coerce_int(_safe_getattr(rel, 'sim_id_a', 0), 0)
+                b = _coerce_int(_safe_getattr(rel, 'sim_id_b', 0), 0)
+                other = b if a == actor_id else a
+            if other == target_id:
+                relationship = rel
+                break
+        if relationship is None:
+            result['error'] = 'no relationship object between actor and target'
+            return result
+        # sentiment_track_tracker(sim_id) is the engine entry point.
+        stt_fn = _safe_getattr(relationship, 'sentiment_track_tracker', None)
+        if callable(stt_fn):
+            stt = _safe_call(stt_fn, actor_id)
+            if stt is not None:
+                result['found'] = True
+                result['tracker_repr'] = str(stt)[:300]
+                items = []
+                try:
+                    for item in stt:
+                        items.append(_describe_sentiment(item))
+                except Exception as e:
+                    result['iter_error'] = str(e)
+                result['items'] = items
+        # Fallback accessors on the relationship object itself.
+        fallback = {}
+        for attr in ('sentiments', 'sentiment_tracks', 'get_sentiments', 'get_sentiment_tracks'):
+            val = _safe_getattr(relationship, attr, None)
+            if callable(val):
+                val = _safe_call(val)
+            if val is not None:
+                fallback[attr] = str(val)[:200]
+        if fallback:
+            result['fallback'] = fallback
+            result['found'] = True
+        result['name_map'] = _sentiment_names()
+    except Exception as e:
+        result['error'] = str(e)
+    return result
+
+
+def _describe_sentiment(item):
+    if item is None:
+        return None
+    return {
+        'type': str(object_class_name(item)),
+        'guid64': _coerce_int(_safe_getattr(item, 'guid64', 0), 0),
+        'name': str(_safe_getattr(item, '__name__', '') or ''),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Probe 5: relationship_bits (bits + sentiments)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _probe_relationship_bits(_connection=None):
+    """Prove the correct accessor for relationship bits + sentiments.
+
+    The old ``relationship`` probe read ``Relationship.get_all_bits()`` (no args),
+    which does not exist on the vanilla object (it lives on the tracker) and
+    always returned ``[]``. This probe uses ``relationship_tracker.get_all_bits``
+    and reverse-maps each ``guid64`` to a ``CommonRelationshipBitId`` name, then
+    best-effort reads sentiments. Unblocks `sim.social` tier,
+    `mem.relationship.review` and sentiment feedback.
+    """
+    output = sims4.commands.output
+    active_sim_info = get_active_sim_info()
+    if active_sim_info is None:
+        output('No active sim', _connection)
+        _write_spike_log('relationship_bits', {'error': 'no_active_sim'})
+        return False
+
+    actor_id = sim_id_of(active_sim_info)
+    target_info = _find_target_sim_info(active_sim_info)
+    if target_info is None:
+        output('No target sim found', _connection)
+        _write_spike_log('relationship_bits', {'actor_sim_id': actor_id, 'error': 'no_target_sim'})
+        return True
+
+    payload = {
+        'actor_sim_id': actor_id,
+        'actor_name': _safe_getattr(active_sim_info, 'full_name', 'Unknown'),
+        'target_sim_id': sim_id_of(target_info),
+        'target_name': _safe_getattr(target_info, 'full_name', 'Unknown'),
+    }
+
+    try:
+        payload['friendship'] = float(CommonRelationshipUtils.get_friendship_level(active_sim_info, target_info))
+        payload['romance'] = float(CommonRelationshipUtils.get_romance_level(active_sim_info, target_info))
+    except Exception as e:
+        payload['track_error'] = str(e)
+
+    bits_result = relationship_bits(active_sim_info, target_info)
+    payload['tracker_get_all_bits'] = bits_result
+
+    name_by_id = _relationship_bit_names()
+    mapped = []
+    for bit in bits_result.get('bits', []):
+        entry = dict(bit)
+        entry['mapped_name'] = name_by_id.get(bit.get('guid64', 0), '')
+        mapped.append(entry)
+    payload['bits_mapped'] = mapped
+
+    payload['sentiments'] = _probe_sentiments(active_sim_info, target_info)
+
+    output('=== Relationship Bits Probe ===', _connection)
+    output('Actor {} <-> Target {}'.format(payload['actor_name'], payload['target_name']), _connection)
+    output('friendship={} romance={}'.format(payload.get('friendship'), payload.get('romance')), _connection)
+    output('bits ({}) via relationship_tracker.get_all_bits:'.format(len(bits_result.get('bits', []))), _connection)
+    for bit in mapped:
+        output('  - guid64={} name={} mapped={}'.format(bit.get('guid64'), bit.get('name'), bit.get('mapped_name')), _connection)
+    if bits_result.get('error'):
+        output('bit accessor error: {}'.format(bits_result['error']), _connection)
+    output('sentiments: {}'.format(payload['sentiments']), _connection)
+
+    _write_spike_log('relationship_bits', payload)
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Probe 6: mood_effect (does a mood buff actually move the mood)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _probe_mood_effect(_connection=None):
+    """Prove applying buff_mood_happy actually moves the Sim's mood.
+
+    The buff *applies* without error (proven), but whether the mood changes was
+    never confirmed. Reads ``SimInfo.get_mood()`` before/after and compares the
+    ``guid64`` against HAPPY (14640).
+    """
+    output = sims4.commands.output
+    active_sim_info = get_active_sim_info()
+    if active_sim_info is None:
+        output('No active sim', _connection)
+        _write_spike_log('mood_effect', {'error': 'no_active_sim'})
+        return False
+
+    actor_id = sim_id_of(active_sim_info)
+    happy_buff_id = resolve_owned_id('mood_buff_happy')
+    happy_mood_id = 14640  # CommonMoodId.HAPPY
+
+    before = current_mood(active_sim_info)
+    payload = {
+        'actor_sim_id': actor_id,
+        'happy_buff_id': happy_buff_id,
+        'happy_mood_id': happy_mood_id,
+        'before': before,
+        'buffs_before': sim_mood_buffs(active_sim_info),
+        'apply_ok': False,
+        'after': {},
+        'buffs_after': [],
+        'moved_to_happy': False,
+        'error': '',
+    }
+
+    if not happy_buff_id:
+        payload['error'] = 'mood_buff_happy tuning id unresolved'
+        _write_spike_log('mood_effect', payload)
+        output('mood_effect: {}'.format(payload['error']), _connection)
+        return True
+
+    applied = native_hooks.apply_buff(active_sim_info, happy_buff_id, 90)
+    payload['apply_ok'] = _as_bool(applied)
+    if not payload['apply_ok']:
+        payload['error'] = 'apply_buff returned False'
+    else:
+        after = current_mood(active_sim_info)
+        payload['after'] = after
+        payload['buffs_after'] = sim_mood_buffs(active_sim_info)
+        live_guid = after.get('sim_guid64', after.get('guid64', 0))
+        payload['moved_to_happy'] = (live_guid == happy_mood_id)
+        native_hooks.remove_buff(active_sim_info, happy_buff_id)
+
+    output('=== Mood Effect Probe ===', _connection)
+    output('before: {}'.format(before), _connection)
+    output('buffs_before: {}'.format(payload['buffs_before']), _connection)
+    output('apply buff_mood_happy({}): {}'.format(happy_buff_id, payload['apply_ok']), _connection)
+    output('after: {}'.format(payload['after']), _connection)
+    output('buffs_after: {}'.format(payload['buffs_after']), _connection)
+    output('moved_to_happy (live guid=={}): {}'.format(happy_mood_id, payload['moved_to_happy']), _connection)
+
+    _write_spike_log('mood_effect', payload)
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Probe 7: lifecycle (death / marriage / birth wiring + payload shape)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _probe_lifecycle(_connection=None):
+    """Report the lifecycle listener wiring and event payload shapes.
+
+    death/marriage/birth S4CL events are registered in lifecycle_hooks but never
+    exercised in-game. This probe reports: listener registration, the payload
+    fields each event exposes (introspected from the S4CL event classes), the
+    current pre-session buffer / marriage snapshot state, and a marriage-marker
+    dry-run against the active Sim's real relationship bits. A real death/birth
+    must still be observed in-game; this confirms the wiring and the data shapes.
+    """
+    output = sims4.commands.output
+    payload = {'checks': {}}
+
+    lh = None
+    try:
+        import sensewright_mod.lifecycle_hooks as lh
+    except Exception as e:
+        payload['listeners'] = {'error': str(e)}
+
+    # 1. lifecycle_hooks registration + state.
+    if lh is not None:
+        payload['listeners'] = {
+            's4cl_available': bool(_safe_getattr(lh, '_S4CL_AVAILABLE', False)),
+            'lifecycle_ready': bool(lh.is_lifecycle_ready()),
+            'event_buffer_len': len(_safe_getattr(lh, '_event_buffer', []) or []),
+            'event_buffer_max': int(_safe_getattr(lh, '_EVENT_BUFFER_MAX', 0) or 0),
+            'known_marriage_pairs': len(_safe_getattr(lh, '_known_marriage_pairs', set()) or set()),
+            'marriage_markers': list(_safe_getattr(lh, '_MARRIAGE_MARKERS', ()) or ()),
+            'handlers': {
+                'death': callable(_safe_getattr(lh, '_handle_sim_died', None)),
+                'pregnancy': callable(_safe_getattr(lh, '_handle_pregnancy_ended', None)),
+                'relationship_bit': callable(_safe_getattr(lh, '_handle_relationship_bit_added', None)),
+            },
+        }
+
+    # 2. Event payload fields (introspected from the S4CL classes).
+    payload['event_fields'] = {}
+    try:
+        from sims4communitylib.events.sim.events.sim_died import S4CLSimDiedEvent
+        from sims4communitylib.events.sim.events.sim_pregnancy_ended import S4CLSimPregnancyEndedEvent
+        from sims4communitylib.events.sim.events.sim_relationship_bit_added import S4CLSimRelationshipBitAddedEvent
+        payload['event_fields']['S4CLSimDiedEvent'] = _public_properties(S4CLSimDiedEvent)
+        payload['event_fields']['S4CLSimPregnancyEndedEvent'] = _public_properties(S4CLSimPregnancyEndedEvent)
+        payload['event_fields']['S4CLSimRelationshipBitAddedEvent'] = _public_properties(S4CLSimRelationshipBitAddedEvent)
+    except Exception as e:
+        payload['event_fields']['error'] = str(e)
+
+    # 3. Marriage-marker dry-run on the active Sim's real bits.
+    active_sim_info = get_active_sim_info()
+    target_info = _find_target_sim_info(active_sim_info) if active_sim_info is not None else None
+    if active_sim_info is not None and target_info is not None:
+        bits_result = relationship_bits(active_sim_info, target_info)
+        name_by_id = _relationship_bit_names()
+        markers = tuple(_safe_getattr(lh, '_MARRIAGE_MARKERS', ()) or ()) if lh is not None else ()
+        matched = []
+        for bit in bits_result.get('bits', []):
+            guid = bit.get('guid64', 0)
+            name = name_by_id.get(guid, '') or bit.get('name', '')
+            if any(m in str(name).lower() for m in markers):
+                matched.append({'guid64': guid, 'name': name})
+        payload['marriage_dry_run'] = {
+            'target_sim_id': sim_id_of(target_info),
+            'matched_bits': matched,
+        }
+    else:
+        payload['marriage_dry_run'] = {'error': 'no active/target sim'}
+
+    output('=== Lifecycle Probe ===', _connection)
+    output('listeners: {}'.format(payload['listeners']), _connection)
+    output('event_fields: {}'.format(payload['event_fields']), _connection)
+    output('marriage_dry_run: {}'.format(payload['marriage_dry_run']), _connection)
+
+    _write_spike_log('lifecycle', payload)
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Probe 8: diary_object (custom diary placement)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _probe_diary_object(_connection=None):
+    """Prove the custom sw_diary_object tuning is buildable/spawnable.
+
+    The smoke test reports ``object:diary found=0`` (the custom object is never
+    placed). Spawn it near the active Sim, report the definition/instance and its
+    affordances, then destroy it immediately to avoid save pollution (PC-07).
+    """
+    output = sims4.commands.output
+    active_sim_info = get_active_sim_info()
+    object_def_id = resolve_owned_id('object_diary')
+
+    payload = {
+        'object_def_id': object_def_id,
+        'active_sim_id': 0,
+        'loaded': False,
+        'spawned': False,
+        'object_id': 0,
+        'class_name': '',
+        'affordances': [],
+        'destroyed': False,
+        'error': '',
+    }
+
+    if object_def_id:
+        try:
+            from sims4.resources import Types
+            manager = services.get_instance_manager(Types.OBJECT)
+            payload['loaded'] = manager is not None and manager.get(object_def_id) is not None
+        except Exception as e:
+            payload['error'] = 'definition check failed: {}'.format(e)
+
+    if active_sim_info is None:
+        payload['error'] = payload['error'] or 'no active sim'
+        _write_spike_log('diary_object', payload)
+        output('diary_object: {}'.format(payload), _connection)
+        return True
+
+    payload['active_sim_id'] = sim_id_of(active_sim_info)
+
+    if not object_def_id:
+        payload['error'] = 'object_diary tuning id unresolved'
+        _write_spike_log('diary_object', payload)
+        output('diary_object: {}'.format(payload), _connection)
+        return True
+
+    game_object = spawn_object_near_sim(object_def_id, active_sim_info)
+    if game_object is None:
+        payload['spawned'] = False
+        payload['error'] = payload['error'] or 'spawn_object_near_sim returned None'
+    else:
+        payload['spawned'] = True
+        payload['object_id'] = _coerce_int(_safe_getattr(game_object, 'id', 0), 0)
+        payload['class_name'] = object_class_name(game_object)
+        try:
+            affordances = []
+            for attr in ('super_affordances', '_super_affordances'):
+                for aff in _safe_getattr(game_object, attr, ()) or ():
+                    affordances.append(str(aff)[:120])
+                if affordances:
+                    break
+            payload['affordances'] = affordances
+        except Exception as e:
+            payload['affordances'] = []
+            payload['affordances_error'] = str(e)
+        # Always destroy, even if introspection above failed (PC-07).
+        payload['destroyed'] = _as_bool(destroy_object(game_object))
+
+    output('=== Diary Object Probe ===', _connection)
+    output('object_def_id={} loaded={}'.format(object_def_id, payload['loaded']), _connection)
+    output('spawned={} object_id={} class={}'.format(
+        payload['spawned'], payload.get('object_id'), payload.get('class_name', '')), _connection)
+    output('affordances={}'.format(payload['affordances']), _connection)
+    output('destroyed={}'.format(payload['destroyed']), _connection)
+    if payload['error']:
+        output('error: {}'.format(payload['error']), _connection)
+
+    _write_spike_log('diary_object', payload)
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Probe 9: trait_levers (traits + relationship bits stick)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _probe_trait_levers(_connection=None):
+    """Prove the trait + relationship-bit levers (evo.trait P31) stick.
+
+    Add/remove a base-game trait (SELF_ASSURED) and a relationship bit
+    (FRIENDSHIP_FRIEND) via native_hooks, verifying each with has_* checks, and
+    always clean up (remove what was added) so the save is left unchanged.
+    """
+    output = sims4.commands.output
+    active_sim_info = get_active_sim_info()
+    if active_sim_info is None:
+        output('No active sim', _connection)
+        _write_spike_log('trait_levers', {'error': 'no_active_sim'})
+        return False
+
+    actor_id = sim_id_of(active_sim_info)
+    target_info = _find_target_sim_info(active_sim_info)
+
+    try:
+        from sims4communitylib.enums.traits_enum import CommonTraitId
+        trait_id = int(CommonTraitId.SELF_ASSURED)
+    except Exception:
+        trait_id = 16824  # CommonTraitId.SELF_ASSURED
+
+    try:
+        from sims4communitylib.enums.relationship_bits_enum import CommonRelationshipBitId
+        bit_id = int(CommonRelationshipBitId.FRIENDSHIP_FRIEND)
+    except Exception:
+        bit_id = 15797  # CommonRelationshipBitId.FRIENDSHIP_FRIEND
+
+    payload = {
+        'actor_sim_id': actor_id,
+        'target_sim_id': sim_id_of(target_info) if target_info is not None else 0,
+        'trait': {},
+        'relationship_bit': {},
+    }
+
+    # Trait lever (SELF_ASSURED).
+    trait = payload['trait']
+    trait['id'] = trait_id
+    trait['had_before'] = _as_bool(native_hooks.has_trait(active_sim_info, trait_id))
+    trait['in_trait_list_before'] = trait_id in sim_trait_ids(active_sim_info)
+    trait['add_ok'] = _as_bool(native_hooks.set_trait(active_sim_info, trait_id))
+    trait['has_after_add'] = _as_bool(native_hooks.has_trait(active_sim_info, trait_id))
+    trait['in_trait_list_after'] = trait_id in sim_trait_ids(active_sim_info)
+    if not trait['had_before']:
+        trait['remove_ok'] = _as_bool(native_hooks.remove_trait(active_sim_info, trait_id))
+        trait['has_after_remove'] = _as_bool(native_hooks.has_trait(active_sim_info, trait_id))
+    else:
+        trait['remove_ok'] = True  # leave the pre-existing trait untouched
+        trait['has_after_remove'] = trait['had_before']
+
+    # Relationship bit lever (FRIENDSHIP_FRIEND).
+    relbit = payload['relationship_bit']
+    relbit['id'] = bit_id
+    relbit['usable'] = target_info is not None
+    if target_info is not None:
+        relbit['had_before'] = _as_bool(native_hooks.has_relationship_bit(active_sim_info, target_info, bit_id))
+        relbit['add_ok'] = _as_bool(native_hooks.add_relationship_bit(active_sim_info, target_info, bit_id))
+        relbit['has_after_add'] = _as_bool(native_hooks.has_relationship_bit(active_sim_info, target_info, bit_id))
+        if not relbit['had_before']:
+            relbit['remove_ok'] = _as_bool(native_hooks.remove_relationship_bit(active_sim_info, target_info, bit_id))
+            relbit['has_after_remove'] = _as_bool(native_hooks.has_relationship_bit(active_sim_info, target_info, bit_id))
+        else:
+            relbit['remove_ok'] = True
+            relbit['has_after_remove'] = relbit['had_before']
+    else:
+        relbit['error'] = 'no target sim'
+
+    output('=== Trait Levers Probe ===', _connection)
+    output('trait: {}'.format(trait), _connection)
+    output('relationship_bit: {}'.format(relbit), _connection)
+
+    _write_spike_log('trait_levers', payload)
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Smoke test
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -639,17 +1205,22 @@ _PROBE_DISPATCH = {
     'ui': _probe_ui_injection,
     'routing': _probe_routing,
     'relationship': _probe_relationship,
+    'relationship_bits': _probe_relationship_bits,
+    'mood_effect': _probe_mood_effect,
+    'lifecycle': _probe_lifecycle,
+    'diary_object': _probe_diary_object,
+    'trait_levers': _probe_trait_levers,
 }
 
 
 @sims4.commands.Command('sw.spike', command_type=sims4.commands.CommandType.Live)
 def cmd_sw_spike(probe_name=None, _connection=None):
     """Run a spike probe by name.
-    Usage: sw.spike <interaction|ui_injection|ui|routing|relationship>
+    Usage: sw.spike <interaction|ui_injection|ui|routing|relationship|relationship_bits|mood_effect|lifecycle|diary_object|trait_levers>
     """
     output = sims4.commands.output
     if probe_name is None:
-        output('Usage: sw.spike <interaction|ui_injection|ui|routing|relationship>', _connection)
+        output('Usage: sw.spike <probe>', _connection)
         output('Available probes: {}'.format(', '.join(sorted(set(_PROBE_DISPATCH.keys())))), _connection)
         return False
 

@@ -184,7 +184,47 @@ exposed three more findings:
   client concept). Server-side object tooltip/display text comes from
   `obj.tooltip_text`/`obj.display_name` accessors, not `get_component(TooltipComponent)`.
 
-## 12. In-game spike validation #3 (2026-10-05, third run)
+## 13. In-game spike validation #4 — phase-2 spikes (2026-10-05)
+
+The five phase-2 probes (`relationship_bits`, `mood_effect`, `lifecycle`,
+`diary_object`, `trait_levers`) were run in build 1.128.90.1030. Ground-truth
+facts confirmed:
+
+- **Relationship bits accessor ✅** — `SimInfo.relationship_tracker.get_all_bits(target_sim_id)`
+  is the correct edge reader (the old `Relationship.get_all_bits()` does not exist on the
+  vanilla `Relationship` object — it lives on the tracker). Returns real bits.
+- **`RelationshipBit.guid64` == `CommonRelationshipBitId` int** ✅ — e.g. `has_met`=15803,
+  `friendship-good_friends`=15799, `friendship-bff`=15794, `family_Target_IsGrandchildOf_Actor`=8807
+  (FAMILY_GRANDCHILD). So `guid64` maps 1:1 to the S4CL `CommonRelationshipBitId` enum.
+- **`RelationshipBit.__name__` is the tuning name** (kebab/snake case, e.g.
+  `"friendship-good_friends"`, `"family_Target_IsGrandchildOf_Actor"`), **not** the enum name.
+- **Sentiments ARE relationship bits** ✅ — they appear in `get_all_bits()` with a
+  `sentimentBit_…` / `shortTermBits_…` name prefix, and their `guid64` lives in the S4CL
+  `CommonLongTermSentimentId` / `CommonShortTermSentimentId` enum space (e.g.
+  `sentimentBit_Actor_CloseTo_Target_LT_generic` = 239984 = `CLOSE_GENERIC`). No separate
+  `sentiment_track_tracker` call is needed for reading sentiments.
+- **`lifecycle` listeners ✅** — `S4CLSimDiedEvent` (`death_type`, `died_off_lot`, `sim_info`),
+  `S4CLSimPregnancyEndedEvent` (`sim_info`), `S4CLSimRelationshipBitAddedEvent`
+  (`sim_info_a`, `sim_info_b`, `relationship_bit`, `relationship_bit_id`) are registered and
+  fire-ready; `relationship_bit_id` is exposed directly (no `guid64` extraction needed).
+- **`trait_levers` ✅** — `CommonTraitUtils.add_trait`/`remove_trait`/`has_trait` and
+  `CommonRelationshipUtils.add_relationship_bit`/`remove_relationship_bit`/
+  `has_relationship_bit_with_sim` all work (`has_after_add=true`, `remove_ok=true`).
+  ⚠️ `sim_info.trait_tracker.traits` is NOT the canonical trait source — use
+  `CommonTraitUtils.get_trait_ids(sim_info)` (reads `sim_info.get_traits()` + `guid64`).
+- **`mood_effect` 🟡** — `CommonBuffUtils.add_buff` applies the buff (`buffs_after` shows
+  `mood_type=14640`, `mood_weight=3`), but `get_mood()`/`get_mood_intensity()` do **not**
+  change synchronously — even with pre-existing weights that already favour happy
+  (happy 1+2+3 vs focused 1). The mood statistic updates lazily (next sim tick); this is
+  expected engine behaviour, not a buff defect. `set_mood` production path is therefore
+  functional (mood flips a tick after apply), but needs a visual in-game confirm.
+- **`diary_object` 🔴** — the custom `sw_diary_object` GameObject tuning does **not** load
+  (`Types.OBJECT` manager returns None). A bare `GameObject` with only `_super_affordances`
+  and no model/footprint/`ObjectDefinition` is not a spawnable object. The diary "Ler/Snoop"
+  interactions still attach to base-game diaries via class-name matching, so this may be
+  moot (see §7).
+
+
 
 - **✅ `sw.smoke_test` = 20/22** (was 18/22): `trait_hidden_no_walkby` now passes
   (`id=13870026573313588640`), `tuning_summary` = 11/11 loaded, and

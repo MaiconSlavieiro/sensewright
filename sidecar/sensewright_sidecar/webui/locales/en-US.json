@@ -62,13 +62,20 @@
     "intensity": "Intensity",
     "type": "Type",
     "trauma": "Trauma",
-    "belief": "Belief"
+    "belief": "Belief",
+    "import_sim": "Import Sim",
+    "export_sim": "Export Sim"
   },
   "god": {
     "title": "Director's Room",
     "spoiler_shield": "Spoiler Shield (ON = hide beats)",
     "no_beats": "No active arc or beats loaded.",
     "dials": "God Dials",
+    "director_mode": "Director Mode",
+    "director_mode_label": "Active Mode",
+    "autonomy_mode_label": "Autonomy Mode",
+    "apply_director_mode": "Apply Mode",
+    "powers": "God Powers",
     "preset": "Director Preset",
     "preset_label": "Active Preset",
     "presets": {
@@ -144,6 +151,10 @@
     "limits": "Rate Limits",
     "pool": "Provider Pool",
     "tiers": "Tiers",
+    "cost_dashboard": "Cost Dashboard (FC3)",
+    "total_tokens": "Total Tokens (Session)",
+    "estimated_cost": "Estimated Cost",
+    "cost_hint": "* Estimate based on average blended rates.",
     "test_connection": "Test Connection",
     "reload_translations": "Reload Translations",
     "generate_package": "Generate Language Package",
@@ -175,6 +186,10 @@
     "arc_steer_failed": "Failed to steer arc",
     "panic_activated": "Panic mode activated",
     "resumed": "Resumed normal operation",
-    "panic_failed": "Panic action failed"
+    "panic_failed": "Panic action failed",
+    "exported": "Sim exported successfully",
+    "export_failed": "Failed to export Sim",
+    "imported": "Sim imported successfully",
+    "import_failed": "Failed to import Sim"
   }
 }

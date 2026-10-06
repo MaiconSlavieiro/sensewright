@@ -37,6 +37,9 @@ everything below is the detailed reference.
 - **Architecture decisions** and cross-process contracts live in
   [`architecture.md`](architecture.md); implementation gaps and history in
   [`project-status.md`](project-status.md); forward-looking design in [`mcp.md`](mcp.md).
+- **Single roadmap:** the execution order lives only in
+  [`operations.md` → Recommended execution order](operations.md#recommended-execution-order-2026-10-05);
+  the Gap-Closing Plan in `project-status.md` is a catalog of items, not a sequence.
 
 ## Repository layout
 

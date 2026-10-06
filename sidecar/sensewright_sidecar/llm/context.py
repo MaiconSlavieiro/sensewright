@@ -53,31 +53,53 @@ class ContextAssembler:
         engine = get_engine()
         purpose = get_purpose(purpose_id)
         tier = purpose.tier if purpose else "bg"
-
-        ctx = self._render_ctx(context, lang)
-        system = engine.render_prompt(purpose_id, "system", lang, ctx).strip()
+        budget = self.tier_budget(tier)
 
         channel = context.get("channel")
         section = ("user_" + channel) if channel in CHANNELS else "user"
-        payload = self._build_payload(purpose_id, context, tier)
-        # Serialize exactly once: ``_build_payload`` returns a dict, and the
-        # budget trim is applied to the JSON string (S-B03 — previously the
-        # payload was a pre-serialized string that got double-encoded).
-        context_json = self._trim_to_budget(
-            json.dumps(payload, ensure_ascii=False), self.tier_budget(tier)
-        )
-        user_ctx = dict(ctx)
-        user_ctx["context_json"] = context_json
-        user = engine.render_prompt(purpose_id, section, lang, user_ctx).strip()
-        if not user:
-            user = context_json
 
-        return [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
+        def _render_tier(level: int) -> tuple[str, str, int, str]:
+            ctx = self._render_ctx(context, lang, level=level)
+            payload = self._build_payload(purpose_id, context, tier, level=level)
+            c_json = json.dumps(payload, ensure_ascii=False)
+            
+            sys_text = engine.render_prompt(purpose_id, "system", lang, ctx).strip()
+            
+            user_ctx = dict(ctx)
+            user_ctx["context_json"] = c_json
+            user_text = engine.render_prompt(purpose_id, section, lang, user_ctx).strip()
+            if not user_text:
+                user_text = c_json
+                
+            toks = estimate_tokens(sys_text + "\n" + user_text)
+            return sys_text, user_text, toks, c_json
 
-    def _render_ctx(self, context: Dict[str, Any], lang: str) -> Dict[str, Any]:
+        # Token Priority Packing (R4)
+        sys_out, usr_out, toks, json_out = _render_tier(2)
+        if toks <= budget:
+            return [{"role": "system", "content": sys_out}, {"role": "user", "content": usr_out}]
+            
+        sys_out, usr_out, toks, json_out = _render_tier(1)
+        if toks <= budget:
+            return [{"role": "system", "content": sys_out}, {"role": "user", "content": usr_out}]
+            
+        sys_out, usr_out, toks, json_out = _render_tier(0)
+        if toks <= budget:
+            return [{"role": "system", "content": sys_out}, {"role": "user", "content": usr_out}]
+
+        # If P0 still overflows, hard trim the JSON part
+        c_json = self._trim_to_budget(json_out, budget)
+        ctx0 = self._render_ctx(context, lang, level=0)
+        sys_final = engine.render_prompt(purpose_id, "system", lang, ctx0).strip()
+        user_ctx = dict(ctx0)
+        user_ctx["context_json"] = c_json
+        usr_final = engine.render_prompt(purpose_id, section, lang, user_ctx).strip()
+        if not usr_final:
+            usr_final = c_json
+            
+        return [{"role": "system", "content": sys_final}, {"role": "user", "content": usr_final}]
+
+    def _render_ctx(self, context: Dict[str, Any], lang: str, level: int = 2) -> Dict[str, Any]:
         """Translate enum state and lift context fields into prompt variables."""
         engine = get_engine()
         profile = context.get("profile") or {}
@@ -92,8 +114,8 @@ class ContextAssembler:
         anchors = engine.content(lang).get("anchors") or {}
         bias_archetypes = anchors.get("bias_archetypes") or []
 
-        family_text = self._family_text(context.get("family"))
-        history_text = self._history_text(context.get("history"))
+        family_text = self._family_text(context.get("family")) if level >= 2 else ""
+        history_text = self._history_text(context.get("history")) if level >= 1 else ""
         family_hint = ""
         if family_text:
             family_hint = str(anchors.get("family_hint", "")).replace("{family_text}", family_text)
@@ -102,7 +124,7 @@ class ContextAssembler:
             history_hint = str(anchors.get("history_hint", "")).replace("{history_text}", history_text)
 
         location_text = self._location_text(context.get("location"), lang, engine)
-        relationship_text = self._relationship_text(context.get("relationship"), lang, engine)
+        relationship_text = self._relationship_text(context.get("relationship"), lang, engine) if level >= 1 else ""
         action_text = self._action_text(context.get("action"), lang, engine)
         location_hint = ""
         if location_text:
@@ -118,16 +140,17 @@ class ContextAssembler:
         # god.puppeteer objective into the sim.social prompt so the puppet NPC
         # drives the scene while the agent answers freely.
         asymmetric_directive = ""
-        puppeteer_objective = context.get("puppeteer_objective", "")
-        if puppeteer_objective:
-            asymmetric_directive = engine.render_prompt(
-                "god.puppeteer", "asymmetric_directive", lang,
-                {
-                    "catalyst_name": context.get("catalyst_name", ""),
-                    "puppeteer_objective": puppeteer_objective,
-                    "agent_name": context.get("agent_name", ""),
-                },
-            ).strip()
+        if level >= 1:
+            puppeteer_objective = context.get("puppeteer_objective", "")
+            if puppeteer_objective:
+                asymmetric_directive = engine.render_prompt(
+                    "god.puppeteer", "asymmetric_directive", lang,
+                    {
+                        "catalyst_name": context.get("catalyst_name", ""),
+                        "puppeteer_objective": puppeteer_objective,
+                        "agent_name": context.get("agent_name", ""),
+                    },
+                ).strip()
 
         return {
             "sim_name": sim_name,
@@ -142,7 +165,7 @@ class ContextAssembler:
             "activity_label": engine.enum("activity", context.get("activity"), lang, gender),
             "trust_label": str(trust),
             "message": context.get("message", ""),
-            "memories_text": self._memories_text(context.get("memories"), lang),
+            "memories_text": self._memories_text(context.get("memories"), lang) if level >= 2 else "",
             "history_text": history_text,
             "family_text": family_text,
             "family_hint": family_hint,
@@ -272,7 +295,7 @@ class ContextAssembler:
                     parts.append(json.dumps(search, ensure_ascii=False))
         return " | ".join(parts)
 
-    def _build_payload(self, purpose_id: str, context: Dict[str, Any], tier: str) -> Dict[str, Any]:
+    def _build_payload(self, purpose_id: str, context: Dict[str, Any], tier: str, level: int = 2) -> Dict[str, Any]:
         """Slice context into a JSON payload bounded by the tier budget."""
         payload: Dict[str, Any] = {"purpose": purpose_id}
 
@@ -282,22 +305,29 @@ class ContextAssembler:
         else:
             payload["profile"] = {k: profile.get(k, "") for k in _DEEP_FIELDS}
 
-        for key in ("mood", "activity", "current_needs", "room_id", "is_sleeping", "is_off_lot_duty"):
+        # P0 fields
+        for key in ("mood", "activity", "current_needs", "room_id", "is_sleeping", "is_off_lot_duty",
+                    "message", "event", "target", "directives", "active_arc", "zeitgeist",
+                    "schedule_blocks", "obligatory_tasks", "native_wants", "location", "action"):
             if key in context:
                 payload[key] = context[key]
+                
+        # P1 fields
+        if level >= 1:
+            for key in ("puppeteer_objective", "scene_subtext", "history", "relationship", "rumor"):
+                if key in context:
+                    payload[key] = context[key]
 
-        memories = context.get("memories") or []
-        if isinstance(memories, list):
-            payload["memories"] = memories[:_MEMORY_COUNT_BY_TIER.get(tier, 8)]
+        # P2 fields
+        if level >= 2:
+            memories = context.get("memories") or []
+            if isinstance(memories, list):
+                # K=5->2 on realtime (handled by smaller counts if needed, but we follow _MEMORY_COUNT_BY_TIER)
+                payload["memories"] = memories[:_MEMORY_COUNT_BY_TIER.get(tier, 8)]
 
-        for key in (
-            "message", "event", "target", "directives", "active_arc", "zeitgeist",
-            "dream_urge", "schedule_blocks", "obligatory_tasks", "native_wants",
-            "relationship", "rumor", "player_facts", "scene_subtext", "puppeteer_objective",
-            "location", "action", "family", "history",
-        ):
-            if key in context:
-                payload[key] = context[key]
+            for key in ("family", "dream_urge", "player_facts"):
+                if key in context:
+                    payload[key] = context[key]
 
         return payload
 

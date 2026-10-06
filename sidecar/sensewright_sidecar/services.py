@@ -1815,6 +1815,54 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"profile": profile}
 
 
+# ── FC2 Export/Import ────────────────────────────────────────────────────
+#: Version of the portable Sim export bundle (bump on schema changes).
+SIM_EXPORT_VERSION = 1
+
+
+def handle_sim_export(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Export a Sim's profile, background, relationships and memories (FC2)."""
+    state = get_state()
+    store = _store(state)
+    if not store:
+        return {"error": "no active store"}
+    sim_id = to_int(payload.get("sim_id"), 0)
+    if not sim_id:
+        return {"error": "missing sim_id"}
+
+    bundle = store.export_sim_bundle(sim_id)
+    export_data: Dict[str, Any] = {"version": SIM_EXPORT_VERSION, "sim_id": sim_id}
+    export_data.update(bundle)
+    return {"export_data": export_data}
+
+
+def handle_sim_import(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Import an export bundle onto a target Sim (replaces profile + memories).
+
+    Relationships are intentionally NOT imported: target sim ids differ across
+    saves, so a robust relationship import needs an id-mapping step (FC5).
+    """
+    state = get_state()
+    store = _store(state)
+    if not store:
+        return {"error": "no active store"}
+    target_sim_id = to_int(payload.get("sim_id"), 0)
+    if not target_sim_id:
+        return {"error": "missing target sim_id"}
+    export_data = payload.get("export_data")
+    if not isinstance(export_data, dict) or not isinstance(export_data.get("profile"), dict):
+        return {"error": "invalid export data"}
+    version = to_int(export_data.get("version"), 0)
+    if version > SIM_EXPORT_VERSION:
+        return {"error": "unsupported export version {}".format(version)}
+    try:
+        imported = store.import_sim_bundle(target_sim_id, export_data, store.get_tick())
+    except (ValueError, TypeError) as exc:
+        return {"error": "invalid export data: {}".format(exc)}
+    logger.info("sim.import target=%s memories=%d", target_sim_id, imported)
+    return {"ok": True, "imported_memories": imported}
+
+
 def handle_evolve(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = get_state()
     lang = normalize_lang(payload.get("lang"))

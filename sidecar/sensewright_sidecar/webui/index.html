@@ -169,6 +169,13 @@
             <div id="relationships-list" class="relationships-list" data-i18n-empty="sims.no_relationships">No relationship data.</div>
           </div>
         </details>
+        
+        <!-- Import/Export -->
+        <div class="field-row actions" style="justify-content: flex-start; padding: 0 16px;">
+          <input type="file" id="import-sim-file" accept=".json" style="display: none;">
+          <button class="btn btn-primary" id="btn-import-sim" data-i18n="sims.import_sim" onclick="document.getElementById('import-sim-file').click()">Import Sim</button>
+          <button class="btn btn-secondary" id="btn-export-sim" data-i18n="sims.export_sim">Export Sim</button>
+        </div>
       </div>
 
       <div id="no-sim-selected" class="empty-state" data-i18n="sims.no_sim_selected">Select a Sim from the dropdown to view and edit their profile.</div>
@@ -201,6 +208,42 @@
         <summary class="card-title" data-i18n="god.dials">God Dials</summary>
         <div class="card-body">
           <div class="dials-grid" id="dials-grid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </details>
+
+      <!-- Director & Autonomy Modes -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="god.director_mode">Director Mode</summary>
+        <div class="card-body">
+          <div class="field-row">
+            <label for="director-mode-select" data-i18n="god.director_mode_label">Active Mode</label>
+            <select id="director-mode-select" aria-label="Director mode">
+              <option value="AUTONOMOUS">AUTONOMOUS</option>
+              <option value="CO_DIRECTOR">CO_DIRECTOR</option>
+              <option value="SANDBOX">SANDBOX</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <label for="autonomy-mode-select" data-i18n="god.autonomy_mode_label">Autonomy Mode</label>
+            <select id="autonomy-mode-select" aria-label="Autonomy mode">
+              <option value="full">Full (Impulses + Social)</option>
+              <option value="reactive">Reactive (Events Only)</option>
+              <option value="off">Off (Player/God Only)</option>
+            </select>
+          </div>
+          <div class="field-row actions">
+            <button class="btn btn-primary" id="btn-apply-director-mode" data-i18n="god.apply_director_mode">Apply Mode</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- God Powers -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="god.powers">God Powers</summary>
+        <div class="card-body">
+          <div class="powers-grid" id="powers-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
             <!-- Populated by JS -->
           </div>
         </div>
@@ -347,6 +390,25 @@
         <h2 data-i18n="providers.title">Provedores & Diagnóstico</h2>
         <button class="btn btn-secondary" id="btn-refresh-status" data-i18n="common.refresh">Refresh Status</button>
       </header>
+
+      <!-- Cost Dashboard FC3 -->
+      <details class="card" open>
+        <summary class="card-title" data-i18n="providers.cost_dashboard">Painel de Custos (FC3)</summary>
+        <div class="card-body">
+          <div class="diag-grid" id="cost-grid">
+            <div class="diag-card">
+              <h4 data-i18n="providers.total_tokens">Total Tokens (Session)</h4>
+              <div id="cost-total-tokens" style="font-size: 28px; font-weight: 700; color: var(--accent); font-family: var(--font-mono);">0</div>
+            </div>
+            <div class="diag-card">
+              <h4 data-i18n="providers.estimated_cost">Estimated Cost</h4>
+              <div id="cost-estimated" style="font-size: 28px; font-weight: 700; color: var(--success); font-family: var(--font-mono);">$0.00</div>
+              <span class="hint" data-i18n="providers.cost_hint">* Estimate based on average blended rates.</span>
+            </div>
+          </div>
+          <div id="provider-costs" style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px;"></div>
+        </div>
+      </details>
 
       <!-- Provider Chain Status -->
       <details class="card" open>

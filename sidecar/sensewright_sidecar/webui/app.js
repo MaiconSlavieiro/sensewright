@@ -178,6 +178,29 @@
     if ($('diag-limits')) $('diag-limits').textContent = JSON.stringify(s.limits || {}, null, 2);
     if ($('diag-pool')) $('diag-pool').textContent = JSON.stringify(s.pool || {}, null, 2);
     if ($('diag-tiers')) $('diag-tiers').textContent = JSON.stringify(s.tiers || {}, null, 2);
+    
+    // FC3 Cost Dashboard
+    if (s.metrics) {
+      var totalTokens = s.metrics.total_tokens || 0;
+      if ($('cost-total-tokens')) $('cost-total-tokens').textContent = totalTokens.toLocaleString();
+      // Rough blended cost estimate: ~$0.50 per 1M tokens as an average fallback
+      var costEstimate = (totalTokens / 1000000) * 0.50;
+      if ($('cost-estimated')) $('cost-estimated').textContent = '$' + costEstimate.toFixed(4);
+      
+      var pCosts = $('provider-costs');
+      if (pCosts) {
+        pCosts.innerHTML = '';
+        Object.keys(s.metrics).forEach(function(k) {
+          if (k.indexOf('provider_') === 0 && k.indexOf('_tokens') > 0) {
+            var pname = k.replace('provider_', '').replace('_tokens', '');
+            var ptok = s.metrics[k];
+            pCosts.innerHTML += '<div style="display: flex; justify-content: space-between; padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 13px;">' +
+              '<span style="font-weight: 600; color: var(--text-muted); text-transform: uppercase;">' + escapeHtml(pname) + '</span>' +
+              '<span style="color: var(--info); font-weight: 700;">' + ptok.toLocaleString() + ' tokens</span></div>';
+          }
+        });
+      }
+    }
   }
 
   function renderChainStatus(s) {
@@ -345,7 +368,12 @@
       renderDials();
       var preset = state.godControls.preset;
       if (preset && $('god-preset')) $('god-preset').value = preset;
+      var directorMode = state.godControls.director_mode;
+      if (directorMode && $('director-mode-select')) $('director-mode-select').value = directorMode;
+      var autonomyMode = state.godControls.autonomy_mode;
+      if (autonomyMode && $('autonomy-mode-select')) $('autonomy-mode-select').value = autonomyMode;
       if ($('free-only')) $('free-only').checked = !!state.godControls.free_only;
+      renderPowers();
       var zeitgeist = state.godControls.zeitgeist;
       if (zeitgeist && typeof zeitgeist === 'object') {
         if ($('zeitgeist-tags')) $('zeitgeist-tags').value = (zeitgeist.tags || []).join(', ');
@@ -601,10 +629,57 @@
     });
   }
 
+  var GOD_POWERS = ['dream_whispers', 'spatial_gravity', 'scene_subtext', 'world_pressure', 'catalyst_npcs', 'aftermath'];
+
+  function renderPowers() {
+    var grid = $('powers-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    GOD_POWERS.forEach(function (power) {
+      var key = 'power.' + power;
+      var isChecked = !!state.godControls[key];
+      var wrap = document.createElement('label');
+      wrap.className = 'toggle-label';
+      wrap.style.display = 'flex';
+      wrap.style.justifyContent = 'space-between';
+      wrap.style.background = 'rgba(0,0,0,0.2)';
+      wrap.style.padding = '12px 16px';
+      wrap.style.borderRadius = 'var(--radius-sm)';
+      wrap.innerHTML = '<span>' + escapeHtml(power) + '</span>' +
+        '<input type="checkbox" data-power="' + escapeHtml(power) + '" ' + (isChecked ? 'checked' : '') + '>' +
+        '<span class="toggle-slider" aria-hidden="true"></span>';
+      grid.appendChild(wrap);
+    });
+    grid.querySelectorAll('input[type=checkbox]').forEach(function (input) {
+      input.addEventListener('change', function () {
+        var power = input.getAttribute('data-power');
+        var val = input.checked;
+        state.godControls['power.' + power] = val;
+        apiPost('/v1/god/controls', { key: 'power.' + power, value: val })
+          .then(function() { toast(t('toast.applied')); })
+          .catch(function () { toast(t('toast.apply_failed'), true); });
+      });
+    });
+  }
+
   function applyPreset() {
     var preset = $('god-preset') ? $('god-preset').value : null;
     if (!preset) return;
     apiPost('/v1/god/controls', { key: 'preset', value: preset })
+      .then(function () { toast(t('toast.applied')); })
+      .catch(function () { toast(t('toast.apply_failed'), true); });
+  }
+
+  function applyDirectorMode() {
+    var mode = $('director-mode-select') ? $('director-mode-select').value : null;
+    var autoMode = $('autonomy-mode-select') ? $('autonomy-mode-select').value : null;
+    if (!mode && !autoMode) return;
+    
+    var promises = [];
+    if (mode) promises.push(apiPost('/v1/god/controls', { key: 'director_mode', value: mode }));
+    if (autoMode) promises.push(apiPost('/v1/god/controls', { key: 'autonomy_mode', value: autoMode }));
+    
+    Promise.all(promises)
       .then(function () { toast(t('toast.applied')); })
       .catch(function () { toast(t('toast.apply_failed'), true); });
   }
@@ -708,12 +783,60 @@
       if ($('btn-save-personality')) $('btn-save-personality').addEventListener('click', saveSimProfile);
       if ($('btn-save-plan')) $('btn-save-plan').addEventListener('click', saveSimProfile);
       if ($('btn-apply-preset')) $('btn-apply-preset').addEventListener('click', applyPreset);
+      if ($('btn-apply-director-mode')) $('btn-apply-director-mode').addEventListener('click', applyDirectorMode);
       if ($('btn-save-zeitgeist')) $('btn-save-zeitgeist').addEventListener('click', saveZeitgeist);
       if ($('btn-refresh-status')) $('btn-refresh-status').addEventListener('click', pollStatus);
       if ($('spoiler-shield')) $('spoiler-shield').addEventListener('change', function () {
         var beats = $('god-beats-container');
         if (beats) beats.classList.toggle('spoiler-on', $('spoiler-shield').checked);
       });
+
+      // FC2 Sim Export/Import
+      if ($('btn-export-sim')) {
+        $('btn-export-sim').addEventListener('click', function() {
+          if (!state.selectedSimId) return;
+          apiPost('/v1/sim/export', { sim_id: state.selectedSimId }).then(function(res) {
+            if (res.export_data) {
+              var blob = new Blob([JSON.stringify(res.export_data, null, 2)], { type: 'application/json' });
+              var url = URL.createObjectURL(blob);
+              var a = document.createElement('a');
+              a.href = url;
+              a.download = 'sim_' + state.selectedSimId + '_export.json';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+              toast(t('toast.exported') || 'Exported successfully!');
+            } else {
+              toast(t('toast.export_failed') || 'Export failed.', true);
+            }
+          }).catch(function() { toast(t('toast.export_failed') || 'Export failed.', true); });
+        });
+      }
+      
+      if ($('import-sim-file')) {
+        $('import-sim-file').addEventListener('change', function(e) {
+          if (!state.selectedSimId || !e.target.files.length) return;
+          var file = e.target.files[0];
+          var reader = new FileReader();
+          reader.onload = function(evt) {
+            try {
+              var data = JSON.parse(evt.target.result);
+              apiPost('/v1/sim/import', { sim_id: state.selectedSimId, export_data: data }).then(function(res) {
+                if (res.ok) {
+                  toast(t('toast.imported') || 'Imported successfully!');
+                  loadSimProfile(state.selectedSimId);
+                } else {
+                  toast(t('toast.import_failed') || 'Import failed.', true);
+                }
+              }).catch(function() { toast(t('toast.import_failed') || 'Import failed.', true); });
+            } catch(err) {
+              toast(t('toast.import_failed') || 'Import failed.', true);
+            }
+          };
+          reader.readAsText(file);
+        });
+      }
 
       // Arc Director panel buttons
       if ($('btn-refresh-arc')) $('btn-refresh-arc').addEventListener('click', loadArcPanel);

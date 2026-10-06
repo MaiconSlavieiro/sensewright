@@ -26,13 +26,10 @@ References use the `file:line` format.
 
 ### 1. Executive summary
 
-> ⚠️ **Superseded snapshot (2026-10-02).** The prose and per-purpose tables below were written on
-> 2026-10-02 and are **out of date**. The 2026-10-03 waves (see [Changelog](#changelog) and
-> [operations.md](operations.md)) promoted many purposes to Full (e.g. `god.cast`, `god.react`,
-> `mem.legacy`, `sim.social.close`, `sim.aspiration`, `world.aftermath`, `autonomy_mode`), fixed
-> 17+ playtest bugs plus a weak-point remediation wave, and raised the sidecar suite to
-> **689 tests**. Read the [Changelog](#changelog) and the [Architectural Review](operations.md)
-> first; treat the numbers below as a historical snapshot.
+> ⚠️ **CRITICAL ARCHITECTURAL IMPERATIVE:** Infrastructure and communication hardening (like the SSE protocol unification `P1` and the Sidecar thread-safety `P2` listed in `operations.md`) are NOT secondary technical debt. Because TS4 is strictly single-threaded, any latency or IPC flaw breaks the core gameplay loops. **These hardening items MUST be treated as primary features and blockers for any further functional playtests.**
+
+> ✅ **Current state (2026-10-06):** Stage 2 (Web Studio Phase 4 & FC2/FC3) is complete. The sidecar suite has **763 tests**; **26 of 33 purposes Full**.
+> The canonical execution order is the [Recommended execution order](operations.md#recommended-execution-order-2026-10-05) in `operations.md`, with **Architectural Review & Evolution Plan (Hardening)** taking precedence over Playtest #5.
 
 The project has a **solid, tested foundation**: both processes (Mod Python 3.7 and Sidecar
 FastAPI) talk to each other, the transactional save cycle works, the manifest-driven i18n
@@ -42,28 +39,14 @@ tiered ContextAssembler) exists, and the build produces valid `.ts4script` (byte
 
 > ⚠️ **New Methodology: Spike-Driven Development.** To stop the cycle of "coding blind" against EA's volatile API and the resulting rework loops, all future Mod-side features (especially Phase 5 / native hooks) MUST follow the [Spike-Driven Development Strategy](spike-strategy.md). Every EA API interaction will be proven via an in-game spike (`sw.spike` / `sw.smoke_test`) *before* integration.
 
-What is **genuinely missing** is not foundation, it is **wiring and triggers**:
+What is **genuinely missing** is not foundation, it is **wiring and triggers** (mostly Phase 5 in-game validation):
 
-- **18 of the 33 purposes** only have a deterministic fallback — they have no trigger or
-  production handler (e.g., `sim.dream`, `sim.cognition`, `god.cast`, `world.gossip`,
-  `mem.compact`, `mem.legacy`, `ops.panel.summary`).
-- **Three partial purposes** (`sim.dream`, `sim.cognition`, `evo.reflect`) have the engine and
-  prompt ready, but **nothing triggers them** and the result is not applied back to the profile.
-- **God Director**: arcs/beats are planned but never consumed; `god.cast`, `god.scene`, and
-  `god.react` do not exist; `god.puppeteer` does not spawn/approach an NPC and does not inject
-  the asymmetric objective into `sim.social`.
-- **World Layer**: the rumor model is ready and tested, but **no production code creates or
-  spreads rumors**; chronicle, mailbox, and aftermath are missing.
+- **Three partial purposes** (`sim.diary`, `sim.lifestory`, `mem.consolidate` triggers missing/partial).
 - **Native hooks (M5/M6)**: missing Diary/"Snoop", Autobiography Book, `VisitSituation` (NPC
   ringing the doorbell), Tombstone Epitaph, sleep balloons, and the "Reflect" interaction on
-  the mirror.
-- **Speech Policy (F11)**: `max_lines_per_minute` and `min_interval_between_lines` are defined
-  but **not enforced**; the 4-channel visual routing is incomplete.
-- **Settings/Concurrency (F15/F16)**: the per-model cooldown (120 s) is dead code; per-tier
-  concurrency is not enforced; the "asymmetric refund" is logically inert.
+  the mirror (some implemented but need in-game validation).
 
-Everything that exists today is covered by **523 tests** (sidecar, 2026-10-02 snapshot — now
-**689**) and compiles under both correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle
+Everything that exists today is covered by **763 tests** (sidecar) and compiles under both correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle
 events, `spawn_npc`, `god.react`/`beat-ended`, mirror/diary/mailbox hooks, sleep balloons,
 object/situation build types) is coded blind and awaits the Phase 5 in-game checklist.
 
@@ -71,12 +54,12 @@ object/situation build types) is coded blind and awaits the Phase 5 in-game chec
 
 ### 2. Validation performed in this review
 
-> Numbers below are the 2026-10-02 snapshot. Current: `pytest` **689 passed**; `.package`
+> Numbers below are the 2026-10-06 snapshot. Current: `pytest` **763 passed**; `.package`
 > 46 resources; `.ts4script` rebuilt (see [Changelog](#changelog)).
 
 | Check | Command | Result |
 |---|---|---|
-| Sidecar test suite | `python -m pytest -q` in `sidecar/` | **523 passed**, 1 warning |
+| Sidecar test suite | `python -m pytest -q` in `sidecar/` | **763 passed**, 1 warning |
 | Mod syntax (Python 3.7) | `py -3.7 -m py_compile` on `mod/sensewright_mod/*.py` | **OK** (20 files) |
 | Build script syntax (3.10+) | `python -m py_compile mod/build.py mod/build_package.py` | **OK** |
 | `.package` build | `python mod/build_package.py` | **OK** — 44 resources (32 buffs, 7 interactions, 1 trait, 1 object, 1 situation, 2 STBL) |
@@ -165,10 +148,10 @@ trigger/application · **Fallback-only** = only `fallbacks.py` + declaration in
 | P13 | `sim.background.expand` | ✅ Full | family backstory memories on demand |
 | P14 | `god.zeitgeist` | ✅ Full | `god/zeitgeist.py:20`, `services.py:517` |
 | P15 | `god.plan` | ✅ Full | `_plan_callback` creates and persists the arc (`create_arc` + `save_arc`) |
-| P16 | `god.cast` | ⚪ Fallback-only | No casting/townie reuse/spawn |
+| P16 | `god.cast` | ✅ Full | Reuses compatible non-player townie or emits `spawn_npc` |
 | P17 | `god.scene` | ✅ Full | Beat armed → `god.scene` writes `scene_draft`/`scene_subtext` to the beat |
 | P18 | `god.puppeteer` | 🟡 Partial | Lease + opening line (`god/puppeteer.py`); no spawn/approach/asymmetric objective/continuation |
-| P19 | `god.react` | ⚪ Fallback-only | `advance_arc` without caller (`god/arcs.py:36`) |
+| P19 | `god.react` | ✅ Full | Folds agent decision, inserts `next_beat`, `advance_arc` |
 | P20 | `god.narration` | ✅ Full | `god/orchestrator.py:17-80` |
 | P21 | `god.background` | ✅ Full | BackgroundScheduler with priority |
 | P22 | `world.npc.backstory` | ✅ Full | recurring-townie detection + background |
@@ -177,14 +160,14 @@ trigger/application · **Fallback-only** = only `fallbacks.py` + declaration in
 | P25 | `world.aftermath` | ✅ Full | high-salience events shift zeitgeist and enqueue durable intents |
 | P26 | `mem.consolidate` | 🟡 Partial | Endpoint works (`services.py:474`); **no automatic trigger** (300 s/zone) |
 | P27 | `mem.compact` | 🟡 Partial | Automatic trigger (≥ 20 consolidated) + archive 15 + VACUUM (`services._maybe_compact`); missing panel exposure |
-| P28 | `mem.legacy` | ⚪ Fallback-only | No death/marriage/birth trigger |
+| P28 | `mem.legacy` | ✅ Full | Legacy memory on death/marriage/birth |
 | P29 | `mem.relationship.review` | ✅ Full | census ingested; once-per-day edge review |
 | P30 | `evo.reflect` | ✅ Full | `handle_evolve` + `_reflect_callback` apply and persist `current_demeanor` |
 | P31 | `evo.trait` | 🟡 Partial | Helpers ready; no `run_purpose`/emission |
 | P32 | `ops.recap` | ✅ Full | recapped at session-start, stored, GET /v1/recap |
 | P33 | `ops.panel.summary` | ✅ Full | deterministic 2-line summary in GET /v1/panel/summary and /v1/status |
 
-**Total: 23 Full · 6 Partial · 4 Fallback-only.**
+**Total: 26 Full · 6 Partial · 1 Fallback-only.**
 
 ---
 
@@ -557,6 +540,10 @@ camada MCP estão em [`operations.md`](operations.md) e [`mcp.md`](mcp.md).
 > **Goal:** an executable plan to close every remaining development gap recorded in
 > the Implementation Status section above (P1 residual, P2, P4, and the FC2/FC5 backlog).
 
+> **Note (2026-10-05):** this section is a **catalog of work items**. Its "Phase 1–5" labels are
+> *not* the execution order (e.g. "Phase 1" holds sidecar tasks, not spikes). Execution follows the
+> Stages 0–5 in [`operations.md`](operations.md#recommended-execution-order-2026-10-05).
+
 This document is the execution roadmap. Each item lists: what exists today (`file:line`),
 the concrete action, the affected files, and verification. At the end of each phase, update
 `docs/project-status.md`.
@@ -903,7 +890,7 @@ Acceptance criteria (`specification.md` "Acceptance Criteria for M8"):
 
 - 🟡 Phase 1 — P1 residual (sidecar) — **1.1–1.10, 1.12, 1.13, 1.14 done** (1.11 `ops.recap`
   now consumed; only the physical Autobiography Book and in-game hooks remain)
-- 🟡 Phase 2 — Mod: events & infra — **2.1–2.5, 2.7, 2.8 done** (2.6 Onboarding Wizard pending)
+- 🟡 Phase 2 — Mod: events & infra — **2.1–2.5, 2.7, 2.8 done** (2.6 Onboarding Wizard / FC1 pending — scheduled as Stage 4)
 - 🟡 Phase 3 — P2 native hooks — **3.1–3.4, 3.8, 3.9 coded blind** (3.5–3.7 + Phase 5 in-game validation pending)
 - [x] Phase 4 — P3: LLM, Config & Observability — done (per-model cooldown, tier concurrency, asymmetric refund, trace_id, VACUUM)
 - 🟡 Phase 4b — Web Studio/P4 — **4.1, 4.2, 4.3, 4.5, 4.8 done** (4.4 spoiler, 4.6 FC2, 4.7 FC3 pending)
@@ -1105,18 +1092,15 @@ Closed **BUG-08/09/10** (see [`operations.md`](operations.md)).
 
 ### Open items (still to do)
 
-- [ ] **`autonomy_mode` (Quick Menu "Autonomia") is unwired.** `panel_ui._set_autonomy` posts an
-      `autonomy_mode` key the sidecar has no control for. Decide the mapping
-      (full/reactive/off → a dial or a pause-like switch) or remove the button.
+- [x] **`autonomy_mode` (Quick Menu "Autonomia")** — resolved in the weak-point wave
+      (`full|reactive|off` accepted, exposed and applied).
 - [ ] **`deepseek-v4-pro` (reasoning model) still returns non-JSON for some purposes.** The JSON
       extractor is more tolerant now, but the durable fix is config: route JSON-only purposes to
       a JSON-capable model (OpenRouter `nemotron` free models work) or set `free_only = true` to
       block the paid deepseek provider. See `docs/operations.md` NOTE-01.
-- [ ] **Load-time event ordering.** Lifecycle events (death/marriage) fire *before*
-      `session-start`, so their reactions/aftermath are scheduled at epoch 0 and dropped by the
-      epoch bump (`stale_epoch_dropped epoch=0 current=1`), and the realtime lane saturates at
-      load (`Realtime lane saturated; dropping event`). Start the marriage snapshot earlier, or
-      buffer events until session-start.
+- [~] **Load-time event ordering.** Mitigated in Stage 1 (R7): lifecycle events arriving during
+      the load window are buffered (max 8) and flushed on `mark_lifecycle_ready()`. Still to
+      confirm in-game (Playtest #5) that no `stale_epoch_dropped epoch=0` / lane saturation remains.
 - [ ] **Web Studio UX gaps.** The Sims tab has no auto-refresh (manual "Refresh Sims" only), and
       the God tab does not render `director_mode` (only the preset dropdown).
 - [ ] **In-game Phase 6.2 validation still pending** — see [`operations.md`](operations.md).

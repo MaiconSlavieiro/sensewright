@@ -2,6 +2,8 @@
 
 Runtime reliability material: the architectural review and evolution plan, the concurrency/thread-safety hardening plan, the catalog of bugs found in deploy/playtest, and the weak-point remediation wave.
 
+> ⚠️ **CRITICAL ARCHITECTURAL IMPERATIVE:** The "Architectural Review & Evolution Plan" and the "Hardening" tickets (P1, P2, P17, P20) described below are NOT secondary technical debt. Because TS4 is strictly single-threaded, any latency or IPC flaw breaks the core gameplay loops. Agents MUST treat these items as primary blockers that halt feature development until resolved.
+
 **On this page**
 
 - [Architectural Review & Evolution Plan](#architectural-review--evolution-plan)
@@ -23,12 +25,7 @@ The foundation (Mod Python 3.7 ↔ Sidecar Python 3.10+, Shadow DB ring buffer, 
 i18n, ProviderChain with RPM/RPD/TPM) is of very high quality. Cross-document analysis exposes
 four structural pathologies that must be stopped before any expansion.
 
-**D1. Severe documentation drift.** The static sections contradict the changelogs. The top of
-[`project-status.md`](project-status.md) still says "523 tests", "14 Full / 7 Partial / 12
-Fallback-only" and that `god.cast`/`god.react`/`mem.legacy` have no trigger, while the bottom of
-the same file and this document show **689 tests** and that `god.cast`, `god.react`,
-`mem.legacy`, `sim.social.close`, `sim.aspiration`, `world.aftermath` and `autonomy_mode` were
-already implemented and tested. Planning off the static tables induces rework on delivered code.
+**D1. Documentation drift [RESOLVED].** The static sections previously contradicted the changelogs, but this has been fixed in the latest documentation pass. The tests now count 763, and all implemented purposes like `god.cast`, `god.react`, and `mem.legacy` are correctly marked as Full.
 
 **D2. The "coding blind" trap (reliability asymmetry).** The Sidecar has 689 automated tests;
 the Mod layer was extensively coded "blind" against reference clones. 100% of the severe
@@ -208,6 +205,9 @@ routine to purge the 20 orphan confidants created in earlier tests.
 
 ### Restructured execution roadmap
 
+> **Superseded in detail (2026-10-05):** Stage 1 is done; the revalidated order is in
+> [Recommended execution order](#recommended-execution-order-2026-10-05).
+
 The previous plan advanced hooks P2, UI P4 and the MCP layer in parallel. Reordered by the
 stability critical path — each layer lands on a 100%-validated base.
 
@@ -236,15 +236,15 @@ three facades validated with contract tests + one external agent script.
 
 | Priority | Component | Action | Resolves |
 |---|---|---|---|
-| P0 | `main.py`/`sqlite_store.py` | Save `player_confidant_sim_id` in the save's `metadata` table; purge old duplicates | BUG-12 / `.save` pollution |
-| P0 | `lifecycle_hooks.py` | Buffer/block events until `session-start` responds | realtime-lane saturation / epoch=0 drops |
-| P0 | `mod/` + `services.py` | Add `outcomes[]` (`applied/failed/expired`) to the autonomy pulse | blind fire-and-forget (God/MCP) |
-| P1 | `http_client.py` | Merge SSE (timeout=15 + keepalive) and pull into one inbound thread | TS4 shutdown hang + intent-consume race |
-| P1 | `engine_facade.py` | `sw.smoke_test` to validate tunings/objects/S4CL attrs in ~2 s | slow EA-API bug discovery |
-| P1 | `llm/json_repair.py` | Repair malformed JSON / `<think>` tags + native `response_format` | false `unusable output` / fallback cascade |
-| P2 | `llm/context.py` | Priority packing (P0/P1/P2) in the ContextAssembler | realtime 700-token overflow |
-| P2 | P2 scope (M5/M6) | Replace physical book (3.5) + epitaph (3.7) with Diary/PC/Web reading | fragile XML tuning complexity |
-| P2 | `docs/` | Update `project-status.md`/`architecture.md` tables to post-Playtest #4 state | documentation drift |
+| ~~P0~~ | `main.py`/`sqlite_store.py` | ~~Save `player_confidant_sim_id` in the save's `metadata` table; purge old duplicates~~ (✅ DONE) | BUG-12 / `.save` pollution |
+| ~~P0~~ | `lifecycle_hooks.py` | ~~Buffer/block events until `session-start` responds~~ (✅ DONE) | realtime-lane saturation / epoch=0 drops |
+| ~~P0~~ | `mod/` + `services.py` | ~~Add `outcomes[]` (`applied/failed/expired`) to the autonomy pulse~~ (✅ DONE) | blind fire-and-forget (God/MCP) |
+| ~~P1~~ | `http_client.py` | ~~Merge SSE (timeout=15 + keepalive) and pull into one inbound thread~~ (✅ DONE) | TS4 shutdown hang + intent-consume race |
+| ~~P1~~ | `engine_facade.py` | ~~`sw.smoke_test` to validate tunings/objects/S4CL attrs in ~2 s~~ (✅ DONE) | slow EA-API bug discovery |
+| ~~P1~~ | `llm/json_repair.py` | ~~Repair malformed JSON / `<think>` tags + native `response_format`~~ (✅ DONE) | false `unusable output` / fallback cascade |
+| ~~P2~~ | `llm/context.py` | ~~Priority packing (P0/P1/P2) in the ContextAssembler~~ (✅ DONE) | realtime 700-token overflow |
+| ~~P2~~ | P2 scope (M5/M6) | ~~Replace physical book (3.5) + epitaph (3.7) with Diary/PC/Web reading~~ (✅ DONE) | fragile XML tuning complexity |
+| ~~P2~~ | `docs/` | ~~Update `project-status.md`/`architecture.md` tables to post-Playtest #4 state~~ (✅ DONE) | documentation drift |
 
 ---
 
@@ -1435,8 +1435,10 @@ Dead config keys and no-op functions, wire fields the sidecar ignores (`content`
   4 data probes (`interaction`, `ui_injection`, `routing`, `relationship`). Each probe prints
   a console summary and appends a JSON line to `mod_logs/Sensewright_Spike.log`.
 - `main.py`: imports `spikes` for the command-registration side effect.
-- **In-game validation still pending** (the probes are the discovery tool — they must be run
-  in TS4 via the cheat console to confirm the EA APIs they read).
+- **In-game validation (2026-10-05):** the 4 probes were run in build 1.128.90.1030 —
+  `interaction`, `routing` and the `ui_injection` buff roundtrip are ✅ validated; balloon,
+  tooltip and `relationship` (bits `[]`, sentiments unread) are 🟡 partial. Full table:
+  [`spike-strategy.md`](spike-strategy.md) §5.1.
 
 ### Deferred
 
@@ -1479,8 +1481,9 @@ detailed in [`spike-strategy.md`](spike-strategy.md) §6.
    parameterized 33-purpose token test.
 5. **`response_format: {"type":"json_object"}`** — the deferred half of R5 (touches the
    provider layer; reduces the fallback cascade on free models).
-6. **R8 GC routine** — purge the ~20 orphan "Confidente Sensewright" duplicates in save
-   `1488584711` (metadata now stores the canonical id; the old duplicates remain).
+6. **R8 GC routine — needs the game, not sidecar-only.** The ~20 orphan "Confidente
+   Sensewright" `SimInfo`s live in the TS4 `.save`; only the canonical id is in the sidecar
+   `metadata`. Purging them requires a Mod-side routine run in-game (Stage 3).
 
 ### C. Deferred / risky (documented, revisit carefully)
 
@@ -1497,6 +1500,26 @@ detailed in [`spike-strategy.md`](spike-strategy.md) §6.
 10. **Web Studio (P4)** — real `spoiler_shield`, Sim export/import (FC2), cost dashboard
     (FC3), `director_mode` selector.
 11. **FC5 compatibility layer** (MCCC/Whims) — backlog.
+12. **FC1 Onboarding Wizard (2.6)** — still the single notification; the 3-option dialog
+    (Quick / Web / Play) is scheduled as Stage 4 (first thing a new user sees).
+
+## Recommended execution order (2026-10-05)
+
+Canonical order, revalidated against all docs. Principle: resolve what is unproven in the game
+first (almost every severe blocker came from wrong EA/S4CL assumptions, not the sidecar); run
+everything that does not need the game in parallel.
+
+| Stage | Scope | Needs game | Notes |
+|---|---|---|---|
+| **0** | Docs sync (this revision) | No | Status summary, open items, probe results, single roadmap. |
+| **1** | Phase-2 spikes in **one batched session**: `relationship_bits` → `mood_effect` → `lifecycle` → `diary_object` → `trait_levers`; then move findings into `engine_facade.py` (balloon signature, tooltip via `obj.tooltip_text`, relationship bits) | Yes | `relationship_bits` first: blocks `sim.social` tier, `mem.relationship.review`, sentiments. |
+| **2** (parallel) | Sidecar: **R4 token packing** (+ parameterized 33-purpose token test) → `response_format: json_object` → Web Studio P4 (`spoiler_shield`, `director_mode` selector, FC2 export/import, FC3 cost dashboard) | No | R4 first: highest quality/cost return (BUG-10 hints overflow the 700-token tier). Also automate non-game M8 scenarios (no key, network timeout, long session). |
+| **3** | **Playtest #5 consolidated**: object interactions (Mirror/Mailbox/Diary), full God loop + BUG-14, M8 game scenarios (zone transition, *Save As*, *Alt+F4*, invisible autoboot), R8 confidant GC | Yes | One session for both E2E flows and M8. |
+| **4** | FC1 Onboarding Wizard, close-out of `project-status.md` / README | Partly | |
+| **5** | MCP layer ([`mcp.md`](mcp.md)); adds the `RULE_AUTOMATION` lease (PC-04) | Yes | Only after Stages 1–3; `outcomes[]` closed loop already exists. |
+
+**Defer / cut:** R2 SSE transport (only if Playtest #5 shows intent-pull latency; shutdown-hang
+risk), physical Autobiography book, Tombstone epitaph, FC5, sleep balloons (best-effort).
 
 ### Open "coded blind" surfaces (→ new spikes)
 

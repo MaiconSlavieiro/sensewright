@@ -9,9 +9,20 @@ from ..schemas import sanitize_payload
 from ..services import (
     handle_aspiration, handle_consolidate, handle_diary_get, handle_evolve,
     handle_profile, handle_seats_get, handle_seats_post,
+    handle_sim_export, handle_sim_import,
 )
 
 router = APIRouter(prefix="/v1", tags=["memory"])
+
+
+@router.post("/sim/export")
+def sim_export(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+    return handle_sim_export(sanitize_payload(payload))
+
+
+@router.post("/sim/import")
+def sim_import(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+    return handle_sim_import(sanitize_payload(payload))
 
 
 @router.post("/profile")

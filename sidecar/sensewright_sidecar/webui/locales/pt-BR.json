@@ -62,13 +62,20 @@
     "intensity": "Intensidade",
     "type": "Tipo",
     "trauma": "Trauma",
-    "belief": "Crença"
+    "belief": "Crença",
+    "import_sim": "Importar Sim",
+    "export_sim": "Exportar Sim"
   },
   "god": {
     "title": "Sala do Diretor",
     "spoiler_shield": "Escudo Anti-Spoiler (LIGADO = esconder beats)",
     "no_beats": "Nenhum arco ativo ou beats carregados.",
     "dials": "Controles do Diretor",
+    "director_mode": "Modo do Diretor",
+    "director_mode_label": "Modo Ativo",
+    "autonomy_mode_label": "Modo de Autonomia",
+    "apply_director_mode": "Aplicar Modo",
+    "powers": "Poderes Divinos",
     "preset": "Predefinição do Diretor",
     "preset_label": "Predefinição Ativa",
     "presets": {
@@ -144,6 +151,10 @@
     "limits": "Limites de Taxa",
     "pool": "Pool de Provedores",
     "tiers": "Tiers",
+    "cost_dashboard": "Painel de Custos (FC3)",
+    "total_tokens": "Total de Tokens (Sessão)",
+    "estimated_cost": "Custo Estimado",
+    "cost_hint": "* Estimativa baseada em taxas médias combinadas.",
     "test_connection": "Testar Conexão",
     "reload_translations": "Recarregar Traduções",
     "generate_package": "Gerar Pacote de Idioma",
@@ -175,6 +186,10 @@
     "arc_steer_failed": "Falha ao direcionar arco",
     "panic_activated": "Modo pânico ativado",
     "resumed": "Operação normal retomada",
-    "panic_failed": "Falha na ação de pânico"
+    "panic_failed": "Falha na ação de pânico",
+    "exported": "Sim exportado com sucesso",
+    "export_failed": "Falha ao exportar Sim",
+    "imported": "Sim importado com sucesso",
+    "import_failed": "Falha ao importar Sim"
   }
 }

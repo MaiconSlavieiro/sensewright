@@ -112,41 +112,39 @@ Full defect log: [`operations.md`](operations.md) + [`research/engine_api_notes.
 | `routing` | ✅ validated | `services.get_zone_situation_manager()` (not `get_situation_manager`) + `create_visit_situation(sim)` spawns townies with a `situation_id`. |
 | `relationship` | 🟡 partial | `friendship`/`romance` read fine, but **`bits` returned `[]`** even for a high-friendship pair; sentiments are not read at all. |
 
-## 6. Phase-2 spikes (proposed — pending implementation)
+## 6. Phase-2 spikes (implemented & run 2026-10-05)
 
-Remaining "coded blind" surfaces worth proving before building on top of them.
+Remaining "coded blind" surfaces proven in **one batched in-game session**
+(Stage 1 of the [execution order](operations.md#recommended-execution-order-2026-10-05)).
+Full results + ground-truth facts: [`research/engine_api_notes.md`](../research/engine_api_notes.md) §13.
 
-### 1. `relationship_bits` (Relationship bits + sentiments) — highest value
+### 1. `relationship_bits` (Relationship bits + sentiments) — ✅ VALIDATED
 - **Goal:** read a relationship's *bits* (romantic/friend/family) and its *sentiments*
-  correctly, and confirm which accessor works (`get_all_bits()`, `RelationshipTrack`,
-  the sentiment tracker, `CommonRelationshipUtils`).
-- **Why:** the current `relationship` probe returned `bits: []` for a pair with
-  `friendship=88.81`. `sim.social` relationship tier (rival/family), `mem.relationship.review`,
-  and sentiment feedback all depend on this.
-- **Output:** console + JSON log of every relationship bit and sentiment between the
-  active Sim and a target.
+  correctly, and confirm which accessor works.
+- **Result:** `relationship_tracker.get_all_bits(target_sim_id)` is correct; `bit.guid64`
+  == `CommonRelationshipBitId` int; `bit.__name__` is the tuning name. **Sentiments are
+  relationship bits** (`sentimentBit_…`/`shortTermBits_…` prefix, guid64 in the sentiment
+  enum space) — no separate sentiment-tracker call needed. Unblocks `sim.social` tier,
+  `mem.relationship.review`, sentiment feedback.
 
-### 2. `mood_effect` (does `set_mood` actually move the needle)
-- **Goal:** apply `buff_mood_happy`, then read the Sim's current mood and confirm it
-  changed to happy.
-- **Why:** we proved the buff *applies* without error, but not that the mood *changes*.
-  This is the same "applies without effect" class as the `mood_type` bug just fixed.
-- **Output:** before/after mood value + a pass/fail.
+### 2. `mood_effect` (does `set_mood` actually move the needle) — 🟡 CONFIRMED APPLY, LAZY MOOD
+- **Goal:** apply `buff_mood_happy`, then read the current mood and confirm it changed.
+- **Result:** the buff applies (`mood_type=14640`, `mood_weight=3` present in `Buffs`), but
+  `get_mood()` does **not** change synchronously — the mood statistic updates lazily (next
+  tick). `set_mood` is functional (mood flips a tick after apply); needs a visual confirm.
 
-### 3. `lifecycle` (death / marriage / birth events)
-- **Goal:** trigger (or observe) `S4CLSimDiedEvent`, `S4CLSimPregnancyEndedEvent`,
-  `S4CLSimRelationshipBitAddedEvent` and confirm they fire with usable data
-  (`death_type`, `sim_info_a/b`, `relationship_bit`).
-- **Why:** `lifecycle_hooks.py` is wired but never exercised in-game; `mem.legacy`
-  (P28) and `sim.lifestory` chapters depend on it.
-- **Output:** JSON log of each event's payload fields.
+### 3. `lifecycle` (death / marriage / birth events) — ✅ VALIDATED
+- **Goal:** confirm the S4CL events are registered and expose usable data.
+- **Result:** all 3 listeners registered; payload fields confirmed in-game:
+  `death_type`/`died_off_lot`/`sim_info`, `sim_info_a/b`/`relationship_bit`/`relationship_bit_id`.
 
-### 4. `trait_levers` (traits + relationship-bit application) — secondary
-- **Goal:** apply/remove a trait and a relationship bit via `native_hooks`
-  (`set_trait`/`remove_trait`/`add_relationship_bit`) and confirm they stick.
-- **Why:** `evo.trait` (P31) and relationship feedback are coded blind.
+### 4. `trait_levers` (traits + relationship-bit application) — ✅ VALIDATED
+- **Goal:** confirm `set_trait`/`remove_trait`/`add_relationship_bit` stick.
+- **Result:** all levers work (`has_after_add=true`, `remove_ok=true`). Use
+  `CommonTraitUtils.get_trait_ids` (not `trait_tracker.traits`) for trait reads.
 
-### 5. `diary_object` (custom diary placement) — secondary
-- **Goal:** confirm the custom `sw_diary_object` tuning is buildable/spawnable on the
-  lot (the smoke test reports `object:diary found=0`).
-- **Why:** the Diary "Ler/Snoop" P2 hook currently has no target object.
+### 5. `diary_object` (custom diary placement) — 🔴 NOT LOADING
+- **Goal:** confirm the custom `sw_diary_object` tuning is buildable/spawnable.
+- **Result:** the object definition does **not** load (`Types.OBJECT` returns None) — a bare
+  `GameObject` with only `_super_affordances` is not spawnable. Diary "Ler/Snoop" still
+  attaches to base-game diaries by class name, so likely moot; decide fix-vs-drop.

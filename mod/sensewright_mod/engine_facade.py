@@ -388,14 +388,17 @@ def relationship_edges(sim_info):
                 romance = CommonRelationshipUtils.get_romance_level(sim_info, target_info)
             except Exception:
                 friendship, romance = 0.0, 0.0
-            # Bits
+            # Bits (correct accessor: the tracker's get_all_bits, not the
+            # Relationship object — validated in-game 2026-10-05).
             bits = []
             try:
-                all_bits = _safe_call(getattr(rel, 'get_all_bits', None))
-                if all_bits:
-                    for bit in all_bits:
-                        bit_name = _safe_getattr(bit, '__name__', str(bit))
-                        bits.append(str(bit_name))
+                tracker = _safe_getattr(sim_info, 'relationship_tracker', None)
+                if tracker is not None:
+                    all_bits = _safe_call(getattr(tracker, 'get_all_bits', None), target_id)
+                    if all_bits:
+                        for bit in all_bits:
+                            bit_name = _safe_getattr(bit, '__name__', str(bit))
+                            bits.append(str(bit_name))
             except Exception:
                 pass
             edges.append({
@@ -486,6 +489,140 @@ def buff_roundtrip(sim, buff_type):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Relationship bits & moods (relationship_bits / mood_effect probes)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def relationship_bits(sim_info, target_sim_info):
+    """Return relationship bits between two Sims via the engine's own accessor.
+
+    ``SimInfo.relationship_tracker.get_all_bits(target_sim_id)`` is the correct
+    edge reader (it delegates to ``relationship_service.get_all_bits``). The old
+    ``relationship`` probe called ``Relationship.get_all_bits()`` (no args) on
+    the vanilla Relationship object — that method lives on the *tracker*, so the
+    old probe silently returned ``[]``. Each bit is returned with its ``guid64``
+    (a ``CommonRelationshipBitId`` int), plus any ``__name__``/``display_name``.
+    """
+    result = {'target_sim_id': 0, 'bits': [], 'error': ''}
+    if sim_info is None or target_sim_info is None:
+        result['error'] = 'sim_info/target missing'
+        return result
+    try:
+        tracker = _safe_getattr(sim_info, 'relationship_tracker', None)
+        target_id = _coerce_int(_safe_getattr(target_sim_info, 'id', 0), 0)
+        result['target_sim_id'] = target_id
+        if tracker is None or not target_id:
+            result['error'] = 'no relationship tracker or target id'
+            return result
+        bits = _safe_call(getattr(tracker, 'get_all_bits', None), target_id)
+        if bits is None:
+            result['error'] = 'get_all_bits returned None'
+            return result
+        for bit in bits:
+            entry = {
+                'guid64': _coerce_int(_safe_getattr(bit, 'guid64', 0), 0),
+                'name': str(_safe_getattr(bit, '__name__', '') or ''),
+                'display_name': str(_safe_getattr(bit, 'display_name', '') or ''),
+            }
+            result['bits'].append(entry)
+    except Exception as e:
+        log_exception('engine_facade.relationship_bits: {}'.format(e))
+        result['error'] = str(e)
+    return result
+
+
+def current_mood(sim_info):
+    """Return the Sim's current mood as {guid64, name, intensity}, or {}.
+
+    ``SimInfo.get_mood()`` returns a Mood object whose ``.guid64`` is the vanilla
+    mood instance id (HAPPY=14640, SAD=14643, …); ``get_mood_intensity()`` is the
+    accompanying strength. Because ``SimInfo.get_mood()`` can be stale (it is the
+    save-path accessor), also read the instanced ``Sim.get_mood()`` (the live
+    value) under ``sim_*`` keys when a Sim instance exists. Used by the
+    ``mood_effect`` probe to prove a buff's ``mood_type`` actually moves the needle.
+    """
+    if sim_info is None:
+        return {}
+    result = {}
+    try:
+        mood = _safe_call(getattr(sim_info, 'get_mood', None))
+        if mood is not None:
+            result['guid64'] = _coerce_int(_safe_getattr(mood, 'guid64', 0), 0)
+            result['name'] = str(_safe_getattr(mood, '__name__', '') or '')
+    except Exception as e:
+        log_exception('engine_facade.current_mood (SimInfo): {}'.format(e))
+    try:
+        result['intensity'] = float(_safe_call(getattr(sim_info, 'get_mood_intensity', None)))
+    except (TypeError, ValueError):
+        pass
+    # Live mood from the instanced Sim (the authoritative, freshly-recomputed one).
+    try:
+        sim = _safe_call(CommonSimUtils.get_sim_instance, sim_info)
+        if sim is not None:
+            live_mood = _safe_call(getattr(sim, 'get_mood', None))
+            if live_mood is not None:
+                result['sim_guid64'] = _coerce_int(_safe_getattr(live_mood, 'guid64', 0), 0)
+                result['sim_name'] = str(_safe_getattr(live_mood, '__name__', '') or '')
+            try:
+                result['sim_intensity'] = float(_safe_call(getattr(sim, 'get_mood_intensity', None)))
+            except (TypeError, ValueError):
+                pass
+    except Exception as e:
+        log_exception('engine_facade.current_mood (Sim): {}'.format(e))
+    return result
+
+
+def sim_mood_buffs(sim_info):
+    """Return the Sim's active mood-affecting buffs as {buff_class, mood_type, mood_weight}.
+
+    Used by the ``mood_effect`` probe to show what a new mood buff competes with
+    (the prevailing mood is the summed highest ``mood_weight``).
+    """
+    buffs = []
+    if sim_info is None:
+        return buffs
+    try:
+        buff_handler = _safe_getattr(sim_info, 'Buffs', None)
+        if buff_handler is None:
+            return buffs
+        for buff in buff_handler:
+            mood_type = _safe_getattr(buff, 'mood_type', None)
+            if mood_type is None:
+                continue
+            buffs.append({
+                'buff_class': str(_safe_getattr(buff, '__class__', '') or ''),
+                'mood_type': _coerce_int(_safe_getattr(mood_type, 'guid64', 0), 0),
+                'mood_weight': _coerce_int(_safe_getattr(buff, 'mood_weight', 0), 0),
+            })
+    except Exception as e:
+        log_exception('engine_facade.sim_mood_buffs: {}'.format(e))
+    return buffs
+
+
+def sim_trait_ids(sim_info):
+    """Return a list of trait guids (CommonTraitId ints) the Sim has.
+
+    Uses S4CL's canonical ``CommonTraitUtils.get_trait_ids`` (which reads
+    ``sim_info.get_traits()`` and returns each ``Trait.guid64``). Reading
+    ``sim_info.trait_tracker.traits`` directly produced a false negative: that
+    legacy tracker can expose a different id space than ``CommonTraitId``, so a
+    freshly-added trait showed up in ``has_trait`` but not in the raw list.
+    """
+    trait_ids = []
+    if sim_info is None:
+        return trait_ids
+    try:
+        from sims4communitylib.utils.sims.common_trait_utils import CommonTraitUtils
+        for tid in CommonTraitUtils.get_trait_ids(sim_info):
+            try:
+                trait_ids.append(int(tid))
+            except (TypeError, ValueError):
+                pass
+    except Exception as e:
+        log_exception('engine_facade.sim_trait_ids: {}'.format(e))
+    return trait_ids
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Object / misc
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -571,3 +708,38 @@ def get_townie_not_on_lot(exclude_sim_info=None):
     except Exception as e:
         log_exception('engine_facade.get_townie_not_on_lot: {}'.format(e))
     return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Object spawning (diary_object probe)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def spawn_object_near_sim(object_def_id, sim_info):
+    """Spawn a tuned object on the lot at the Sim's location.
+
+    Returns the created ``GameObject`` (or None). Used by the ``diary_object``
+    probe to prove a custom object definition is buildable; the caller is
+    responsible for destroying the result to avoid save pollution (PC-07).
+    """
+    if not object_def_id or sim_info is None:
+        return None
+    try:
+        from sims4communitylib.utils.objects.common_object_spawn_utils import CommonObjectSpawnUtils
+        from sims4communitylib.utils.sims.common_sim_location_utils import CommonSimLocationUtils
+        location = CommonSimLocationUtils.get_location(sim_info)
+        return CommonObjectSpawnUtils.spawn_object_on_lot(object_def_id, location)
+    except Exception as e:
+        log_exception('engine_facade.spawn_object_near_sim: {}'.format(e))
+        return None
+
+
+def destroy_object(game_object):
+    """Destroy a GameObject immediately (safe no-op on None)."""
+    if game_object is None:
+        return False
+    try:
+        from sims4communitylib.utils.objects.common_object_spawn_utils import CommonObjectSpawnUtils
+        return bool(CommonObjectSpawnUtils.destroy_object(game_object))
+    except Exception as e:
+        log_exception('engine_facade.destroy_object: {}'.format(e))
+        return False

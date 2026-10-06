@@ -126,6 +126,7 @@ class OpenAICompatProvider(Provider):
             "messages": messages,
             "max_tokens": int(max_tokens),
             "temperature": float(temperature),
+            "response_format": {"type": "json_object"},
         }
         # Sensewright always wants one JSON object back. Free reasoning models
         # (e.g. OpenRouter's nemotron) otherwise spend the entire completion
@@ -163,6 +164,7 @@ class GeminiProvider(Provider):
             "generationConfig": {
                 "maxOutputTokens": int(max_tokens),
                 "temperature": float(temperature),
+                "responseMimeType": "application/json",
             },
         }
         data = self._http_post_json(url, payload, headers, timeout)

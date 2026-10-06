@@ -285,6 +285,16 @@ class LLMScheduler:
             # Settle the dispatch estimate against the provider-reported usage.
             self._budgeter.refund(int(sim_id), est)
             self._budgeter.spend(int(sim_id), response.total_tokens or est)
+        
+        # Track global token usage for the FC3 Cost Dashboard
+        if response.total_tokens:
+            try:
+                from ..state import get_state
+                st = get_state()
+                st.incr("total_tokens", response.total_tokens)
+                st.incr("provider_" + provider_name + "_tokens", response.total_tokens)
+            except Exception:
+                pass
         logger.info(
             "llm.route purpose=%s provider=%s model=%s latency=%.2fs tokens=%s",
             purpose_id, provider_name, model, latency, response.total_tokens,

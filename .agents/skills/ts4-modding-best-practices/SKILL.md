@@ -103,3 +103,13 @@ To ensure long-term maintainability and readability, strictly follow these gener
     *   Write clear docstrings for all non-trivial functions explaining the *Why*, not just the *What*.
     *   Document expected payloads and side effects, especially in cross-process boundaries (HTTP and Queues).
 *   **Stateless Services:** Treat the Sidecar as a stateless processor where possible. All persistent data should live in the SQLite database (Shadow DB). This allows the Sidecar to be restarted instantly without losing data or risking out-of-sync states with the game.
+
+## 8. Architectural Hardening & Project State Assessment
+
+When acting as an agent working on this mod, you must never suffer from "Feature Blindness" (focusing only on UI or gameplay mechanics while ignoring the underlying infrastructure). 
+
+*   **Infrastructure is a Feature:** Communication protocols (like SSE vs Polling), threading concurrency, lock contention, and lifecycle IPC state are not "technical debt" to be deferred—they are the foundational requirements that keep the mod from crashing the TS4 engine.
+*   **Proactive Document Review:** When asked "what is pending?" or "what is the next step?", you MUST thoroughly review `docs/operations.md` and `docs/project-status.md`. 
+    *   Explicitly search for sections like `Architectural Review & Evolution Plan` or tables labeled `Hardening`.
+    *   Do not filter out infrastructural tasks (like `P1`, `P2`, IPC improvements, or protocol unifications). Treat them with the same or higher priority as player-facing features (like `FC2` or Playtests).
+*   **Acknowledge the Engine's Fragility:** Because TS4 is single-threaded and unforgiving, resolving communication latency or thread race conditions (e.g., TS4 shutdown hangs) must precede large-scale gameplay testing. Always present these infra tasks to the user as critical blockers.

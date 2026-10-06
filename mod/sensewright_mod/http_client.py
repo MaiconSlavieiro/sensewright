@@ -13,6 +13,7 @@ import subprocess
 import sys
 import os
 import traceback
+import socket
 
 from sensewright_mod.config import (
     get_sidecar_api_url, get_sidecar_health_url, get_request_timeout,
@@ -383,21 +384,83 @@ def _maybe_intent_pull():
     _next_intent_pull_at[0] = time.monotonic() + _intent_pull_backoff[0]
 
 
-def _intent_pull_loop():
-    """Dedicated thread for the idle intent pull (4.3).
+#: Consecutive SSE connection failures before degrading to the polling fallback.
+_SSE_MAX_FAILS = 2
+#: While in polling fallback, retry the SSE stream after this many seconds.
+_SSE_RETRY_AFTER_S = 60.0
 
-    Kept off the outbound worker so a slow ``GET /autonomy/intents`` (5 s
-    timeout) can never delay lifecycle/chat/event dispatch.
+
+def _sse_stream_loop():
+    """Dedicated thread for Server-Sent Events (SSE) inbound transport (P1).
+
+    Replaces the old idle intent pull with a low-latency persistent connection
+    to ``GET /v1/autonomy/stream``. The sidecar emits a keepalive comment every
+    ~5 s, so the 15 s socket timeout only fires if the sidecar hangs. After
+    ``_SSE_MAX_FAILS`` consecutive connection failures it degrades to the legacy
+    ``_maybe_intent_pull`` polling, and re-tries SSE every ``_SSE_RETRY_AFTER_S``
+    seconds so a transient sidecar restart does not pin the session to polling.
     """
-    worker_log_info('Intent-pull thread started')
+    worker_log_info('SSE intent stream thread started')
+    consecutive_sse_fails = 0
+    fallback_until = 0.0
+
     while _worker_running and not _shutdown_event.is_set():
+        if not _session_started[0]:
+            _shutdown_event.wait(1.0)
+            continue
+
+        if consecutive_sse_fails >= _SSE_MAX_FAILS:
+            if fallback_until == 0.0:
+                fallback_until = time.monotonic() + _SSE_RETRY_AFTER_S
+                worker_log_info('SSE unavailable; falling back to intent polling')
+            if time.monotonic() < fallback_until:
+                try:
+                    _maybe_intent_pull()
+                except Exception as e:
+                    worker_log_exception('Intent pull error (fallback): {}'.format(e))
+                _shutdown_event.wait(0.5)
+                continue
+            # Retry window reached: give SSE one more attempt.
+            consecutive_sse_fails = _SSE_MAX_FAILS - 1
+            fallback_until = 0.0
+
+        # Try SSE Connection
         try:
-            _maybe_intent_pull()
+            url = get_sidecar_api_url('/autonomy/stream')
+            req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
+            # 15 s timeout = 3x the sidecar keepalive interval.
+            with urllib.request.urlopen(req, timeout=15.0) as response:
+                consecutive_sse_fails = 0
+                fallback_until = 0.0
+                for line in response:
+                    if _shutdown_event.is_set() or not _worker_running:
+                        break
+                    line = line.decode('utf-8').strip()
+                    if not line:
+                        continue
+                    if line.startswith('data: '):
+                        data_str = line[6:]
+                        try:
+                            payload = json.loads(data_str)
+                            intents = payload.get('intents') or []
+                            if intents:
+                                _inbound_intents_queue.put({
+                                    'type': 'response',
+                                    'trace_id': generate_trace_id(),
+                                    'endpoint': '/autonomy/stream',
+                                    'response': payload,
+                                })
+                        except Exception as e:
+                            worker_log_exception('SSE JSON parse error: {}'.format(e))
+                    elif line == ': keepalive':
+                        pass
+        except socket.timeout:
+            # Expected if sidecar hangs, we just loop and reconnect
+            _shutdown_event.wait(1.0)
         except Exception as e:
-            worker_log_exception('Intent pull error: {}'.format(e))
-        # Cadence is governed by _next_intent_pull_at; sleep in short slices so
-        # shutdown stays responsive.
-        _shutdown_event.wait(0.5)
+            worker_log_exception('SSE stream connection dropped: {}'.format(e))
+            consecutive_sse_fails += 1
+            _shutdown_event.wait(2.0)
 
 
 def _worker_loop():
@@ -423,7 +486,7 @@ def _worker_loop():
                 continue
 
             # Both lanes idle: block until a producer wakes us (no busy polling).
-            # Intent polling runs on its own thread (see _intent_pull_loop).
+            # Intent polling runs on its own thread (see _sse_stream_loop).
             _wakeup.wait(0.5)
             _wakeup.clear()
 
@@ -481,7 +544,7 @@ def start_worker():
     _worker_thread = threading.Thread(target=_worker_loop, name='SensewrightWorker', daemon=True)
     _worker_thread.start()
     _intent_pull_thread = threading.Thread(
-        target=_intent_pull_loop, name='SensewrightIntentPull', daemon=True)
+        target=_sse_stream_loop, name='SensewrightIntentPull', daemon=True)
     _intent_pull_thread.start()
 
 
