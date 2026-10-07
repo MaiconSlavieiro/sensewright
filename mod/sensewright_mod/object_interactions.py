@@ -88,6 +88,9 @@ def _log_object_tuning_status():
             ('interaction.diary_read', 'interaction_diary_read'),
             ('interaction.diary_snoop', 'interaction_diary_snoop'),
             ('interaction.mailbox', 'interaction_mailbox'),
+            ('interaction.dev_god_toggle_debug', 'interaction_dev_god_toggle_debug'),
+            ('interaction.dev_god_rewrite', 'interaction_dev_god_rewrite_background'),
+            ('interaction.dev_god_dump', 'interaction_dev_god_dump_zeitgeist'),
         ):
             tuning_id = resolve_owned_id(key)
             loaded = False
@@ -155,21 +158,36 @@ class SensewrightMirrorReflectInteraction(_SensewrightObjectInteraction):
             from sensewright_mod.http_client import post_async, generate_trace_id
             from sensewright_mod.state_collector import get_current_game_state
             from sensewright_mod.i18n import get_current_language, t
+            from sensewright_mod.engine_facade import show_balloon
 
             sim_info = _resolve_sim_info(interaction_sim)
+            sim_id = _safe_getattr(sim_info, 'id', 0)
+            first_name = _safe_getattr(sim_info, 'first_name', '')
             state = get_current_game_state()
-            worker_log_info('object_interactions: mirror reflect clicked sim={}'.format(
-                _safe_getattr(sim_info, 'id', 0)))
+            worker_log_info('object_interactions: mirror reflect clicked sim={}'.format(sim_id))
+
+            def _callback(response, trace_id=None):
+                try:
+                    reflection = ''
+                    if isinstance(response, dict):
+                        reflection = response.get('reflection', '') or ''
+                    if not reflection:
+                        reflection = t('notify.mirror.reflect_body')
+                    title = first_name if first_name else t('notify.mirror.reflect_title')
+                    _show_notification(title, reflection)
+                    show_balloon(interaction_sim, reflection, balloon_type='thought')
+                except Exception as ex:
+                    log_exception('SensewrightMirrorReflectInteraction callback failed: {}'.format(ex))
+
             post_async('/evolve', {
                 'trace_id': generate_trace_id(),
-                'sim_id': _safe_getattr(sim_info, 'id', 0),
+                'sim_id': sim_id,
                 'trigger': 'mirror',
                 'player_id': 'player_1',
                 'save_id': state['save_id'],
                 'world_sim_tick': state['world_sim_tick'],
                 'lang': get_current_language(),
-            })
-            _show_notification(t('notify.mirror.reflect_title'), t('notify.mirror.reflect_body'))
+            }, callback=_callback)
         except Exception as e:
             log_exception('SensewrightMirrorReflectInteraction failed: {}'.format(e))
         return CommonExecutionResult.TRUE
@@ -248,14 +266,30 @@ class SensewrightMailboxInteraction(_SensewrightObjectInteraction):
             def _callback(response, trace_id=None):
                 data = response if isinstance(response, dict) else {}
                 lines = []
-                for chronicle in (data.get('chronicles') or [])[-3:]:
+                seen = set()
+                # Deduplicate chronicles preserving most recent unique entries
+                for chronicle in reversed(data.get('chronicles') or []):
                     text = chronicle.get('text') if isinstance(chronicle, dict) else str(chronicle)
-                    if text:
-                        lines.append(text)
-                for rumor in (data.get('rumors') or [])[:3]:
+                    text = text.strip() if text else ''
+                    if text and text not in seen:
+                        seen.add(text)
+                        lines.insert(0, text)
+                        if len(lines) >= 3:
+                            break
+
+                seen_rumors = set()
+                rumor_lines = []
+                for rumor in (data.get('rumors') or []):
                     text = rumor.get('text') if isinstance(rumor, dict) else str(rumor)
-                    if text:
-                        lines.append('â€¢ {}'.format(text))
+                    text = text.strip() if text else ''
+                    if text and text not in seen_rumors and text not in seen:
+                        seen_rumors.add(text)
+                        rumor_lines.append(u'• {}'.format(text))
+                        if len(rumor_lines) >= 3:
+                            break
+                if rumor_lines:
+                    lines.extend(rumor_lines)
+
                 body = '\n\n'.join(lines) if lines else t('notify.mailbox.empty')
                 _show_notification(t('notify.mailbox.title'), body)
 
@@ -320,8 +354,14 @@ class _DiaryInteractionHandler(CommonScriptObjectInteractionHandler):
 class _MailboxInteractionHandler(CommonScriptObjectInteractionHandler):
     @property
     def interactions_to_add(self):
-        tuning_id = resolve_owned_id('interaction_mailbox')
-        return (tuning_id,) if tuning_id else ()
+        return tuple(
+            tuning_id for tuning_id in (
+                resolve_owned_id('interaction_mailbox'),
+                resolve_owned_id('interaction_dev_god_toggle_debug'),
+                resolve_owned_id('interaction_dev_god_rewrite_background'),
+                resolve_owned_id('interaction_dev_god_dump_zeitgeist'),
+            ) if tuning_id
+        )
 
     def should_add(self, script_object, *args, **kwargs):
         _log_object_tuning_status()

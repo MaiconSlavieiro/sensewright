@@ -111,7 +111,9 @@ def _resolve_interaction_ids():
         interaction_id for interaction_id in (
             resolve_owned_id('interaction_chat'),
             resolve_owned_id('interaction_provoke'),
-            resolve_owned_id('interaction_panel'),
+            resolve_owned_id('interaction_dev_sim_toggle_debug'),
+            resolve_owned_id('interaction_dev_sim_rewrite_profile'),
+            resolve_owned_id('interaction_dev_sim_dump_profile'),
         ) if interaction_id
     )
     if not _diagnostic_logged:
@@ -135,7 +137,9 @@ def _log_tuning_load_status():
     checks = [
         ('interaction.chat', getattr(Types, 'INTERACTION', None), resolve_owned_id('interaction_chat')),
         ('interaction.provoke', getattr(Types, 'INTERACTION', None), resolve_owned_id('interaction_provoke')),
-        ('interaction.panel', getattr(Types, 'INTERACTION', None), resolve_owned_id('interaction_panel')),
+        ('interaction.dev_toggle', getattr(Types, 'INTERACTION', None), resolve_owned_id('interaction_dev_sim_toggle_debug')),
+        ('interaction.dev_rewrite', getattr(Types, 'INTERACTION', None), resolve_owned_id('interaction_dev_sim_rewrite_profile')),
+        ('interaction.dev_dump', getattr(Types, 'INTERACTION', None), resolve_owned_id('interaction_dev_sim_dump_profile')),
         ('buff.epiphany', getattr(Types, 'BUFF', None), resolve_owned_id('buff_dream_epiphany')),
         ('trait.confidant', getattr(Types, 'TRAIT', None), resolve_owned_id('trait_hidden_no_walkby')),
     ]

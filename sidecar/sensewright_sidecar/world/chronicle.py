@@ -12,6 +12,11 @@ def get_chronicles(store: SqliteStore, save_id: int) -> List[Any]:
 
 def append_chronicle(store: SqliteStore, save_id: int, chronicle: str, tick: int) -> None:
     chronicles = get_chronicles(store, save_id)
+    if chronicles:
+        last = chronicles[-1]
+        last_text = (last.get("text") if isinstance(last, dict) else str(last)).strip()
+        if last_text == str(chronicle).strip():
+            return
     chronicles.append({"text": chronicle, "tick": int(tick)})
     if len(chronicles) > 50:
         chronicles = chronicles[-50:]

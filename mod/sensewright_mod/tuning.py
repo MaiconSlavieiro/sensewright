@@ -31,12 +31,18 @@ _OWNED_NAMES = {
     "buff_missing_player": "buff_missing_player",
     "interaction_chat": "sw_chat_interaction",
     "interaction_provoke": "sw_provoke_interaction",
-    "interaction_panel": "sw_panel_interaction",
     # Object-target interactions (mirror / diary / snoop / mailbox) — A8 / 3.2-3.4 / 3.9.
     "interaction_mirror_reflect": "sw_mirror_reflect_interaction",
     "interaction_diary_read": "sw_diary_read_interaction",
     "interaction_diary_snoop": "sw_diary_snoop_interaction",
     "interaction_mailbox": "sw_mailbox_interaction",
+    # Dev interactions (activated via sw.master)
+    "interaction_dev_sim_toggle_debug": "sw_dev_sim_toggle_debug_interaction",
+    "interaction_dev_sim_rewrite_profile": "sw_dev_sim_rewrite_profile_interaction",
+    "interaction_dev_sim_dump_profile": "sw_dev_sim_dump_profile_interaction",
+    "interaction_dev_god_toggle_debug": "sw_dev_god_toggle_debug_interaction",
+    "interaction_dev_god_rewrite_background": "sw_dev_god_rewrite_background_interaction",
+    "interaction_dev_god_dump_zeitgeist": "sw_dev_god_dump_zeitgeist_interaction",
     # Catalyst VisitSituation (2.4 / 3.3).
     "situation_visit": "sw_visit_situation",
     # Custom diary object definition (3.4).

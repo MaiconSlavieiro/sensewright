@@ -443,9 +443,24 @@ def _maybe_end_of_day(
         return 0
 
     scheduled = 0
+    store = _store(state)
+    recent_rumors = []
+    if store:
+        try:
+            from .world.rumors import get_rumors
+            recent_rumors = [r.get("text") for r in get_rumors(store, save_id) if r.get("text")][-3:]
+        except Exception:
+            pass
+
+    chronicle_ctx = {
+        "save_id": save_id,
+        "world_sim_tick": tick,
+        "day": day,
+        "neighborhood_rumors": recent_rumors,
+    }
     state.scheduler.submit_bg(
         "world.household.chronicle",
-        {"save_id": save_id, "world_sim_tick": tick, "day": day},
+        chronicle_ctx,
         lang, trace_id=trace_id,
         dedup_key="{}:{}:chronicle".format(save_id, day),
         callback=state.guard_callback(

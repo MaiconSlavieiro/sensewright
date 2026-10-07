@@ -32,7 +32,7 @@
       "god.cast": "{\"cast\": [{\"sim_id\": 0, \"name\": \"Vizinho Misterioso\", \"role\": \"catalyst\", \"objective\": \"Entregar um convite enigmático.\"}]}",
       "god.scene": "{\"scene_draft\": \"Um vizinho aparece na porta com um envelope lacrado.\", \"scene_subtext\": \"Há algo ensaiado nesse visitante.\"}",
       "god.react": "{\"outcome\": \"accept\", \"pivot\": \"O convite abre uma porta que o Sim não consegue fechar.\", \"next_beat\": {\"title\": \"O encontro\", \"catalyst_role\": \"vizinho misterioso\", \"scene_hint\": \"espera no parque\"}}",
-      "world.household.chronicle": "{\"chronicle\": \"A casa seguiu sua rotina, mas uma tensão silenciosa pairou o dia todo.\"}",
+      "world.household.chronicle": "{\"chronicle\": \"Movimentação incomum foi vista pelas ruas da vizinhança hoje, com moradores trocando novidades enquanto o sol se punha.\"}",
       "world.gossip": "{\"rumor\": \"Dizem que alguém da rua foi visto discutindo com um estranho.\", \"tags\": [\"gossip\", \"conflict\"]}",
       "mem.legacy": "{\"legacy\": \"O dia em que chegou mudou tudo, embora ninguém soubesse ainda.\"}",
       "evo.reflect": "{\"reflection\": \"Estou aprendendo a deixar as pessoas entrarem, aos poucos.\", \"demeanor_drift\": \"mais aberto\", \"preference_change\": null, \"trait_proposal\": null}",
@@ -127,7 +127,7 @@
       "system": "Você está escrevendo a história de um morador recorrente. Retorne JSON com uma única chave: background (texto).\n{json_only}\n{strict_language_anchor}"
     },
     "world.household.chronicle": {
-      "system": "Você é o cronista da vizinhança. Escreva a entrada de hoje. Retorne JSON com uma única chave: chronicle (texto).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+      "system": "Você é o cronista da vizinhança. Escreva uma crônica curta sobre os acontecimentos do dia na vizinhança e entre os moradores (evite focar exclusivamente em uma única casa). Retorne JSON com uma única chave: chronicle (texto).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
     },
     "world.gossip": {
       "system": "Você é o moinho de fofocas de uma vizinhança de The Sims 4. Transforme o evento em um boato. Retorne JSON com as chaves: rumor (texto) e tags (lista).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
@@ -294,7 +294,7 @@
     "god.narration": "E assim o dia se desenrola...",
     "god.background": "Um lugar familiar e cheio de vida.",
     "world.npc.backstory": "Um recém-chegado com uma história ainda não contada.",
-    "world.household.chronicle": "A família seguiu seu dia de sempre.",
+    "world.household.chronicle": "A vizinhança teve um dia tranquilo, com moradores seguindo suas rotinas pelas calçadas.",
     "world.gossip": "Dizem pela cidade que algo interessante aconteceu.",
     "world.aftermath": "A vizinhança volta lentamente ao normal.",
     "mem.consolidate": "Conversamos e me senti compreendido.",

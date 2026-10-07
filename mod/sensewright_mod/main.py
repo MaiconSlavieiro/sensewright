@@ -17,6 +17,7 @@ from sensewright_mod.native_hooks import get_or_create_player_confidant, set_pla
 from sensewright_mod.chat_ui import cmd_sw_chat, cmd_sw_chat_picker
 from sensewright_mod.panel_ui import cmd_sw_panel
 from sensewright_mod.pie_menu import register_pie_menu_interactions, cmd_pie_chat, cmd_pie_provoke, cmd_pie_panel
+from sensewright_mod.dev_commands import _sw_master_command  # Force registration
 # Importing the interactions module registers the S4CL pie menu handler as an
 # import side effect (must happen before household/sims load).
 from sensewright_mod import interactions as _interactions  # noqa: F401

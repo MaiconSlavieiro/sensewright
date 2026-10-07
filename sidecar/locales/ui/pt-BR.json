@@ -3,7 +3,12 @@
     "pie_menu.root": "Sensewright...",
     "pie_menu.chat_sms": "Mandar SMS...",
     "pie_menu.direct_scene": "Provocar Cena Aqui...",
-    "pie_menu.quick_menu": "Menu Rápido Sensewright",
+    "pie_menu.dev.sim": "[SW Dev: Sim]",
+    "pie_menu.dev.god": "[SW Dev: God Mod]",
+    "pie_menu.dev.sys": "[SW Dev: System]",
+    "pie_menu.dev.toggle": "Habilitar/Desabilitar Debug em Tempo Real",
+    "pie_menu.dev.dump": "Ver Estado e Histórico (Dump)",
+    "pie_menu.dev.rewrite": "Reescrever/Co-Criar Narrativa...",
     "pie_menu.mirror_reflect": "Refletir sobre a vida...",
     "buff.dream_epiphany.name": "Epifania Matinal",
     "buff.dream_epiphany.desc": "Um sonho vívido deixou uma ideia brilhante na sua cabeça.",
@@ -61,9 +66,6 @@
     "buff.mood_uncomfortable.name": "Incomodado",
     "buff.mood_confident.name": "Confiante",
     "buff.mood_energized.name": "Elétrico",
-    "buff.mood_embarrassed.name": "Envergonhado",
-    "buff.mood_playful.name": "Brincalhão",
-    "buff.mood_scared.name": "Assustado",
     "buff.mood_fine.desc": "Calmo e constante.",
     "buff.mood_happy.desc": "De bom humor de verdade.",
     "buff.mood_sad.desc": "Uma tristeza silenciosa pesa sobre ele.",
@@ -77,9 +79,12 @@
     "buff.mood_uncomfortable.desc": "Algo parece errado.",
     "buff.mood_confident.desc": "Capaz e seguro de si.",
     "buff.mood_energized.desc": "Fervilhando de energia.",
+    "buff.mood_playful.name": "Brincalhão",
+    "buff.mood_playful.desc": "Com vontade de brincar e se divertir.",
+    "buff.mood_embarrassed.name": "Envergonhado",
     "buff.mood_embarrassed.desc": "Morrendo de vergonha por dentro.",
-    "buff.mood_playful.desc": "Se sentindo bobo e pronto para brincar.",
-    "buff.mood_scared.desc": "Pulando com cada sombra."
+    "buff.mood_scared.name": "Assustado",
+    "buff.mood_scared.desc": "Uma apreensão difícil de sacudir."
   },
   "notify": {
     "recap": {
@@ -91,6 +96,7 @@
       "hint": "No jogo: digite sw.panel no console, ou clique com o botão direito em um Sim e abra o menu 'Sensewright...'."
     },
     "typing": "{sim_name} está digitando...",
+    "provoke_prompt": "Provocar uma cena interessante aqui.",
     "chat": {
       "respond": "Responder Agora"
     },
@@ -110,6 +116,10 @@
     "paused": {
       "title": "Sensewright pausado",
       "body": "Abra o Menu Rápido para retomar."
+    },
+    "resumed": {
+      "title": "Sensewright retomado",
+      "body": "A vida interior dos seus Sims continua."
     },
     "mirror": {
       "reflect_title": "Um Momento de Reflexão",
@@ -146,6 +156,8 @@
       "director_mode": "Modo do Diretor",
       "autonomy": "Autonomia",
       "web_studio": "Abrir Web Studio",
+      "panic": "Pausar Sensewright",
+      "resume": "Retomar Sensewright",
       "refresh": "Atualizar"
     },
     "summary": {

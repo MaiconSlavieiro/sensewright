@@ -32,7 +32,7 @@
       "god.cast": "{\"cast\": [{\"sim_id\": 0, \"name\": \"Mysterious Neighbor\", \"role\": \"catalyst\", \"objective\": \"Deliver a cryptic invitation.\"}]}",
       "god.scene": "{\"scene_draft\": \"A neighbor appears at the door with a sealed envelope.\", \"scene_subtext\": \"Something about this visitor feels rehearsed.\"}",
       "god.react": "{\"outcome\": \"accept\", \"pivot\": \"The invitation opens a door the Sim cannot close.\", \"next_beat\": {\"title\": \"The meeting\", \"catalyst_role\": \"mysterious neighbor\", \"scene_hint\": \"waits at the park\"}}",
-      "world.household.chronicle": "{\"chronicle\": \"The household kept to its routines, but a quiet tension lingered all day.\"}",
+      "world.household.chronicle": "{\"chronicle\": \"Unusual movement was seen across the neighborhood streets today, with residents trading news as the sun set.\"}",
       "world.gossip": "{\"rumor\": \"Word is that someone on the street was seen arguing with a stranger.\", \"tags\": [\"gossip\", \"conflict\"]}",
       "mem.legacy": "{\"legacy\": \"The day they arrived changed everything, though no one knew it yet.\"}",
       "evo.reflect": "{\"reflection\": \"I am learning to let people in, slowly.\", \"demeanor_drift\": \"more open\", \"preference_change\": null, \"trait_proposal\": null}",
@@ -127,7 +127,7 @@
       "system": "You are writing a backstory for a recurring townie. Return JSON with a single key: background (string).\n{json_only}\n{strict_language_anchor}"
     },
     "world.household.chronicle": {
-      "system": "You are the neighborhood chronicler. Write today's entry. Return JSON with a single key: chronicle (string).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
+      "system": "You are the neighborhood chronicler. Write a brief daily chronicle about the happenings in the neighborhood and among local residents (avoid focusing exclusively on a single household). Return JSON with a single key: chronicle (string).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
     },
     "world.gossip": {
       "system": "You are the rumor mill of a Sims 4 neighborhood. Turn the event into a juicy rumor. Return JSON with keys: rumor (string) and tags (array).\n{one_shot_block}\n{json_only}\n{strict_language_anchor}"
@@ -294,7 +294,7 @@
     "god.narration": "And so the day unfolds...",
     "god.background": "A familiar, lived-in place.",
     "world.npc.backstory": "A newcomer with an untold story.",
-    "world.household.chronicle": "The household went about its usual day.",
+    "world.household.chronicle": "The neighborhood had a peaceful day, with residents going about their business along the sidewalks.",
     "world.gossip": "Word around town is that something interesting happened.",
     "world.aftermath": "The neighborhood slowly returns to normal.",
     "mem.consolidate": "We talked and I felt understood.",

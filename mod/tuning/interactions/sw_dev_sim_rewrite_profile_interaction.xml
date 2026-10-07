@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<I c="SensewrightDevSimRewriteProfileInteraction" i="interaction" m="sensewright_mod.dev_interactions" n="sw_dev_sim_rewrite_profile_interaction" s="0">
+  <V t="disabled" n="_saveable" />
+  <T n="category">swtune:sw_pie_menu_category_dev_sim</T>
+  <V n="display_name" t="localized_string" p="STBL">stbl.pie_menu.dev.rewrite</V>
+  <T n="allow_autonomous">False</T>
+  <T n="allow_user_directed">True</T>
+  <E n="target_type">TARGET</E>
+</I>
