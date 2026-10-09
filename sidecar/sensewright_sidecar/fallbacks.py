@@ -54,7 +54,14 @@ def _fb_chat(context: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fb_profile(context: Dict[str, Any]) -> Dict[str, Any]:
+    """0-key profile fallback that stays truthful (R-6).
+
+    Never invents native facts and never erases the existing persona: the stored
+    narrative fields win, and a co-author text is stored as an explicit
+    ``backstory`` addition instead of being discarded.
+    """
     from .agent.profile import template_profile
+    existing = context.get("profile") if isinstance(context.get("profile"), dict) else {}
     profile = template_profile(
         _name(context),
         species=context.get("species", "HUMAN"),
@@ -64,7 +71,18 @@ def _fb_profile(context: Dict[str, Any]) -> Dict[str, Any]:
         dislikes=context.get("dislikes"),
         generated_at_tick=int(context.get("world_sim_tick", 0)),
     )
-    profile["backstory"] = _fallback_str("fallbacks.sim.profile.backstory", context)
+    for key in (
+        "core_personality", "current_demeanor", "speech_style", "backstory",
+        "goals", "ambition", "secrets", "quirks",
+    ):
+        if existing.get(key):
+            profile[key] = existing[key]
+    coauthor = str(context.get("coauthor_text") or context.get("coauthor_block") or "").strip()
+    if coauthor:
+        prior = str(profile.get("backstory") or "").strip()
+        profile["backstory"] = "{} {}".format(prior, coauthor).strip() if prior else coauthor
+    if not profile.get("backstory"):
+        profile["backstory"] = _fallback_str("fallbacks.sim.profile.backstory", context)
     return profile
 
 
@@ -147,7 +165,17 @@ def _fb_background_expand(context: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fb_zeitgeist(context: Dict[str, Any]) -> Dict[str, Any]:
-    return {"tags": ["calm", "everyday"], "preset": "drama", "weather_preference": "sunny"}
+    """0-key zeitgeist fallback that preserves the existing neighborhood (R-6)."""
+    existing = context.get("zeitgeist") if isinstance(context.get("zeitgeist"), dict) else {}
+    tags = list(existing.get("tags") or ["calm", "everyday"])
+    preset = existing.get("preset") or "drama"
+    weather = existing.get("weather_preference") or "sunny"
+    typed_text = str(context.get("zeitgeist_text") or "")
+    if typed_text:
+        typed = [t.strip() for t in typed_text.split(",") if t.strip()]
+        if typed:
+            tags = typed
+    return {"tags": tags, "preset": preset, "weather_preference": weather}
 
 
 def _fb_plan(context: Dict[str, Any]) -> Dict[str, Any]:

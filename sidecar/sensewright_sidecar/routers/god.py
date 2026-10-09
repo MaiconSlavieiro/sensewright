@@ -8,8 +8,8 @@ from fastapi import APIRouter, Body
 from ..schemas import sanitize_payload
 from ..services import (
     handle_arc_steer, handle_beat_ended, handle_controls_get, handle_controls_post,
-    handle_direct_scene, handle_get_arc, handle_get_cast, handle_god_tick,
-    handle_zeitgeist,
+    handle_direct_scene, handle_get_arc, handle_get_cast, handle_god_dump,
+    handle_god_tick, handle_zeitgeist,
 )
 
 router = APIRouter(prefix="/v1/god", tags=["god"])
@@ -58,3 +58,8 @@ def get_arc() -> Dict[str, Any]:
 @router.get("/cast")
 def get_cast() -> Dict[str, Any]:
     return handle_get_cast()
+
+
+@router.get("/dump")
+def god_dump(save_id: int = 0) -> Dict[str, Any]:
+    return handle_god_dump({"save_id": save_id})

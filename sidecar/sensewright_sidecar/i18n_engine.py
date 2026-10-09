@@ -378,6 +378,9 @@ class I18nEngine:
             "strict_language": strict,
             "json_only": json_only,
             "one_shot_block": one_shot_block,
+            # R-4: safe empty default so templates that reference the co-author
+            # block never break on the pure-regeneration paths.
+            "coauthor_block": "",
             "llm_language_name": self.llm_language_name(code),
         }
         merged = dict(base_vars)

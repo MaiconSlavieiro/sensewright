@@ -4,18 +4,32 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..state import AppState
-from ..world.chronicle import get_zeitgeist, set_zeitgeist
+from ..world.chronicle import get_chronicles, get_zeitgeist, set_zeitgeist
+from ..world.rumors import get_rumors
 
 
 def run_zeitgeist(state: AppState, save_id: int, zeitgeist_text: str, lang: str) -> Dict[str, Any]:
-    """Generate (or derive) the neighborhood zeitgeist and persist it."""
+    """Generate (or derive) the neighborhood zeitgeist and persist it.
+
+    R-5/R-7: the regeneration merges the current zeitgeist + chronicles + rumors
+    + the active arc theme (the director's intent), so a rewrite is coherent with
+    the neighborhood history instead of a disconnected reinvention.
+    """
     store = state.working_store()
     if store is None:
         return {"tags": [], "preset": "drama", "weather_preference": "sunny"}
 
+    arc = state.active_arc or {}
+    if not isinstance(arc, dict):
+        arc = {}
     context = {
         "save_id": save_id,
         "zeitgeist_text": zeitgeist_text,
+        "zeitgeist": get_zeitgeist(store, save_id),
+        "theme": arc.get("theme", ""),
+        "active_arc": arc,
+        "chronicles": get_chronicles(store, save_id),
+        "rumors": get_rumors(store, save_id),
     }
     result = state.scheduler.run_purpose("god.zeitgeist", context, lang)
     data = result.data or {}

@@ -151,14 +151,7 @@ def _profile_callback(state: AppState, sim_id: int, tick: int):
     def _callback(result) -> None:
         try:
             data = result.data or {}
-            sim = state.get_census(sim_id) or {"name": ""}
-            profile = normalize_profile(
-                data, name=sim.get("name", ""), species=sim.get("species"),
-                age_stage=sim.get("age_stage"), traits=sim.get("traits"),
-                likes=sim.get("likes"), dislikes=sim.get("dislikes"),
-                source=_profile_source(data),
-                generated_at_tick=tick,
-            )
+            profile = _normalize_preserving_history(state, sim_id, data, tick)
             _persist_profile(state, sim_id, profile, tick)
             state.incr("profiles_generated")
         except Exception:  # noqa: BLE001
@@ -167,13 +160,117 @@ def _profile_callback(state: AppState, sim_id: int, tick: int):
     return _callback
 
 
+def _normalize_preserving_history(
+    state: AppState, sim_id: int, data: Any, tick: int,
+) -> Dict[str, Any]:
+    """Normalize an LLM profile while preserving native/historical ground truth.
+
+    R-2/R-3: ``normalize_profile`` already forces the census traits/species/age,
+    but the LLM rarely echoes ``life_story``; without this the regenerated profile
+    would silently erase the biography. We reinject the stored ``life_story``
+    unless the model produced one.
+    """
+    sim = state.get_census(sim_id) or {"name": ""}
+    raw = dict(data) if isinstance(data, dict) else {}
+    existing = _sim_profile(state, sim_id)
+    if not raw.get("life_story") and existing.get("life_story"):
+        raw["life_story"] = existing["life_story"]
+    return normalize_profile(
+        raw, name=sim.get("name", ""), species=sim.get("species"),
+        age_stage=sim.get("age_stage"), traits=sim.get("traits"),
+        likes=sim.get("likes"), dislikes=sim.get("dislikes"),
+        source=_profile_source(raw), generated_at_tick=tick,
+    )
+
+
+def _profile_grounding_context(
+    state: AppState, sim_id: int, tick: int, coauthor_text: str = "",
+) -> Dict[str, Any]:
+    """Assemble the native-truth + director-theme context for ``sim.profile``.
+
+    Implements R-1/R-7: the pure-regeneration and co-author paths share the same
+    merge inputs — full profile + background + relationships + memories
+    (including ``legacy``) + family + the active arc theme/whisper + zeitgeist.
+    The census is preferred for the immutable native facts.
+    """
+    store = _store(state)
+    sim = state.get_census(sim_id) or {}
+    profile: Dict[str, Any] = {}
+    background = ""
+    relationships: List[Any] = []
+    memories: List[Any] = []
+    if store is not None:
+        bundle = store.export_sim_bundle(sim_id)
+        profile = bundle.get("profile") or {}
+        background = bundle.get("background") or ""
+        relationships = bundle.get("relationships") or []
+        memories = bundle.get("memories") or []
+
+    merged = dict(profile)
+    for key, value in (
+        ("name", sim.get("name") or merged.get("name", "")),
+        ("species", sim.get("species") or merged.get("species")),
+        ("age_stage", sim.get("age_stage") or merged.get("age_stage")),
+        ("traits", sim.get("traits") if sim.get("traits") is not None else merged.get("traits")),
+        ("likes", sim.get("likes") if sim.get("likes") is not None else merged.get("likes")),
+        ("dislikes", sim.get("dislikes") if sim.get("dislikes") is not None else merged.get("dislikes")),
+    ):
+        if value not in (None, [], ""):
+            merged[key] = value
+    if background and not merged.get("background"):
+        merged["background"] = background
+
+    legacy = [
+        m for m in memories
+        if isinstance(m, dict) and str(m.get("type", "")).lower() == "legacy"
+    ]
+
+    arc = state.active_arc or {}
+    if not isinstance(arc, dict):
+        arc = {}
+    whisper = ""
+    beat = current_beat(arc) if arc else None
+    if beat:
+        whisper = beat.get("god_whisper_hint", "") or ""
+
+    ctx: Dict[str, Any] = {
+        "sim_id": sim_id,
+        "sim_name": sim.get("name", ""),
+        "species": sim.get("species"),
+        "age_stage": sim.get("age_stage"),
+        "gender": sim.get("gender"),
+        "traits": sim.get("traits"),
+        "likes": sim.get("likes"),
+        "dislikes": sim.get("dislikes"),
+        "goals": merged.get("goals") or [],
+        "secrets": merged.get("secrets") or [],
+        "quirks": merged.get("quirks") or [],
+        "ambition": merged.get("ambition") or "",
+        "profile": merged,
+        "relationships": relationships,
+        "memories": memories,
+        "legacy_memories": legacy,
+        "family": _resolve_family(state, sim_id),
+        "zeitgeist": current_zeitgeist(state, state.active_save_id or 0),
+        "active_arc": arc,
+        "theme": arc.get("theme", "") if isinstance(arc, dict) else "",
+        "god_whisper_hint": whisper,
+        "world_sim_tick": int(tick),
+    }
+    if coauthor_text:
+        ctx["coauthor_text"] = coauthor_text
+        ctx["coauthor_block"] = coauthor_text
+    return ctx
+
+
 def _schedule_profile_generation(state: AppState, sim_id: int, tick: int, lang: str) -> bool:
     """Schedule a background ``sim.profile`` generation for one sim (BUG-11).
 
     Bounded (one attempt per sim per session) and deduped; returns False when no
     job was scheduled (store unavailable, or already attempted this session). The
     LLM call runs off the request thread and the persona is persisted by
-    ``_profile_callback``.
+    ``_profile_callback``. The context is grounded in the native truth and the
+    active arc (R-1/R-7).
     """
     store = _store(state)
     if store is None:
@@ -181,14 +278,7 @@ def _schedule_profile_generation(state: AppState, sim_id: int, tick: int, lang: 
     if sim_id in state.profile_generation_attempted:
         return False
     state.profile_generation_attempted.add(sim_id)
-    sim = state.get_census(sim_id) or {"sim_id": sim_id, "name": ""}
-    ctx = {
-        "sim_id": sim_id, "sim_name": sim.get("name", ""),
-        "species": sim.get("species"), "age_stage": sim.get("age_stage"),
-        "gender": sim.get("gender"),
-        "traits": sim.get("traits"), "likes": sim.get("likes"),
-        "dislikes": sim.get("dislikes"), "world_sim_tick": int(tick),
-    }
+    ctx = _profile_grounding_context(state, sim_id, tick)
     state.scheduler.submit_bg(
         "sim.profile", ctx, lang,
         dedup_key="{}:{}:profile".format(state.active_save_id or 0, sim_id),
@@ -1790,13 +1880,18 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     sim = state.get_census(sim_id) or {"name": ""}
     force_interactive = bool(payload.get("force_interactive", False))
     tick = int(payload.get("world_sim_tick", 0))
+    coauthor_text = str(payload.get("coauthor_text") or "").strip()
 
     # 4.1: accept a profile edited in the Web Studio and persist it (native
     # traits/likes/dislikes/species/age remain ground truth via normalize).
     posted = payload.get("profile")
     if isinstance(posted, dict) and posted:
+        raw_posted = dict(posted)
+        existing_posted = _sim_profile(state, sim_id)
+        if not raw_posted.get("life_story") and existing_posted.get("life_story"):
+            raw_posted["life_story"] = existing_posted["life_story"]
         profile = normalize_profile(
-            posted, name=sim.get("name", ""), species=sim.get("species"),
+            raw_posted, name=sim.get("name", ""), species=sim.get("species"),
             age_stage=sim.get("age_stage"), traits=sim.get("traits"),
             likes=sim.get("likes"), dislikes=sim.get("dislikes"),
             generated_at_tick=tick,
@@ -1813,22 +1908,15 @@ def handle_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     # BUG-11: regenerate when there is no stored profile, when the caller forces
     # an interactive regeneration, OR when the stored profile is still a template
     # (empty persona) — the census pre-creates a template, which used to make the
-    # `profile is None` gate never fire.
-    if profile is None or force_interactive or _is_template_profile(profile):
-        ctx = {"sim_id": sim_id, "sim_name": sim.get("name", ""), "species": sim.get("species"), "age_stage": sim.get("age_stage"),
-               "gender": sim.get("gender"),
-               "traits": sim.get("traits"), "likes": sim.get("likes"), "dislikes": sim.get("dislikes"),
-               "world_sim_tick": int(payload.get("world_sim_tick", 0))}
+    # `profile is None` gate never fire. R-1/R-7: a co-author request always runs,
+    # and every regeneration is grounded in the native truth + director theme.
+    if coauthor_text or profile is None or force_interactive or _is_template_profile(profile):
+        ctx = _profile_grounding_context(state, sim_id, tick, coauthor_text=coauthor_text)
         result = state.scheduler.run_purpose("sim.profile", ctx, lang)
         data = result.data or {}
-        profile = normalize_profile(
-            data, name=sim.get("name", ""), species=sim.get("species"),
-            age_stage=sim.get("age_stage"), traits=sim.get("traits"),
-            likes=sim.get("likes"), dislikes=sim.get("dislikes"),
-            source=_profile_source(data), generated_at_tick=tick,
-        )
+        profile = _normalize_preserving_history(state, sim_id, data, tick)
         if store:
-            store.upsert_sim_profile(sim_id, profile, int(payload.get("world_sim_tick", 0)))
+            store.upsert_sim_profile(sim_id, profile, tick)
 
     return {"profile": profile}
 
@@ -2096,6 +2184,37 @@ def handle_get_cast(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     state = get_state()
     arc = state.active_arc or {}
     return {"ok": True, "cast": arc.get("cast", [])}
+
+
+def handle_god_dump(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Consolidated God Director dump for the Dev Mode "Dump" action (S5).
+
+    Returns the full directorial state in one payload so the Mod can log it and
+    summarize it in-game without chaining multiple requests.
+    """
+    state = get_state()
+    save_id = to_int((payload or {}).get("save_id", 0)) or (state.active_save_id or 0)
+    store = _store(state)
+    zeitgeist = current_zeitgeist(state, save_id)
+    arc = state.active_arc
+    if arc is None and store is not None:
+        actives = store.list_arcs(status="active")
+        arc = actives[0] if actives else None
+    arc = arc or {}
+    chronicles: List[Any] = []
+    rumors: List[Any] = []
+    if store is not None:
+        chronicles = get_chronicles(store, save_id)
+        rumors = get_rumors(store, save_id)
+    return {
+        "ok": True,
+        "save_id": save_id,
+        "zeitgeist": zeitgeist,
+        "arc": arc,
+        "cast": arc.get("cast", []) if isinstance(arc, dict) else [],
+        "chronicles": chronicles,
+        "rumors": rumors,
+    }
 
 
 # ── aspiration (P12) ──────────────────────────────────────────────────────

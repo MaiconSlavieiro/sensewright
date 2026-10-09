@@ -33,6 +33,14 @@ _DEEP_FIELDS = (
     "core_personality", "current_demeanor", "life_story", "psyche_blocks",
     "dream_residue", "daily_plan", "backstory",
 )
+#: Native ground truth (R-1/R-2): included in the deep profile payload so the
+#: LLM grounds its narrative in traits/age/species/goals/... instead of dropping
+#: them. Values are read from the context top-level first (the census is the
+#: source of truth), falling back to the stored profile.
+_PROFILE_TRUTH_FIELDS = (
+    "traits", "likes", "dislikes", "age_stage", "species",
+    "goals", "secrets", "quirks", "ambition",
+)
 
 
 class ContextAssembler:
@@ -111,6 +119,15 @@ class ContextAssembler:
         zeitgeist = context.get("zeitgeist_tags") or []
         if isinstance(zeitgeist, str):
             zeitgeist = [zeitgeist]
+        zeitgeist_obj = context.get("zeitgeist") or {}
+        if not isinstance(zeitgeist_obj, dict):
+            zeitgeist_obj = {}
+        if not zeitgeist:
+            zeitgeist = zeitgeist_obj.get("tags") or []
+        arc = context.get("active_arc") or {}
+        if not isinstance(arc, dict):
+            arc = {}
+        coauthor_text = context.get("coauthor_block") or context.get("coauthor_text") or ""
         anchors = engine.content(lang).get("anchors") or {}
         bias_archetypes = anchors.get("bias_archetypes") or []
 
@@ -176,6 +193,10 @@ class ContextAssembler:
             "asymmetric_directive": asymmetric_directive,
             "surrealism_index": str(context.get("surrealism_index", "0.5")),
             "zeitgeist_tags": ", ".join(zeitgeist),
+            "zeitgeist_preset": str(zeitgeist_obj.get("preset", "")),
+            "theme": str(context.get("theme") or arc.get("theme") or ""),
+            "god_whisper_hint": str(context.get("god_whisper_hint", "")),
+            "coauthor_block": str(coauthor_text),
             "target_name": context.get("target_name", ""),
             "catalyst_name": context.get("catalyst_name", ""),
             "agent_name": context.get("agent_name", ""),
@@ -314,17 +335,27 @@ class ContextAssembler:
             payload["profile"] = {k: profile.get(k, "") for k in _MICRO_FIELDS}
         else:
             payload["profile"] = {k: profile.get(k, "") for k in _DEEP_FIELDS}
+            # R-1/R-2: native ground truth travels in the profile payload. The
+            # context top-level (census) wins over the stored profile.
+            for key in _PROFILE_TRUTH_FIELDS:
+                value = context.get(key)
+                if value in (None, [], {}):
+                    value = profile.get(key)
+                if value not in (None, [], {}):
+                    payload["profile"][key] = value
 
         # P0 fields
         for key in ("mood", "activity", "current_needs", "room_id", "is_sleeping", "is_off_lot_duty",
                     "message", "event", "target", "directives", "active_arc", "zeitgeist",
+                    "theme", "god_whisper_hint", "coauthor_block",
                     "schedule_blocks", "obligatory_tasks", "native_wants", "location", "action"):
             if key in context:
                 payload[key] = context[key]
                 
         # P1 fields
         if level >= 1:
-            for key in ("puppeteer_objective", "scene_subtext", "history", "relationship", "rumor"):
+            for key in ("puppeteer_objective", "scene_subtext", "history", "relationship",
+                        "relationships", "legacy_memories", "rumor"):
                 if key in context:
                     payload[key] = context[key]
 
