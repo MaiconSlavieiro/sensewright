@@ -9,6 +9,9 @@
     "pie_menu.dev.toggle": "Habilitar/Desabilitar Debug em Tempo Real",
     "pie_menu.dev.dump": "Ver Estado e Histórico (Dump)",
     "pie_menu.dev.rewrite": "Reescrever/Co-Criar Narrativa...",
+    "pie_menu.dev.sys_status": "Dump do Status do Sistema",
+    "pie_menu.dev.sys_panic": "Pausar / Retomar o Sensewright",
+    "pie_menu.dev.sys_reload": "Recarregar Traduções",
     "pie_menu.mirror_reflect": "Refletir sobre a vida...",
     "buff.dream_epiphany.name": "Epifania Matinal",
     "buff.dream_epiphany.desc": "Um sonho vívido deixou uma ideia brilhante na sua cabeça.",
@@ -133,6 +136,23 @@
     "mailbox": {
       "title": "Histórias da Vizinhança",
       "empty": "Ainda não há histórias na vizinhança."
+    },
+    "dev": {
+      "rewrite_title": "Reescrever / Co-Criar",
+      "rewrite_hint": "Descreva quem este Sim deveria ser. Seu texto é mesclado com os traços nativos, o histórico e a história atual.",
+      "rewrite_done": "Perfil reescrito.",
+      "bg_title": "Co-Criar Vizinhança",
+      "bg_hint": "Descreva o clima da vizinhança. Ele é mesclado com as crônicas atuais e o arco ativo.",
+      "bg_done": "Vizinhança reescrita.",
+      "dump_profile_title": "Dump do Perfil do Sim",
+      "dump_zeitgeist_title": "Dump do Deus Diretor",
+      "dump_done": "Gravado no worker log.",
+      "status_title": "Status do Sensewright",
+      "panic_title": "Sensewright",
+      "panic_on": "Pausado.",
+      "panic_off": "Retomado.",
+      "reload_title": "Traduções",
+      "reload_done": "Traduções recarregadas."
     }
   },
   "studio": {

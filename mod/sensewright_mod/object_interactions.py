@@ -91,6 +91,10 @@ def _log_object_tuning_status():
             ('interaction.dev_god_toggle_debug', 'interaction_dev_god_toggle_debug'),
             ('interaction.dev_god_rewrite', 'interaction_dev_god_rewrite_background'),
             ('interaction.dev_god_dump', 'interaction_dev_god_dump_zeitgeist'),
+            ('interaction.dev_sys_toggle', 'interaction_dev_sys_toggle_debug'),
+            ('interaction.dev_sys_status', 'interaction_dev_sys_dump_status'),
+            ('interaction.dev_sys_panic', 'interaction_dev_sys_panic'),
+            ('interaction.dev_sys_reload', 'interaction_dev_sys_reload_i18n'),
         ):
             tuning_id = resolve_owned_id(key)
             loaded = False
@@ -360,6 +364,10 @@ class _MailboxInteractionHandler(CommonScriptObjectInteractionHandler):
                 resolve_owned_id('interaction_dev_god_toggle_debug'),
                 resolve_owned_id('interaction_dev_god_rewrite_background'),
                 resolve_owned_id('interaction_dev_god_dump_zeitgeist'),
+                resolve_owned_id('interaction_dev_sys_toggle_debug'),
+                resolve_owned_id('interaction_dev_sys_dump_status'),
+                resolve_owned_id('interaction_dev_sys_panic'),
+                resolve_owned_id('interaction_dev_sys_reload_i18n'),
             ) if tuning_id
         )
 

@@ -43,6 +43,11 @@ _OWNED_NAMES = {
     "interaction_dev_god_toggle_debug": "sw_dev_god_toggle_debug_interaction",
     "interaction_dev_god_rewrite_background": "sw_dev_god_rewrite_background_interaction",
     "interaction_dev_god_dump_zeitgeist": "sw_dev_god_dump_zeitgeist_interaction",
+    # Dev System actions (B5): status dump, panic toggle, i18n reload, sys debug.
+    "interaction_dev_sys_toggle_debug": "sw_dev_sys_toggle_debug_interaction",
+    "interaction_dev_sys_dump_status": "sw_dev_sys_dump_status_interaction",
+    "interaction_dev_sys_panic": "sw_dev_sys_panic_interaction",
+    "interaction_dev_sys_reload_i18n": "sw_dev_sys_reload_i18n_interaction",
     # Pie-menu categories that group the dev interactions (Dev Mode / WebUI).
     "pie_menu_category_dev_sim": "sw_pie_menu_category_dev_sim",
     "pie_menu_category_dev_god": "sw_pie_menu_category_dev_god",

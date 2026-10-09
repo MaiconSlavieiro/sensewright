@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<I c="SensewrightDevSysReloadI18nInteraction" i="interaction" m="sensewright_mod.dev_interactions" n="sw_dev_sys_reload_i18n_interaction" s="0">
+  <V n="pie_menu_icon" t="enabled">
+    <V n="enabled" t="resource_key">
+      <U n="resource_key">
+        <T n="key" p="sensewright_icon_general">2f7d0004:00000000:67C5EA84BDAFD36F</T>
+      </U>
+    </V>
+  </V>
+  <V t="disabled" n="_saveable" />
+  <T n="category">swtune:sw_pie_menu_category_dev_sys</T>
+  <V n="display_name" t="localized_string" p="STBL">stbl.pie_menu.dev.sys_reload</V>
+  <T n="allow_autonomous">False</T>
+  <T n="allow_user_directed">True</T>
+  <E n="target_type">OBJECT</E>
+</I>

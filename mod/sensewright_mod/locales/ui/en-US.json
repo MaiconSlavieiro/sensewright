@@ -9,6 +9,9 @@
     "pie_menu.dev.toggle": "Toggle Real-time Debug",
     "pie_menu.dev.dump": "Dump State & History",
     "pie_menu.dev.rewrite": "Rewrite/Co-Author Narrative...",
+    "pie_menu.dev.sys_status": "Dump System Status",
+    "pie_menu.dev.sys_panic": "Pause / Resume Sensewright",
+    "pie_menu.dev.sys_reload": "Reload Localization",
     "pie_menu.mirror_reflect": "Reflect on Life...",
     "buff.dream_epiphany.name": "Morning Epiphany",
     "buff.dream_epiphany.desc": "A vivid dream left a brilliant idea in your head.",
@@ -133,6 +136,23 @@
     "mailbox": {
       "title": "Neighborhood Stories",
       "empty": "No neighborhood stories yet."
+    },
+    "dev": {
+      "rewrite_title": "Rewrite / Co-Author",
+      "rewrite_hint": "Describe who this Sim should be. Your text is merged with their native traits, history and the current story.",
+      "rewrite_done": "Profile rewritten.",
+      "bg_title": "Neighborhood Co-Author",
+      "bg_hint": "Describe the mood of the neighborhood. It is merged with the current chronicles and the active arc.",
+      "bg_done": "Neighborhood rewritten.",
+      "dump_profile_title": "Sim Profile Dump",
+      "dump_zeitgeist_title": "God Dump",
+      "dump_done": "Written to the worker log.",
+      "status_title": "Sensewright Status",
+      "panic_title": "Sensewright",
+      "panic_on": "Paused.",
+      "panic_off": "Resumed.",
+      "reload_title": "Localization",
+      "reload_done": "Translations reloaded."
     }
   },
   "studio": {
