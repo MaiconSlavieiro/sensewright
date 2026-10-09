@@ -22,6 +22,7 @@ everything below is the detailed reference.
 | Document | What it covers |
 |----------|----------------|
 | [`mcp.md`](mcp.md) | MCP layer (design + plan): root cause, protocol/transport (official `mcp` SDK, Streamable HTTP), Action Gateway, the three facades (`agency`/`god`/`rules`), tool schemas, SSE push, rules DSL, phases, risks. |
+| [`dev-mode-coauthor.md`](dev-mode-coauthor.md) | Dev Mode / WebUI plan: the §4.9 stub actions (co-author rewrite, dumps, System menu) **and** the LLM grounding contract (R-0…R-7) — merge player text + director theme + native truth. |
 | [`spike-strategy.md`](spike-strategy.md) | Spike-Driven Development strategy (Data Probes) to map the EA API reality before integrating native features. |
 | [`project-status.md`](project-status.md) | Where the project stands and what remains: spec↔code gap per milestone/feature/purpose, the gap-closing plan, and the reverse-chronological changelog. |
 

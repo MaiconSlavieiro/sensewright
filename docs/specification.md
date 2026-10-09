@@ -212,6 +212,8 @@ Generates the Sim identity JSON (`PROFILE_SHAPE`), decoupling immutable essence 
 * **REQ-PROF-02:** Native game data (`traits`, `likes`, `dislikes`, `age_stage`, `career`) constitutes non-negotiable *ground truth*.
 * **REQ-PROF-03 (Two-Stage Bootstrap):** When newly seated Sims arrive on a lot, they receive an instantaneous deterministic `fallback_profile` (`source="template"`) at tick 0 and enter the **`bg`** queue for LLM generation. The **`interactive`** tier is used only if the player triggers `/v1/chat` or executes `sw.profile` on that Sim before the background job completes.
 * **REQ-PROF-04 (Diegetic Revelation):** Running the native social interaction **"Get to Know" (`sim_GetToKnow`)** between two Sims progressively unlocks entries from `secrets[]` and `backstory` into `relationships.known_secrets`.
+* **REQ-PROF-05 (LLM Grounding / Merge):** Every generated profile text merges (a) optional player text, (b) the God Director theme (`active_arc.theme` / `god_whisper_hint` / `zeitgeist`) and (c) native truth (traits/age/relationships/memories/`life_story`/family). This extends REQ-PROF-02 from post-processing to the prompt itself. See [`dev-mode-coauthor.md`](dev-mode-coauthor.md) R-0/R-7.
+* **REQ-PROF-06 (Co-Author):** The player may rewrite a Sim's profile from free text; the LLM returns a **merged** profile, never replacing native facts or existing history. See [`dev-mode-coauthor.md`](dev-mode-coauthor.md) R-1…R-4.
 
 ---
 

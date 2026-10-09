@@ -368,6 +368,34 @@ Language adherence guaranteed at **prompt construction time**:
 2. One-shot example in target language (`prompt.one_shot_<lang>`).
 3. Anchor directive (`prompt.anchor_<lang>`) injected as **absolute last line** of system prompt.
 
+### 5.6 Grounding & Merge Pipeline
+
+> Status: ✅ **implemented** (2026-10-09) — contract defined in
+> [`dev-mode-coauthor.md`](dev-mode-coauthor.md) (R-0…R-7). `sim.profile` (via
+> `_profile_grounding_context`), `god.zeitgeist` (`run_zeitgeist`) and `sim.dream`
+> (`services.py`) all merge these layers; the in-game click flow awaits Playtest #5.
+
+Every **steered text** (Sim profile, neighborhood background/zeitgeist) is produced by a
+three-layer merge rather than a free invention:
+
+```
+player text (optional) ─┐
+director theme ─────────┼─► LLM prompt ─► merged text ─► normalize ─► persist
+native truth ───────────┘
+```
+
+- **Player text** — the co-author free text (absent in pure regeneration).
+- **Director theme** — `active_arc.theme`, `current_beat().god_whisper_hint`, and
+  `zeitgeist.preset/tags` (`god/arcs.py`, `god/orchestrator.py`, `god/zeitgeist.py`).
+- **Native truth** — census (traits/likes/dislikes/age/species/career), persistent profile,
+  relationships, memories (incl. `legacy`), `life_story`, family
+  (`memory/sqlite_store.py`, `agent/profile.py`, `services.py`).
+
+Native facts are **immutable**: the LLM may only write the narrative layer, enforced post-hoc
+by `normalize_profile` (REQ-PROF-02) and, from R-1, also by the prompt itself. The ContextAssembler
+(`llm/context.py`) is the assembly point: `_build_payload` must stop dropping
+`traits`/`age_stage`/`theme`/`zeitgeist` from `context_json` (`llm/context.py:308-342`).
+
 ---
 
 ## 6. i18n Engine (4-Layer Cascade)

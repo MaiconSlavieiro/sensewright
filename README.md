@@ -72,6 +72,7 @@ Full step-by-step instructions: [`docs/getting-started.md`](docs/getting-started
 | [`docs/reference.md`](docs/reference.md) | Catalog of the 33 purposes + localization engine / translation guide |
 | [`docs/specification.md`](docs/specification.md) | Full v2 specification (milestones, features, acceptance criteria) |
 | [`docs/mcp.md`](docs/mcp.md) | MCP layer (design + plan): protocol, gateway, facades, rules, SSE |
+| [`docs/dev-mode-coauthor.md`](docs/dev-mode-coauthor.md) | Dev Mode / WebUI plan (co-author rewrite, dumps, System menu) + the LLM grounding contract (player text + director theme + native truth) |
 | [`docs/project-status.md`](docs/project-status.md) | Implementation status, gap-closing plan, changelog |
 | [`docs/operations.md`](docs/operations.md) | Architectural review & evolution plan, hardening, playtest bugs, weak-point remediation |
 | [`docs/README.md`](docs/README.md) | Documentation hub / index |

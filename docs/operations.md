@@ -1521,6 +1521,20 @@ everything that does not need the game in parallel.
 **Defer / cut:** R2 SSE transport (only if Playtest #5 shows intent-pull latency; shutdown-hang
 risk), physical Autobiography book, Tombstone epitaph, FC5, sleep balloons (best-effort).
 
+> **Dev Mode / WebUI pendencies (implemented 2026-10-09).** The reorganization shipped
+> (`sw.master`, `SensewrightDevManager`, the `[SW Dev: Sim|God Mod|System]` pie-menu
+> categories) and the actions behind the menu items are now implemented: Rewrite Profile /
+> Rewrite Background (LLM co-author via `CommonInputTextDialog`), Dump Profile / Dump
+> Zeitgeist (worker log + summarized notification) and the `[SW Dev: System]` category
+> (Status / Panic / Resume / Reload i18n / toggle). The **in-game click flow** still needs
+> Playtest #5 → **Stage 3**.
+>
+> The same wave closed the **LLM grounding gap**: the pure-regeneration paths (`sim.profile`,
+> `god.zeitgeist`) now merge the God Director theme and the native truth (contract **R-0…R-7**),
+> and `_build_payload` no longer drops traits/age/theme/zeitgeist. Full design, decisions and
+> `file:line` evidence: [`dev-mode-coauthor.md`](dev-mode-coauthor.md); summary in
+> [`project-status.md`](project-status.md) → Gap-Closing Plan §4.9.
+
 ### Open "coded blind" surfaces (→ new spikes)
 
 The 4 master probes validated interaction/routing/buff/relationship-friendship, but these

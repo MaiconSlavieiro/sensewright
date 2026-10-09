@@ -45,8 +45,10 @@ What is **genuinely missing** is not foundation, it is **wiring and triggers** (
 - **Native hooks (M5/M6)**: missing Diary/"Snoop", Autobiography Book, `VisitSituation` (NPC
   ringing the doorbell), Tombstone Epitaph, sleep balloons, and the "Reflect" interaction on
   the mirror (some implemented but need in-game validation).
+- **Dev Mode / WebUI (§4.9)**: ✅ implemented (co-author Rewrite ×2, Dump ×2, `[SW Dev: System]`,
+  LLM grounding R-0…R-7) — the in-game click flow still needs Playtest #5.
 
-Everything that exists today is covered by **796 tests** (sidecar) and compiles under both correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle
+Everything that exists today is covered by **812 tests** (sidecar) and compiles under both correct interpreters. The 2026-10-02 P2/P3 wave (lifecycle
 events, `spawn_npc`, `god.react`/`beat-ended`, mirror/diary/mailbox hooks, sleep balloons,
 object/situation build types) is verified through the Phase-2 spikes and ready for Playtest #5.
 
@@ -833,6 +835,49 @@ Phase 1 (Spike-Driven Dev) ─────────┐
 
 - **Action:** `POST /v1/config/panic` (pairs with 2.5): pause the `LLMScheduler` + `state.drain_intents()`.
 
+#### 4.9 Dev Mode / WebUI — co-author, dumps & grounding ✅
+
+> Surfaced 2026-10-09 during a docs audit: commit `3985684`
+> (`feat(mod): Implemented Dev Mode / WebUI architecture`) shipped the navigation shell but
+> **none of the functions behind the menu items were finished**. **Design + item catalog:**
+> [`dev-mode-coauthor.md`](dev-mode-coauthor.md). **Implemented 2026-10-09** (S1–S5 sidecar,
+> B1–B5 mod, tuning/locales, tests) — the in-game click flow is still **coded blind** and
+> requires Playtest #5 (Stage 3).
+
+**Shell (exists):** `sw.master` toggles the global `SensewrightDevManager.dev_mode_enabled`
+(`dev_commands.py`); the three dev pie-menu categories `[SW Dev: Sim]` / `[SW Dev: God Mod]`
+/ `[SW Dev: System]` are registered (`interactions.py:134-136`) and every dev interaction is
+gated by `dev_mode_enabled` (`dev_interactions.py`).
+
+**Actions (implemented):**
+
+- **Rewrite Profile / Co-Author** (`SensewrightDevSimRewriteProfileInteraction`) —
+  `post_async('/profile', {force_interactive:false})` → `CommonInputTextDialog` prefilled with
+  the current persona → `post_async('/profile', {coauthor_text})`. The sidecar
+  `handle_profile` merges player text + native truth + director theme (R-1…R-4).
+- **Rewrite Background / Co-Author** (`SensewrightDevGodRewriteBackgroundInteraction`) —
+  prefill via `GET /v1/world/neighborhood` → `CommonInputTextDialog` →
+  `POST /v1/god/zeitgeist` with `zeitgeist_text` (R-5).
+- **Dump Profile** (`SensewrightDevSimDumpProfileInteraction`) — `POST /v1/sim/export`
+  → worker log + summarized notification.
+- **Dump Zeitgeist** (`SensewrightDevGodDumpZeitgeistInteraction`) — new consolidated
+  `GET /v1/god/dump` (`handle_god_dump`) → worker log + summarized notification.
+- **`[SW Dev: System]`** — `SensewrightDevSys{ToggleDebug,DumpStatus,Panic,ReloadI18n}Interaction`
+  wired to `GET /v1/status`, `GET|POST /v1/config/panic|resume`, `POST /v1/i18n/reload`; 4 new
+  tuning XMLs + `interaction_dev_sys_*` keys + `pie_menu.dev.sys_*` STBL.
+- **Placement:** the God + System interactions are on the **mailbox** object
+  (`object_interactions.py`) — decision D4.
+
+**Grounding contract (R-0…R-7):** every steered text (profile, background, zeitgeist) is a
+**merge** of player text + God Director theme + native truth. Implemented as
+`_profile_grounding_context` / `_normalize_preserving_history` (`services.py`), the enriched
+`_build_payload` (`llm/context.py`), the enriched `run_zeitgeist` (`god/zeitgeist.py`) and the
+truthful fallbacks (`fallbacks.py`). The `sim.dream` path was the reference pattern.
+
+**Verify:** `python -m pytest -q` (**812 passed**, new `tests/test_grounding.py` 13);
+`py -3.7 -m py_compile mod/sensewright_mod/*.py` clean; `.package` 67 resources;
+`.ts4script` 141,029 B. In-game validation (Playtest #5 / Stage 3) still required.
+
 #### Phase 4 verification
 
 - Extend `test_services_endpoints.py`, `test_god.py`, `test_i18n_engine.py` (FNV-32/`ts4_stbl_byte`) (+~25 tests).
@@ -894,6 +939,7 @@ Acceptance criteria (`specification.md` "Acceptance Criteria for M8"):
 - 🟡 Phase 3 — P2 native hooks — **3.1–3.4, 3.8, 3.9 coded blind** (3.5–3.7 + Phase 5 in-game validation pending)
 - [x] Phase 4 — P3: LLM, Config & Observability — done (per-model cooldown, tier concurrency, asymmetric refund, trace_id, VACUUM)
 - 🟡 Phase 4b — Web Studio/P4 — **4.1, 4.2, 4.3, 4.5, 4.8 done** (4.4 spoiler, 4.6 FC2, 4.7 FC3 pending)
+- [x] Phase 4c — Dev Mode / WebUI — **4.9 implemented** (co-author Rewrite ×2, Dump ×2, `[SW Dev: System]`, LLM grounding R-0…R-7) — in-game click flow pending Playtest #5; see [`dev-mode-coauthor.md`](dev-mode-coauthor.md)
 - [ ] Phase 5 — M8 in-game validation
 - [ ] Close-out — docs/project-status.md + README
 
@@ -910,6 +956,53 @@ and the full list of purposes promoted to Full.
 Reverse-chronological record of what **changed** per session, plus the **open items**
 that remain. Complements [`project-status.md`](project-status.md) (spec↔code gap) and [`operations.md`](operations.md)
 (playtest findings) — this file records the actual edits, not the plan.
+
+---
+
+### 2026-10-09 — Dev Mode co-author, dumps & LLM grounding ✅
+
+Implemented [`dev-mode-coauthor.md`](dev-mode-coauthor.md) (S1–S5 sidecar, B1–B5 mod) and
+closed §4.9. **812 sidecar tests** (new `tests/test_grounding.py`); Mod compiles under 3.7;
+`.package` 67 resources; `.ts4script` 141,029 B.
+
+- **Grounding (S1/S3/S4):** `_profile_grounding_context` + `_normalize_preserving_history`
+  (`services.py`) build the merge inputs (profile/background/relationships/memories incl.
+  `legacy`/family/arc theme/whisper/zeitgeist) for both generation and co-author; `life_story`
+  is preserved across regeneration. `_build_payload` (`llm/context.py`) now carries
+  traits/likes/dislikes/age/species/goals/secrets/quirks/ambition + theme/zeitgeist/coauthor.
+  `run_zeitgeist` merges arc theme + chronicles + rumors. Fallbacks return the existing
+  persona/neighborhood instead of inventing facts.
+- **Co-author + dumps (S2/S5):** `handle_profile` accepts `coauthor_text`;
+  new `handle_god_dump` + `GET /v1/god/dump`.
+- **Mod (B1–B5):** `dev_interactions.py` implements Rewrite Profile / Rewrite Background
+  (`CommonInputTextDialog` + LLM merge), Dump Profile / Dump Zeitgeist (worker log +
+  summary) and the `[SW Dev: System]` actions (status/panic/reload/toggle). 4 new tuning XMLs
+  + `interaction_dev_sys_*` / `pie_menu.dev.sys_*` / `notify.dev.*` locale keys (en+pt).
+- **Docs:** §4.9 status, this changelog, `dev-mode-coauthor.md` header + `operations.md` note.
+
+---
+
+### 2026-10-09 — Dev Mode / WebUI: co-author & LLM grounding plan 📋
+
+Docs-only: a docs audit found that commit `3985684` shipped the Dev Mode **shell** but every
+action behind the menu items is still a stub, and that the LLM **regeneration** paths ignore
+the director theme and the native truth. Both are now specified in
+[`dev-mode-coauthor.md`](dev-mode-coauthor.md) and summarized in §4.9 above.
+
+- **Decisions:** co-author always via LLM; dumps → worker log + summarized notification;
+  `[SW Dev: System]` implemented; God actions stay on the mailbox.
+- **New contract R-0…R-7:** every steered text merges player text + director theme
+  (`active_arc.theme` / `god_whisper_hint` / `zeitgeist`) + native truth (traits/age/
+  relationships/memories/`life_story`/family; chronicles/rumors for the neighborhood).
+- **Discovery:** `sim.profile` context (`services.py:185-191`, `:1818-1821`) carries no
+  theme/relationships/memories, and `_build_payload` (`llm/context.py:308-342`) drops
+  traits/age from `context_json`; `run_zeitgeist` (`god/zeitgeist.py:16-20`) sees neither the
+  arc theme nor the chronicles. `sim.dream` (`services.py:317-342`) is the correct reference
+  pattern.
+- **Implementation items:** S1–S5 (sidecar), B1–B5 (mod), tuning/locales, tests, docs.
+- **Docs touched:** new `dev-mode-coauthor.md`; §4.9 + Progress + this changelog in
+  `project-status.md`; execution-order note in `operations.md`; grounding section in
+  `architecture.md`; reference in `specification.md`; hub + root README.
 
 ---
 
