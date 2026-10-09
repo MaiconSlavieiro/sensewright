@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <I c="SensewrightProvokeInteraction" i="interaction" m="sensewright_mod.interactions" n="sw_provoke_interaction" s="0">
+  <V n="pie_menu_icon" t="enabled">
+    <V n="enabled" t="resource_key">
+      <U n="resource_key">
+        <T n="key" p="sensewright_icon_cene">2f7d0004:00000000:61B8740E1508D0AA</T>
+      </U>
+    </V>
+  </V>
   <V t="disabled" n="_saveable" />
-  <T n="category">0</T>
   <V n="display_name" t="localized_string" p="STBL">stbl.pie_menu.direct_scene</V>
   <T n="allow_autonomous">False</T>
   <T n="allow_user_directed">True</T>

@@ -120,6 +120,25 @@ def _resolve_interaction_ids():
         _diagnostic_logged = True
         if ids:
             worker_log_info('pie menu: resolved interaction ids {}'.format(ids))
+
+            # debug pie menu categories load. IMPORTANT: category IDs must be
+            # resolved through resolve_owned_id (tuning_ids.json), never
+            # hardcoded — the tuning instance IDs changed when the FNV-64
+            # high-bit convention was dropped, and a stale literal here made the
+            # diagnostic report `None` for categories that actually loaded.
+            import services
+            import sims4.resources
+            cat_mgr = services.get_instance_manager(sims4.resources.Types.PIE_MENU_CATEGORY)
+            if cat_mgr is not None:
+                for label, key in (
+                    ('dev_sim', 'pie_menu_category_dev_sim'),
+                    ('dev_god', 'pie_menu_category_dev_god'),
+                    ('dev_sys', 'pie_menu_category_dev_sys'),
+                ):
+                    category_id = resolve_owned_id(key)
+                    category = cat_mgr.get(category_id) if category_id else None
+                    worker_log_info('pie menu category {} id={} loaded={}'.format(
+                        label, category_id, category is not None))
         else:
             worker_log_warn('pie menu: could NOT resolve interaction ids')
     return ids

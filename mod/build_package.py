@@ -20,6 +20,7 @@
 #       u32 locale(0), 6 fixed bytes 00 00 1A 48 00 00
 #     - entries: u32 key_hash, u8 flags(0), u16 length, length bytes (utf-8)
 
+import base64
 import os
 import sys
 import json
@@ -27,6 +28,13 @@ import re
 import struct
 import zlib
 from pathlib import Path
+
+# PNG -> TS4 DXT5 DDS converter (build machine only).
+sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
+try:
+    import png_to_dds  # type: ignore
+except ImportError:
+    png_to_dds = None
 
 
 MOD_DIR = Path(__file__).parent
@@ -39,6 +47,27 @@ DIST_DIR.mkdir(exist_ok=True)
 OUTPUT_PACKAGE = DIST_DIR / "Sensewright.package"
 STBL_KEYS_OUTPUT = DIST_DIR / "stbl_keys.json"
 TUNING_IDS_OUTPUT = DIST_DIR / "tuning_ids.json"
+
+# Custom icons. Drop PNGs at mod/tuning/icons/<name>; the build converts each to
+# a 512x512 DDS (DXT5/BC3, full mipmap chain) and packages it as type 0x00B2D882.
+# This matches S4CL's shipped .package (verified: 16 DDS resources, fourcc
+# "DXT5", type 0x00B2D882, group 0x00000000). The pie-menu category XMLs reference
+# the icon via the "Icon" key type (2f7d0004 = server-side key), while the binary
+# SimData references the DDS key type (0x00B2D882) that the client UI reads.
+ICON_DIR = TUNING_DIR / "icons"
+ICON_SIZE = 512
+ICON_RESOURCE_TYPE = 0x00B2D882  # DDS image (DXT5)
+# Icon filename -> resource instance (fnv1_64 of a stable name).
+CUSTOM_ICONS = {
+    # Pie-menu category icons.
+    "dev_sim.png": 0xF28192D3888BDE5E,  # fnv1_64("sensewright_icon_dev_sim")
+    "dev_god.png": 0xF25998D3886A9635,  # fnv1_64("sensewright_icon_dev_god")
+    "dev_sys.png": 0xF281A2D3888BF910,  # fnv1_64("sensewright_icon_dev_sys")
+    # Interaction icons.
+    "sms.png": 0x4767B091647F47C0,      # fnv1_64("sensewright_icon_sms")
+    "cene.png": 0x61B8740E1508D0AA,     # fnv1_64("sensewright_icon_cene")
+    "sensewright_icon.png": 0x67C5EA84BDAFD36F,  # fnv1_64("sensewright_icon_general")
+}
 
 # DBPF constants (TS4 / .package)
 DBPF_MAGIC = b"DBPF"
@@ -70,6 +99,16 @@ TUNING_TYPES = {
     "situation": 0xFBC3AEEB,
 }
 DEFAULT_TUNING_TYPE = 0x545AC67A  # SimData fallback
+
+# SimData (client binary) resources. The game's ActionScript UI reads pie menu
+# category info (name/icon/priority) from the SimData client binary, NOT from the
+# tuning XML. A PieMenuCategory tuning that ships WITHOUT a matching SimData
+# resource loads fine server-side but the UI throws "Failed to locate category
+# info for interaction category with key: …" and the whole pie menu fails to open.
+# Verified against S4CL's shipped .package: every pie menu category has a SimData
+# resource (type 0x545AC67A, group 0x00E9D967) whose instance equals the tuning's.
+SIMDATA_TYPE = 0x545AC67A
+SIMDATA_GROUP_PIE_MENU_CATEGORY = 0x00E9D967
 
 # STBL resource key encoding: group 0 for the default locale (byte 0x00),
 # 0x80000000 otherwise; instance = (locale_byte << 56) | base.
@@ -110,8 +149,8 @@ def plain_fnv1_64(text):
 
 
 def fnv1_64(text):
-    """FNV-1 64-bit hash with high bit set (TS4 tuning instance convention)."""
-    return plain_fnv1_64(text.lower()) | 0x8000000000000000
+    """FNV-1 64-bit hash (removed high bit to avoid negative integer UI bugs)."""
+    return plain_fnv1_64(text.lower())
 
 
 # Stable, mod-specific base for STBL instance keys (top byte reserved for locale).
@@ -220,6 +259,77 @@ def inject_tuning_refs(xml_data, name_to_instance):
     text = _TUNING_REF_RE.sub(_replace, text)
     result = text.encode("utf-8") if is_bytes else text
     return result, unresolved
+
+
+# Extract tunable values from a fully-processed PieMenuCategory tuning XML so we
+# can emit the matching SimData (client binary) resource for it.
+_SIMDATA_DISPLAY_NAME_RE = re.compile(r'<T\b[^>]*\bn="_display_name"[^>]*>\s*0x([0-9A-Fa-f]{8})\s*</T>')
+_SIMDATA_ICON_RE = re.compile(r'<T\b[^>]*\bn="_icon"[^>]*>2f7d0004:00000000:([0-9A-Fa-f]{16})</T>')
+_SIMDATA_PRIORITY_RE = re.compile(r'<T\b[^>]*\bn="_display_priority"[^>]*>\s*(-?\d+)\s*</T>')
+
+
+# Binary SimData (client data) template for a PieMenuCategory. This 400-byte
+# prefix is byte-identical to S4CL's shipped PieMenuCategory SimData (the "DATA"
+# binary the ActionScript UI actually reads). Only the tuning guid32, display
+# name hash, display priority, icon resource key and the trailing null-terminated
+# tuning name vary between categories. Format reverse-engineered from S4CL's
+# sims4communitylib.package and round-trip validated against it.
+_SIMDATA_PREFIX = base64.b64decode(
+    "REFUQQEBAAAYAAAAAQAAAHAAAAABAAAAAAAAAAAAAABwAQAAfklW91gAAAANAAAAOAAAAAwAAAAB"
+    "AAAAAAAAAAAAAADLbKphyAAAAAAAAADzkBUC5fQoXYLYsgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AIAAAAAAAAAAAAAAAAAAAQAAzK0h28FlIAI4AAAACAAAAAcAAAC/AAAAgG1hORIAAAAgAAAAAAAA"
+    "gLMAAAAsV6lbCAAAACgAAAAAAACAZAAAAKhfAJIAAAAAAAAAAAAAAIBrAAAAKWpdpAYAAAAIAAAA"
+    "AAAAgGkAAAAbfvGuEwAAABAAAAAAAACANQAAALi+OtIUAAAABAAAAAAAAIBhAAAAnjBL2g4AAAAw"
+    "AAAAAAAAgF9jb2xsYXBzaWJsZQBfZGlzcGxheV9uYW1lAF9kaXNwbGF5X3ByaW9yaXR5AF9pY29u"
+    "AF9wYXJlbnQAX3NwZWNpYWxfY2F0ZWdvcnkAbW9vZF9vdmVycmlkZXMAUGllTWVudUNhdGVnb3J5"
+    "AA=="
+)
+# Offsets of the tunable values inside the binary SimData prefix.
+_SIMDATA_OFF_GUID32 = 0x24
+_SIMDATA_OFF_DISPLAY_NAME = 0x44
+_SIMDATA_OFF_DISPLAY_PRIORITY = 0x48
+_SIMDATA_OFF_ICON_INSTANCE = 0x50
+_SIMDATA_OFF_ICON_TYPE = 0x58
+_SIMDATA_ICON_TYPE = 0x00B2D882  # DDS image (DXT5)
+
+
+def build_pie_menu_category_simdata(name, processed_xml_data):
+    """Generate the binary SimData (client data) for a PieMenuCategory tuning.
+
+    The game's UI reads the category info (name/icon/priority) from this "DATA"
+    binary, NOT from the tuning XML. The tuning XML's ``_icon`` is authored with
+    the ``Icon`` key type (``2f7d0004`` = PNG), and the client binary stores the
+    same ``Icon`` key type — the base game's pie-menu icons are PNG resources.
+    """
+    if isinstance(processed_xml_data, bytes):
+        text = processed_xml_data.decode("utf-8", errors="replace")
+    else:
+        text = processed_xml_data
+
+    display_name = 0
+    match = _SIMDATA_DISPLAY_NAME_RE.search(text)
+    if match:
+        display_name = int(match.group(1), 16)
+
+    priority = 0
+    match = _SIMDATA_PRIORITY_RE.search(text)
+    if match:
+        priority = int(match.group(1))
+
+    icon_instance = 0
+    match = _SIMDATA_ICON_RE.search(text)
+    if match:
+        icon_instance = int(match.group(1), 16)
+
+    data = bytearray(_SIMDATA_PREFIX)
+    struct.pack_into("<I", data, _SIMDATA_OFF_GUID32, fnv1_32(name.lower()) & 0xFFFFFFFF)
+    struct.pack_into("<I", data, _SIMDATA_OFF_DISPLAY_NAME, display_name & 0xFFFFFFFF)
+    struct.pack_into("<I", data, _SIMDATA_OFF_DISPLAY_PRIORITY, priority & 0xFFFFFFFF)
+    if icon_instance:
+        struct.pack_into("<Q", data, _SIMDATA_OFF_ICON_INSTANCE, icon_instance & 0xFFFFFFFFFFFFFFFF)
+        struct.pack_into("<I", data, _SIMDATA_OFF_ICON_TYPE, _SIMDATA_ICON_TYPE)
+    data += name.encode("utf-8") + b"\x00"
+    return bytes(data)
 
 
 def load_manifest():
@@ -425,6 +535,33 @@ def build_package():
             print("  WARNING: unresolved tuning reference 'swtune:{}' in {}".format(ref_name, rel_path))
 
         resources.append((res_type, 0, instance, data))
+
+        # Pie menu categories must also ship a SimData (client binary) resource,
+        # otherwise the game's UI cannot render the category ("Failed to locate
+        # category info"). The SimData instance equals the tuning instance and it
+        # lives under group 0x00E9D967.
+        if kind == "pie_menu_category" and name:
+            simdata = build_pie_menu_category_simdata(name, data)
+            resources.append((SIMDATA_TYPE, SIMDATA_GROUP_PIE_MENU_CATEGORY, instance, simdata))
+            print("  Added SimData for pie_menu_category {} (instance: 0x{:016X})".format(name, instance))
+
+    # ── Custom icons (PNG -> DXT5 DDS) ────────────────────────────────────────
+    if png_to_dds is None:
+        print("  WARNING: png_to_dds converter unavailable; skipping custom icons")
+    else:
+        for icon_filename, icon_instance in sorted(CUSTOM_ICONS.items()):
+            icon_png = ICON_DIR / icon_filename
+            if not icon_png.exists():
+                print("  NOTE: no custom icon at {} (instance 0x{:016X} unreferenced)".format(
+                    icon_png, icon_instance))
+                continue
+            try:
+                icon_bytes = png_to_dds.convert_to_bytes(str(icon_png), ICON_SIZE)
+                resources.append((ICON_RESOURCE_TYPE, 0, icon_instance, icon_bytes))
+                print("  Added custom icon DDS from {} (instance: 0x{:016X}, {} bytes)".format(
+                    icon_filename, icon_instance, len(icon_bytes)))
+            except Exception as e:
+                print("  WARNING: custom icon conversion failed for {}: {}".format(icon_filename, e))
 
     package_bytes = build_dbpf(resources)
     write_file(OUTPUT_PACKAGE, package_bytes)

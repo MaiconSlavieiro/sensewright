@@ -913,6 +913,55 @@ that remain. Complements [`project-status.md`](project-status.md) (spec↔code g
 
 ---
 
+### 2026-10-09 — Custom pie-menu & interaction icons ✅
+
+The mod's custom pie menus now render their icons, and the interaction entries gained custom
+icons. Full root cause + evidence in [`operations.md`](operations.md) → "UI Assets — Custom
+Menu Icons".
+
+#### A. DDS assets were malformed (why the icons never showed)
+
+- `tools/png_to_dds.py` wrote a **124-byte** DDS header instead of 128 (missing
+  `dwReserved2`), so pixel data started at `0x7C` instead of `0x80` and every DXT5 block was
+  shifted by 4 bytes — the texture existed but could not be decoded. Also fixed
+  `DDSD_LINEARSIZE`, `dwPitchOrLinearSize` and `dwDepth`. New output is **349,680 B**
+  (layout byte-identical to the S4CL reference). | `tools/png_to_dds.py` |
+
+#### B. Pie-menu categories ship their client SimData
+
+- `build_package.py` now emits the `0x545AC67A` SimData (group `0x00E9D967`) for every
+  `pie_menu_category`, generated from a template byte-identical to S4CL's. Without it the
+  client reports "Failed to locate category info" and the pie menu fails to open.
+  | `build_package.py` |
+- The FNV-1 64 instance convention was corrected to **not** set the high bit (matches
+  S4TK/S4CL and the DBPF index / `tuning_ids.json`); the category load diagnostic now
+  resolves IDs through `tuning_ids.json` instead of a stale literal. | `build_package.py`,
+  `tuning.py`, `interactions.py` |
+- The three dev categories declare `_icon` + `_display_priority`.
+  | `tuning/pie_menu_category/*.xml` |
+
+#### C. Interaction entries gained a custom `pie_menu_icon`
+
+- Added the S4CL `pie_menu_icon` block to all 12 interactions (chat → `sms.png`,
+  provoke → `cene.png`, the rest → `sensewright_icon.png`), referencing
+  `2f7d0004:00000000:<instance>`; the game resolves the instance to the packaged DDS.
+  | `tuning/interactions/*.xml` |
+- Dev interactions migrated to S4CL `CommonImmediateSuperInteraction`
+  (`on_started`/`on_test`) so their tunings load cleanly. | `dev_interactions.py` |
+
+#### Verification
+
+- `python mod/build_package.py` → `Sensewright.package` (385,097 B, 63 resources).
+- `python mod/build.py` → `Sensewright.ts4script` (136,596 B, Python 3.7 bytecode).
+- Installed package: 6 DDS, 12/12 interactions with `pie_menu_icon`, all references resolve
+  to present DDS; every category has a SimData sibling.
+- `cd sidecar && python -m pytest -q` → **799 passed** (4 new regression tests in
+  `test_package_index.py`; `test_tuning_refs.py` allows `sensewright_mod.dev_interactions`).
+- Installed with `scripts/install-mod.ps1` (OneDrive Mods folder).
+- Pending: in-game visual confirmation (Playtest #5).
+
+---
+
 ### 2026-10-03 — Playtest #4 follow-up (post-install regression fixes)
 
 After the first deploy, a real session (`save 1488584711`, 15:23–15:30) showed three

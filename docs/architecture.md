@@ -680,3 +680,27 @@ State as of 2026-10-04 (689 sidecar tests; `.package` 46 resources):
 The Web Studio SPA is served by `sidecar/sensewright_sidecar/webui/` (`GET /ui`); its REST
 backing endpoints are listed in §9. The in-game Quick Menu is the Mod-side `panel_ui.py` /
 `pie_menu.py`.
+
+## 15. UI Asset Pipeline — Pie-Menu Icons
+
+Custom icons flow through three stages; a mismatch in any of them makes the icon silently
+not render (see [`operations.md`](operations.md) → "UI Assets — Custom Menu Icons"):
+
+1. **Source** — PNGs live under `mod/tuning/icons/`. `tools/png_to_dds.py` converts each to
+   a 512×512 DXT5 DDS with a full mipmap chain. The file header **must be 128 bytes**
+   (4-byte `"DDS "` magic + 124-byte `DDS_HEADER`); a 124-byte header shifts every DXT5
+   block by 4 bytes and the texture becomes unreadable.
+2. **Package** — `mod/build_package.py` emits each icon as resource type `0x00B2D882` (DDS)
+   at the instance listed in `CUSTOM_ICONS`.
+3. **Reference** — two distinct consumers:
+   - **Pie-menu categories**: the tuned `_icon` is authored as `2f7d0004` (PNG) as a
+     placeholder, but the client UI reads the real icon from the per-category **SimData**
+     binary (`0x545AC67A`, group `0x00E9D967`), where the key is stored as `0x00B2D882`.
+     A `PieMenuCategory` *without* its SimData makes the whole pie menu fail to open.
+   - **Interactions**: there is no SimData; the client resolves `pie_menu_icon` directly
+     from the tuning. It is authored as `2f7d0004:00000000:<instance>` and the game resolves
+     the instance to the packaged DDS (verified against S4CL traits, which reference
+     `2f7d0004` while shipping only `0x00B2D882`).
+
+Tuning instance IDs use FNV-1 64-bit of the lowercase name **without** the high bit set;
+this matches S4TK/S4CL and the DBPF index values emitted into `tuning_ids.json`.

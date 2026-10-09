@@ -1,77 +1,94 @@
+# sensewright_mod/dev_interactions.py
 import sims4.log
-from interactions.base.interaction import Interaction
-from interactions.base.super_interaction import SuperInteraction
+from sims4communitylib.classes.interactions.common_immediate_super_interaction import CommonImmediateSuperInteraction
+from sims4communitylib.classes.testing.common_execution_result import CommonExecutionResult
+from sims4communitylib.classes.testing.common_test_result import CommonTestResult
+from sims4communitylib.mod_support.mod_identity import CommonModIdentity
+from sims4communitylib.modinfo import ModInfo
+
 from sensewright_mod.dev_manager import SensewrightDevManager
-from sensewright_mod.engine_facade import show_notification
+from sensewright_mod.debug_log import log_exception
+
+def show_notification(title, text):
+    try:
+        from sims4communitylib.notifications.common_basic_notification import CommonBasicNotification
+        from sims4communitylib.utils.localization.common_localization_utils import CommonLocalizationUtils
+        CommonBasicNotification(
+            CommonLocalizationUtils.create_localized_string(title),
+            CommonLocalizationUtils.create_localized_string(text)
+        ).show()
+    except Exception as e:
+        log_exception('Failed to show notification: {}'.format(e))
 
 logger = sims4.log.Logger('SensewrightDev')
 
-class SensewrightDevSimBaseInteraction(SuperInteraction):
+class _SensewrightDevBaseInteraction(CommonImmediateSuperInteraction):
     @classmethod
-    def _test(cls, target, context, **kwargs):
-        if not SensewrightDevManager.dev_mode_enabled:
-            return sims4.tuning.instances.TestResult(False, "Dev mode disabled.")
-        return super()._test(target, context, **kwargs)
+    def get_mod_identity(cls) -> CommonModIdentity:
+        return ModInfo.get_identity()
 
-class SensewrightDevGodBaseInteraction(SuperInteraction):
     @classmethod
-    def _test(cls, target, context, **kwargs):
-        if not SensewrightDevManager.dev_mode_enabled:
-            return sims4.tuning.instances.TestResult(False, "Dev mode disabled.")
-        return super()._test(target, context, **kwargs)
+    def get_log_identifier(cls) -> str:
+        return 'sensewright_dev_interaction'
 
-class SensewrightDevSysBaseInteraction(SuperInteraction):
     @classmethod
-    def _test(cls, target, context, **kwargs):
+    def on_test(cls, interaction_sim, interaction_target, interaction_context, **kwargs) -> CommonTestResult:
         if not SensewrightDevManager.dev_mode_enabled:
-            return sims4.tuning.instances.TestResult(False, "Dev mode disabled.")
-        return super()._test(target, context, **kwargs)
+            return CommonTestResult(False, "Dev mode disabled.")
+        return CommonTestResult.TRUE
+
 
 # --- SIM DEVS ---
-class SensewrightDevSimToggleDebugInteraction(SensewrightDevSimBaseInteraction):
-    def _run_interaction_gen(self, timeline):
+class SensewrightDevSimToggleDebugInteraction(_SensewrightDevBaseInteraction):
+    def on_started(self, interaction_sim, interaction_target) -> CommonExecutionResult:
         new_state = SensewrightDevManager.toggle_debug_sim()
         state_str = "ENABLED" if new_state else "DISABLED"
-        show_notification("Sim Debug", f"Sim Debug is now {state_str}")
-        return True
+        show_notification("Sim Debug", "Sim Debug is now {}".format(state_str))
+        return CommonExecutionResult.TRUE
 
-class SensewrightDevSimRewriteProfileInteraction(SensewrightDevSimBaseInteraction):
-    def _run_interaction_gen(self, timeline):
-        # Trigger input dialog for co-author
+class SensewrightDevSimRewriteProfileInteraction(_SensewrightDevBaseInteraction):
+    def on_started(self, interaction_sim, interaction_target) -> CommonExecutionResult:
         show_notification("WIP", "Co-author UI not fully implemented yet.")
-        return True
+        return CommonExecutionResult.TRUE
 
-class SensewrightDevSimDumpProfileInteraction(SensewrightDevSimBaseInteraction):
+class SensewrightDevSimDumpProfileInteraction(_SensewrightDevBaseInteraction):
     @classmethod
-    def _test(cls, target, context, **kwargs):
+    def on_test(cls, interaction_sim, interaction_target, interaction_context, **kwargs) -> CommonTestResult:
+        res = super().on_test(interaction_sim, interaction_target, interaction_context, **kwargs)
+        if not res:
+            return res
         if not SensewrightDevManager.debug_sim_enabled:
-            return sims4.tuning.instances.TestResult(False, "Sim debug disabled.")
-        return super()._test(target, context, **kwargs)
+            return CommonTestResult(False, "Sim debug disabled.")
+        return CommonTestResult.TRUE
 
-    def _run_interaction_gen(self, timeline):
+    def on_started(self, interaction_sim, interaction_target) -> CommonExecutionResult:
         show_notification("Sim Profile Dump", "Triggering dump...")
-        return True
+        return CommonExecutionResult.TRUE
+
 
 # --- GOD DEVS ---
-class SensewrightDevGodToggleDebugInteraction(SensewrightDevGodBaseInteraction):
-    def _run_interaction_gen(self, timeline):
+class SensewrightDevGodToggleDebugInteraction(_SensewrightDevBaseInteraction):
+    def on_started(self, interaction_sim, interaction_target) -> CommonExecutionResult:
         new_state = SensewrightDevManager.toggle_debug_god()
         state_str = "ENABLED" if new_state else "DISABLED"
-        show_notification("God Debug", f"God Mod Debug is now {state_str}")
-        return True
+        show_notification("God Debug", "God Mod Debug is now {}".format(state_str))
+        return CommonExecutionResult.TRUE
 
-class SensewrightDevGodRewriteBackgroundInteraction(SensewrightDevGodBaseInteraction):
-    def _run_interaction_gen(self, timeline):
+class SensewrightDevGodRewriteBackgroundInteraction(_SensewrightDevBaseInteraction):
+    def on_started(self, interaction_sim, interaction_target) -> CommonExecutionResult:
         show_notification("WIP", "Neighborhood co-author UI not fully implemented yet.")
-        return True
+        return CommonExecutionResult.TRUE
 
-class SensewrightDevGodDumpZeitgeistInteraction(SensewrightDevGodBaseInteraction):
+class SensewrightDevGodDumpZeitgeistInteraction(_SensewrightDevBaseInteraction):
     @classmethod
-    def _test(cls, target, context, **kwargs):
+    def on_test(cls, interaction_sim, interaction_target, interaction_context, **kwargs) -> CommonTestResult:
+        res = super().on_test(interaction_sim, interaction_target, interaction_context, **kwargs)
+        if not res:
+            return res
         if not SensewrightDevManager.debug_god_enabled:
-            return sims4.tuning.instances.TestResult(False, "God debug disabled.")
-        return super()._test(target, context, **kwargs)
+            return CommonTestResult(False, "God debug disabled.")
+        return CommonTestResult.TRUE
 
-    def _run_interaction_gen(self, timeline):
+    def on_started(self, interaction_sim, interaction_target) -> CommonExecutionResult:
         show_notification("Zeitgeist Dump", "Triggering dump...")
-        return True
+        return CommonExecutionResult.TRUE

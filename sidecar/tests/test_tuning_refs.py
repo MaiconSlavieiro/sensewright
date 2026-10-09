@@ -51,6 +51,7 @@ def test_interactions_use_real_binding_modules():
         "interaction": (
             "sensewright_mod.interactions",
             "sensewright_mod.object_interactions",
+            "sensewright_mod.dev_interactions",
         ),
         "pie_menu_category": ("interactions.pie_menu_category",),
         "object": ("objects.game_object",),

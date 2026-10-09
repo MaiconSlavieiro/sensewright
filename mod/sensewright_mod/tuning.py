@@ -3,11 +3,12 @@
 # moodlet) and native TS4 tuning IDs (moods, sentiments, weather) and registers
 # them with native_hooks / tool_executor at startup.
 #
-# Owned tunings use TS4's canonical instance convention: FNV-1 64-bit of the
-# tuning name (lowercased) with the high bit set — identical to S4CL's
-# `CommonResourceUtils.convert_str_to_fnv64` and to what `build_package.py`
-# emits into `tuning_ids.json`. When the compiled `tuning_ids.json` is present
-# inside the .ts4script it is treated as the single source of truth.
+# Owned tunings use TS4's tuning-instance convention: FNV-1 64-bit of the
+# tuning name (lowercased) WITHOUT the high bit set. This matches S4TK/S4CL
+# shipped .package resources and what `build_package.py` emits into
+# `tuning_ids.json` (the DBPF index instance). When the compiled
+# `tuning_ids.json` is present inside the .ts4script it is treated as the
+# single source of truth.
 
 import json
 import os
@@ -19,7 +20,6 @@ from sensewright_mod.debug_log import log_debug, log_exception, log_info
 _FNV64_OFFSET = 14695981039346656037
 _FNV64_PRIME = 1099511628211
 _FNV64_MASK = 0xFFFFFFFFFFFFFFFF
-_FNV64_HIGH_BIT = 0x8000000000000000
 
 # Sensewright-owned tuning names (must match the `n` attribute in tuning/*.xml).
 _OWNED_NAMES = {
@@ -43,6 +43,10 @@ _OWNED_NAMES = {
     "interaction_dev_god_toggle_debug": "sw_dev_god_toggle_debug_interaction",
     "interaction_dev_god_rewrite_background": "sw_dev_god_rewrite_background_interaction",
     "interaction_dev_god_dump_zeitgeist": "sw_dev_god_dump_zeitgeist_interaction",
+    # Pie-menu categories that group the dev interactions (Dev Mode / WebUI).
+    "pie_menu_category_dev_sim": "sw_pie_menu_category_dev_sim",
+    "pie_menu_category_dev_god": "sw_pie_menu_category_dev_god",
+    "pie_menu_category_dev_sys": "sw_pie_menu_category_dev_sys",
     # Catalyst VisitSituation (2.4 / 3.3).
     "situation_visit": "sw_visit_situation",
     # Custom diary object definition (3.4).
@@ -99,12 +103,18 @@ _tuning_ids_loaded = False
 
 
 def fnv1_64(text):
-    """FNV-1 64-bit hash with high bit set (TS4 tuning instance ID)."""
+    """FNV-1 64-bit hash (lowercased, no high bit).
+
+    Matches ``build_package.py`` and S4TK's tuning-instance convention (the
+    64-bit instance stored in the DBPF index). The high bit must NOT be set:
+    the compiled ``tuning_ids.json`` carries the no-high-bit values, and setting
+    the high bit would produce IDs that never match the packaged resources.
+    """
     h = _FNV64_OFFSET
     for byte in text.lower().encode("utf-8"):
         h = (h * _FNV64_PRIME) & _FNV64_MASK
         h ^= byte
-    return h | _FNV64_HIGH_BIT
+    return h
 
 
 def _find_mod_zip():

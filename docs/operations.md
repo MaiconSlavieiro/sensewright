@@ -1534,3 +1534,92 @@ remain unproven and are the target of [`spike-strategy.md`](spike-strategy.md) �
 - **Trait levers** — `set_trait`/`remove_trait`/`add_relationship_bit` coded blind.
 - **Custom diary object** — `sw_diary_object` `found=0` on the test lot.
 
+---
+
+## UI Assets — Custom Menu Icons (2026-10-09) ✅ FIXED
+
+> **Status:** ✅ FIXED — build + install verified; in-game visual confirmation pending (Playtest #5)
+> **Branch:** `v2-remake`
+> **Artifacts:** `Sensewright.package` (385,097 B, 63 resources), `Sensewright.ts4script`
+> (136,596 B, Python 3.7 bytecode)
+> **Regression tests:** `sidecar/tests/test_package_index.py` (DDS header, icon refs, category SimData)
+
+**Symptom.** The mod's custom pie-menu categories (`sw_pie_menu_category_dev_sim/god/sys`)
+and the interaction entries (Text/Message, Provoke Scene, diary, mailbox, mirror, dev
+actions) rendered **without their icons**. The icon resources were present in the
+`.package` yet the UI showed nothing (or the default), and the pie menus themselves were at
+risk of not opening.
+
+### Root cause A — malformed DDS (the icons that never rendered)
+
+`tools/png_to_dds.py::build_dds()` allocated a **124-byte** header, but a DDS file is
+`4-byte "DDS " magic + 124-byte DDS_HEADER = 128 bytes`. The magic was written *inside* the
+124-byte array, so the trailing `dwReserved2` field was omitted and **pixel data began at
+offset `0x7C` instead of `0x80`** — every DXT5 block was shifted by 4 bytes and the texture
+was unreadable. The header also lacked `DDSD_LINEARSIZE`, left `dwPitchOrLinearSize = 0` and
+wrote `dwDepth = 1`.
+
+**Evidence (byte-for-byte against the working S4CL reference):**
+
+| | Header | Total size | Pixel-data offset |
+|---|---|---|---|
+| S4CL DDS (loads) | 128 B | 349,680 B | `0x80` |
+| Generated (broken) | 124 B | 349,676 B | `0x7C` |
+
+### Root cause B — interactions had no `pie_menu_icon`
+
+Pie-menu **categories** and **interactions** resolve their icons through two different
+paths:
+
+- A category's `_icon` is authored as type `2f7d0004` (PNG) as a *placeholder*; the client
+  UI reads the real icon from the per-category **SimData** binary (`0x545AC67A`, group
+  `0x00E9D967`) where the key is stored as `0x00B2D882` (DDS). A category without its SimData
+  makes the whole pie menu fail to open.
+- An interaction has **no SimData**; the client resolves `pie_menu_icon` directly from the
+  tuning. The custom interaction icons (`sms.png`, `cene.png`, `sensewright_icon.png`) were
+  packaged as DDS but **no tuning referenced them**.
+
+### Fix
+
+1. **DDS header** (`tools/png_to_dds.py`) — allocate 128 bytes; set
+   `dwFlags = 0x000A1007` (adds `DDSD_LINEARSIZE`); set `dwPitchOrLinearSize` to the top-mip
+   size; set `dwDepth = 0`; write `dwReserved2` at offset 124.
+2. **Interaction icons** — added the S4CL `pie_menu_icon` block to all 12 interactions,
+   referencing `2f7d0004:00000000:<instance>`. The game resolves that key to the packaged
+   DDS of the same instance even though the declared type is PNG — verified against S4CL's
+   shipped traits, which reference `2f7d0004` while shipping only `0x00B2D882`.
+
+   | Interaction | Icon | Instance |
+   |---|---|---|
+   | `sw_chat_interaction` | `sms.png` | `4767B091647F47C0` |
+   | `sw_provoke_interaction` | `cene.png` | `61B8740E1508D0AA` |
+   | diary read/snoop, mailbox, mirror + 6× dev | `sensewright_icon.png` | `67C5EA84BDAFD36F` |
+3. **Pie-menu categories** — `build_package.py` emits the client SimData for every
+   `pie_menu_category` from a template that is byte-identical to S4CL's; the FNV-1 64
+   instance convention was corrected to **not** set the high bit (matches S4TK/S4CL and the
+   DBPF index / `tuning_ids.json`); each dev category declares `_icon` + `_display_priority`.
+
+### Why it slipped through
+
+The category path is deliberately obscure (tuning says PNG, client reads DDS from SimData),
+and the malformed DDS produced a resource that *existed* but could not be decoded, so
+neither the build nor the loader logged an obvious error. There was no offline test pinning
+the DDS header size or the icon references.
+
+### Verification
+
+- Rebuilt DDS: **349,680 B**, header byte-for-byte layout identical to S4CL (data at `0x80`).
+- Decoded the top mip back to RGBA: **mean absolute error 1.19/255** vs. the source PNG.
+- `ElementTree` parse of all 19 tuning XMLs → well-formed.
+- Installed `.package` inspected: 6 DDS resources; **12/12** interactions carry
+  `pie_menu_icon`; every reference resolves to a present DDS instance; every category has a
+  SimData sibling.
+- `cd sidecar && python -m pytest -q` → **799 passed** (4 new icon/SimData regression tests).
+- Build + install: `python mod/build_package.py` → `python mod/build.py` →
+  `scripts/install-mod.ps1`.
+
+### Follow-up
+
+- In-game visual confirmation (restart with Script Mods enabled). Everything up to the
+  texture load is verified offline.
+
