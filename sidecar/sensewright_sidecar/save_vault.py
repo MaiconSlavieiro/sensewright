@@ -174,6 +174,25 @@ class SaveVault:
         working = self.working_path(save_id)
         committed = self.committed_path(save_id)
 
+        # Save As arrives while the source slot is still active. Copy the
+        # working state (including unsaved memories), never the old checkpoint
+        # or an unrelated destination working file.
+        if self._working_store is not None and self._active_save_id != save_id:
+            source_id = self._active_save_id
+            if previous_save_id is not None and int(previous_save_id) != source_id:
+                raise ValueError("Save As source does not match the active slot")
+            _copy_db(self.working_path(source_id), working)
+            # World records are keyed by slot id within each database.
+            copied = sqlite3.connect(working)
+            try:
+                with copied:
+                    copied.execute("DELETE FROM neighborhoods WHERE save_id = ?", (save_id,))
+                    copied.execute("UPDATE neighborhoods SET save_id = ? WHERE save_id = ?",
+                                   (save_id, source_id))
+            finally:
+                copied.close()
+            self._close_working()
+
         # Flush RAM buffers into working db (the active store already holds them;
         # ensure the metadata tick is current). Drop the reference before the
         # close so a concurrent callback cannot resolve a closed handle during

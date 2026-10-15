@@ -1,5 +1,8 @@
 {
   "stbl": {
+    "pie_menu.dev.sys_status": "Dump System Status",
+    "pie_menu.dev.sys_panic": "Pause / Resume Sensewright",
+    "pie_menu.dev.sys_reload": "Reload Localization",
     "pie_menu.root": "Sensewright...",
     "pie_menu.chat_sms": "Text / Message...",
     "pie_menu.direct_scene": "Provoke Scene Here...",

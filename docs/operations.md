@@ -1,5 +1,10 @@
 # Operations & Reliability
 
+> **2026-10-15 review:** [Runtime corrections and remaining acceptance work](review-2026-10-15.md).
+> SSE/polling unification is implemented; references below to deferring it are
+> historical. This review fixes its EOF/timeout recovery and adds transport
+> regressions. In-game shutdown, save and transition acceptance is still open.
+
 Runtime reliability material: the architectural review and evolution plan, the concurrency/thread-safety hardening plan, the catalog of bugs found in deploy/playtest, and the weak-point remediation wave.
 
 > ⚠️ **CRITICAL ARCHITECTURAL IMPERATIVE:** The "Architectural Review & Evolution Plan" and the "Hardening" tickets (P1, P2, P17, P20) described below are NOT secondary technical debt. Because TS4 is strictly single-threaded, any latency or IPC flaw breaks the core gameplay loops. Agents MUST treat these items as primary blockers that halt feature development until resolved.

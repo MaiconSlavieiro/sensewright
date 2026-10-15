@@ -154,9 +154,14 @@ def _coalesce_slot(item):
             incoming = item.get('payload') or {}
             payload['sims_delta'] = _merge_sims_delta(
                 payload.get('sims_delta'), incoming.get('sims_delta'))
+            # Outcomes are events, not snapshots: every drained result must
+            # reach the sidecar even when several pulses share one slot.
+            if 'outcomes' in incoming:
+                payload['outcomes'] = list(payload.get('outcomes') or []) + list(
+                    incoming.get('outcomes') or [])
             # Latest scalar clock/state wins.
             for key, value in incoming.items():
-                if key != 'sims_delta':
+                if key not in ('sims_delta', 'outcomes'):
                     payload[key] = value
             existing['payload'] = payload
             existing['trace_id'] = item.get('trace_id', existing.get('trace_id'))
@@ -173,10 +178,15 @@ def _enqueue_realtime(item):
                 worker_log_warn('Realtime lane saturated; dropping event')
                 return
         elif len(_realtime_q) >= _REALTIME_MAX:
-            # Lifecycle/chat are never silently dropped in normal operation;
-            # this is a last-resort safety valve.
-            worker_log_warn('Realtime lane hard cap; dropping {}'.format(item.get('endpoint')))
-            return
+            # Evict an expendable event before rejecting lifecycle/chat work.
+            for index, queued in enumerate(_realtime_q):
+                if queued.get('endpoint') == '/events':
+                    del _realtime_q[index]
+                    worker_log_warn('Realtime lane hard cap; evicting event')
+                    break
+            else:
+                worker_log_warn('Realtime lane hard cap; dropping {}'.format(item.get('endpoint')))
+                return
         _realtime_q.append(item)
 
 
@@ -339,8 +349,8 @@ def _make_request(method, endpoint, payload=None, timeout=None):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
     try:
-        response = urllib.request.urlopen(req, timeout=timeout)
-        resp_data = response.read().decode('utf-8')
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            resp_data = response.read().decode('utf-8')
         if resp_data:
             return json.loads(resp_data)
         return {'ok': True}
@@ -430,8 +440,6 @@ def _sse_stream_loop():
             req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
             # 15 s timeout = 3x the sidecar keepalive interval.
             with urllib.request.urlopen(req, timeout=15.0) as response:
-                consecutive_sse_fails = 0
-                fallback_until = 0.0
                 for line in response:
                     if _shutdown_event.is_set() or not _worker_running:
                         break
@@ -443,6 +451,8 @@ def _sse_stream_loop():
                         try:
                             payload = json.loads(data_str)
                             intents = payload.get('intents') or []
+                            consecutive_sse_fails = 0
+                            fallback_until = 0.0
                             if intents:
                                 _inbound_intents_queue.put({
                                     'type': 'response',
@@ -453,9 +463,14 @@ def _sse_stream_loop():
                         except Exception as e:
                             worker_log_exception('SSE JSON parse error: {}'.format(e))
                     elif line == ': keepalive':
-                        pass
+                        consecutive_sse_fails = 0
+                        fallback_until = 0.0
+            # A server can close a stream cleanly without delivering a frame.
+            # Count EOF as failure too; otherwise reconnect spins indefinitely.
+            consecutive_sse_fails += 1
+            _shutdown_event.wait(1.0)
         except socket.timeout:
-            # Expected if sidecar hangs, we just loop and reconnect
+            consecutive_sse_fails += 1
             _shutdown_event.wait(1.0)
         except Exception as e:
             worker_log_exception('SSE stream connection dropped: {}'.format(e))

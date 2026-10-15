@@ -7,6 +7,7 @@ which makes the game fail to load the tuning. This test catches that offline.
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -41,6 +42,19 @@ def test_every_tuning_reference_resolves():
         if missing:
             unresolved[str(path.relative_to(TUNING_DIR))] = missing
     assert not unresolved, "unresolved swtune references: {}".format(unresolved)
+
+
+def test_every_tuning_string_exists_in_both_locale_bundles():
+    references = set()
+    for path in _xml_files():
+        references.update(re.findall(r'>stbl\.([A-Za-z0-9_.]+)<', path.read_text(encoding='utf-8')))
+    assert references
+    for root in (REPO_ROOT / 'sidecar/locales', REPO_ROOT / 'mod/sensewright_mod/locales'):
+        manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+        for locale in manifest['locales']:
+            path = root / 'ui' / (locale['code'] + '.json')
+            strings = json.loads(path.read_text(encoding='utf-8'))['stbl']
+            assert references <= strings.keys(), '{} missing {}'.format(path, references - strings.keys())
 
 
 def test_interactions_use_real_binding_modules():

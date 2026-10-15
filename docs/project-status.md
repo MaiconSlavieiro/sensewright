@@ -1,5 +1,14 @@
 # Project Status & Roadmap
 
+> **Current review — 2026-10-15:** [Corrections and remaining acceptance work](review-2026-10-15.md).
+> The older tables and test counts below are historical snapshots, not the
+> current backlog. M8 remains unaccepted in-game.
+>
+> **Verified:** 822 tests passed (one Starlette/httpx deprecation warning);
+> Python 3.7.9 compilation and bytecode magic checks passed; `.package` and
+> `.ts4script` rebuilt. GNU Make was unavailable, so its dependency ordering
+> was inspected and the builders were executed directly in package/script order.
+
 Where the project stands against the specification and what remains: the spec↔code gap per milestone/feature/purpose, the execution plan to close the gaps, and the reverse-chronological changelog.
 
 **On this page**

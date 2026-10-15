@@ -4,6 +4,10 @@
 
 > **Documentation hub:** [`docs/`](docs/README.md)
 
+> **Review (2026-10-15):** [runtime fixes, validation and remaining gaps](docs/review-2026-10-15.md).
+> In-game release acceptance is still pending; feature descriptions below do
+> not imply every native interaction has passed a playtest.
+
 ---
 
 ## What It Does

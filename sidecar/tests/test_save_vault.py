@@ -152,6 +152,33 @@ class TestSaveVault:
         assert vault2.working_store() is not None
         vault2.shutdown()
 
+    @pytest.mark.parametrize('previous_id', [1, None])
+    def test_save_as_copies_active_unsaved_state(self, vault, previous_id):
+        vault.session_start(1, 100)
+        vault.working_store().add_memory(1, 'thought', {'text': 'old'}, 'old', created_sim_tick=100)
+        vault.save(1, None, 200)
+        original = Path(vault.committed_path(1)).read_bytes()
+        vault.working_store().add_memory(1, 'thought', {'text': 'new'}, 'new', created_sim_tick=300)
+        vault.working_store().set_metadata('player_confidant_sim_id', '42')
+        vault.working_store().set_neighborhood(1, zeitgeist={'tags': ['hope']}, tick=300)
+
+        vault.save(2, previous_id, 400)
+        assert vault.active_save_id == 2
+        assert Path(vault.committed_path(1)).read_bytes() == original
+        vault.session_start(2, 400)
+        store = vault.working_store()
+        assert {m['content']['text'] for m in store.recent_memories(1)} == {'old', 'new'}
+        assert store.get_metadata('player_confidant_sim_id') == '42'
+        assert store.get_neighborhood(2)['zeitgeist']['tags'] == ['hope']
+
+    def test_save_as_rejects_wrong_source_without_changing_active_slot(self, vault):
+        vault.session_start(1, 100)
+        with pytest.raises(ValueError, match='source'):
+            vault.save(2, 3, 200)
+        assert vault.active_save_id == 1
+        assert vault.working_store().get_tick() == 100
+        assert not Path(vault.committed_path(2)).exists()
+
     def test_zone_transition_advances_tick(self, vault):
         vault.session_start(save_id=1, world_sim_tick=100)
         vault.zone_transition(save_id=1, world_sim_tick=200)

@@ -528,7 +528,7 @@ def build_package():
 
         data, unreplaced = inject_localized_strings(data, stbl_hashes)
         for key in unreplaced:
-            print("  WARNING: unresolved STBL reference 'stbl.{}' in {}".format(key, rel_path))
+            raise RuntimeError("Unresolved STBL reference 'stbl.{}' in {}".format(key, rel_path))
 
         data, unresolved_refs = inject_tuning_refs(data, name_to_instance)
         for ref_name in unresolved_refs:

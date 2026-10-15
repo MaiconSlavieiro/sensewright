@@ -18,23 +18,21 @@ SIDECAR_DIR = sidecar
 SCRIPTS_DIR = scripts
 
 # Build targets
-mod: $(DIST_DIR)/Sensewright.ts4script
+mod: package
+	@echo "Building .ts4script..."
+	@$(PY310) $(MOD_DIR)/build.py
 
-package: $(DIST_DIR)/Sensewright.package
+package:
+	@echo "Building .package..."
+	@$(PY310) $(MOD_DIR)/build_package.py
 
 sidecar:
 	@echo "Starting sidecar..."
 	@cd $(SIDECAR_DIR) && $(PY310) main.py
 
-# Build .ts4script (requires Python 3.7)
-$(DIST_DIR)/Sensewright.ts4script: $(wildcard $(MOD_DIR)/sensewright_mod/*.py) $(wildcard $(MOD_DIR)/sensewright_mod/locales/*.json)
-	@echo "Building .ts4script..."
-	@$(PY310) $(MOD_DIR)/build.py
-
-# Build .package (requires Python 3.10+)
-$(DIST_DIR)/Sensewright.package: $(wildcard $(MOD_DIR)/tuning/**/*.xml) $(wildcard $(MOD_DIR)/sensewright_mod/locales/*.json) $(wildcard $(MOD_DIR)/sensewright_mod/locales/ui/*.json)
-	@echo "Building .package..."
-	@$(PY310) $(MOD_DIR)/build_package.py
+# Always rebuild: package generation also refreshes tuning_ids.json, which
+# must exist before script packaging even under make -j. Inputs include build
+# scripts, icon assets and SimData templates, not only XML/locales.
 
 # Run syntax verification
 test:

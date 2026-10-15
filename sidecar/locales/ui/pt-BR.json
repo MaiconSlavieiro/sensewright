@@ -1,5 +1,8 @@
 {
   "stbl": {
+    "pie_menu.dev.sys_status": "Dump do Status do Sistema",
+    "pie_menu.dev.sys_panic": "Pausar / Retomar o Sensewright",
+    "pie_menu.dev.sys_reload": "Recarregar Traduções",
     "pie_menu.root": "Sensewright...",
     "pie_menu.chat_sms": "Mandar SMS...",
     "pie_menu.direct_scene": "Provocar Cena Aqui...",
