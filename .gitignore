@@ -30,6 +30,11 @@ research/ui-refs/
 research/s4cl/
 research/lot51_core/
 
+# Scratch & local developer artifacts
+scratch/
+icons/
+senswriting_icon.png
+
 # OS / IDE
 .DS_Store
 Thumbs.db
